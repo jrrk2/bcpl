@@ -36,6 +36,7 @@ to res.
 #include <netdb.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 
 #define  c_name2ipaddr 101
 #define  c_name2port   102

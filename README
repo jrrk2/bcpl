@@ -1,3 +1,61 @@
+This is an alpha version of BCPL for AppleSilcon,
+not bad for a language invented in 1959.
+
+I decided to check in this version that prints 'Hello'
+as a first milestone.
+
+SECTION "hello"
+
+GET "libhdr"
+
+LET clihook() = start()
+
+LET start() = VALOF
+{ wrs("Hello*n")
+  RESULTIS 0
+}
+
+AND wrc(ch) BE sys(11,ch)   //wrch(ch)
+
+AND wrs(s) BE
+  FOR i = 1 TO s%0 DO wrc(s%i)
+
+AND nl() BE wrc('*n')
+
+the existing instructions should work, except that you should type
+'make hello' in the natbcpl directory to get this listing.
+
+the assembly language source for this program would like like the following:
+
+ .global temps_hello_s_LA3
+temps_hello_s_LA3:
+ stp X10,lr, [X2], #16
+ stp X1,X4, [X2]
+ sub X10, X2, #16
+// LSTR   _M9001
+ adrp X4, temps_hello_s_MA9001 @PAGE
+ add X4, X4, temps_hello_s_MA9001 @PAGEOFF
+ lsr X4, X4, #3
+// ATB
+ mov X5, X4
+// LF      _L5
+ adrp X4, temps_hello_s_LA5 @PAGE
+ add X4, X4, temps_hello_s_LA5 @PAGEOFF
+// K       P3
+ add X2, X10, #24 // 00000018
+ mov X1, X4
+ mov X4, X5
+ blr X1
+// L       K0
+ movz X4, #0
+// RTN
+ ldp X10, lr, [X10]
+ ret
+
+The use of globals to represent internal labels was a conscious choice
+to ease debugging in the early stages, so don't bother complaining about that
+at this stage.
+
 BCPL CINTCODE DISTRIBUTION   (Revised 28 June 2013)
 
 The following change was made on 31 May 2013.

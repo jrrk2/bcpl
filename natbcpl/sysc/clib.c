@@ -195,6 +195,7 @@ to forMAC, forMIPS, forSUN4 etc Add and set external tallyv
 #include <signal.h>
 #include <string.h>
 #include <math.h>
+#include <sys/stat.h>
 
 #if defined(forVmsItanium) || defined(forVmsVax)
 #include <timeb.h>
@@ -211,6 +212,7 @@ BCPLWORD rootnode[Rtn_upb+1];
 static char *parms;  /* vector of command-line arguments */
 static int  parmp=1; /* subscript of next command-line character. */
 static int  ttyinp;  /* =1 if stdin is a tty, =0 otherwise */
+static int verbose =  1;
 
 /* Function defined in callc.c  */
 extern BCPLWORD callc(BCPLWORD *args, BCPLWORD *g);
@@ -384,7 +386,7 @@ int main(int argc, char *argv[])
 { int i = stackupb;      /* for FOR loops  */
   BCPLWORD res;
 
-  //printf("main: entered\n");
+  printf("main: entered\n");
 
   for(i=0; i<=Rtn_upb; i++) rootnode[i] = 0;
 
@@ -452,7 +454,7 @@ int main(int argc, char *argv[])
   prefixstr     = rootvarstr+4*16;
   prefixbp      = (char *)(prefixstr<<B2Wsh);
   for(i=0; i<=5*16; i++) ((BCPLWORD*)(rootvarstr<<B2Wsh))[i] = 0;
-  //printf("rootnode[Rtn_hdrsvar]=%d\n", rootnode[Rtn_hdrsvar]);
+  if (verbose) printf("rootnode[Rtn_hdrsvar]=%ld\n", rootnode[Rtn_hdrsvar]);
 
   c2b_str(rootvar, rootvarstr);
   c2b_str(pathvar, pathvarstr);
@@ -464,8 +466,8 @@ int main(int argc, char *argv[])
   rootnode[Rtn_hdrsvar]      = hdrsvarstr;
   rootnode[Rtn_scriptsvar]   = scriptsvarstr;
 
-  //printf("rootnode=%d\n", (BCPLWORD)rootnode/4);
-  //printf("rootnode[Rtn_hdrsvar]=%d\n", rootnode[Rtn_hdrsvar]);
+  if (verbose) printf("rootnode=%ld\n", (BCPLWORD)rootnode/4);
+  if (verbose) printf("rootnode[Rtn_hdrsvar]=%ld\n", rootnode[Rtn_hdrsvar]);
   if(filetracing) {
     char *path = getenv(rootvar);
     PRINTFS("Environment variable %s", rootvar);
@@ -497,7 +499,7 @@ int main(int argc, char *argv[])
 
   for (i=1;i<=gvecupb;i++) globbase[i] = Globword + i;
   globbase[Gn_rootnode] = ((BCPLWORD)rootnode)>>B2Wsh;
-  //printf("globbase[Gn_rootnode]=%d\n", globbase[Gn_rootnode]);
+  if (verbose) printf("globbase[Gn_rootnode]=%ld\n", globbase[Gn_rootnode]);
 
   for (i=0;i<=stackupb;i++) stackbase[i] = 0;
 
@@ -505,14 +507,13 @@ int main(int argc, char *argv[])
   /* initsections, gvecupb and stackupb are defined in the file */
   /* (typically) initprog.c created by a call of the command makeinit. */
 
-  //printf("Calling initsections\n");
+  if (verbose) printf("Calling initsections\n");
   initsections(globbase);
-  //printf("Calling init_keyb\n");
+  if (verbose) printf("Calling init_keyb\n");
   ttyinp = init_keyb();
 
-  //printf("globbase[Gn_rootnode]=%d\n", globbase[Gn_rootnode]);
-  //printf("clib: calling callstart(%d, %d)\n",
-  //	 (BCPLWORD)stackbase, (BCPLWORD)globbase);
+  if (verbose) printf("globbase[Gn_rootnode]=%ld\n", globbase[Gn_rootnode]);
+  if (verbose) printf("clib: calling callstart(%ld, %ld)\n", (BCPLWORD)stackbase, (BCPLWORD)globbase);
   /* Enter BCPL start function: callstart is defined in mlib.s */
   res = callstart(stackbase, globbase);
 
@@ -537,7 +538,7 @@ BCPLWORD muldiv1(BCPLWORD a, BCPLWORD b, BCPLWORD c)
   // and seem to run about 60% faster.
   // It is used by the MDIV instruction (and the syslib muldiv function).
   BCPLINT64 ab = (BCPLINT64)a * (BCPLINT64)b;
-  //printf("muldiv: entered\n");
+  if (verbose) printf("muldiv: entered\n");
   if(c==0) c=1;
   result2 = (BCPLWORD)(ab % c);
   return (BCPLWORD)(ab / c);
@@ -570,7 +571,7 @@ BCPLWORD muldiv(BCPLWORD a, BCPLWORD b, BCPLWORD c)
     if(rn>=uc) { qn++; rn -= uc; }
   }
   result2 = rneg ? -(BCPLWORD)r : r;
-  //printf("muldiv: result2=%d\n", result2);
+  if (verbose) printf("muldiv: result2=%ld\n", result2);
   return    qneg ? -(BCPLWORD)q : q;
 }
 
@@ -600,7 +601,7 @@ FILEPT pathinput(char *name, char *pathname)
 
   if ( pathname==0 || !relfilename(name)) {
     /* If no pathname given or name is absolute just search the current directory */
-    //printf("pathinput: pathname=0\n");
+    if (verbose) printf("pathinput: pathname=0\n");
     fp = fopen(osfname(name, chbuf4), "rb");
     if(filetracing)
     { PRINTFS("Trying: %s in the current directory - ", name);
@@ -613,7 +614,7 @@ FILEPT pathinput(char *name, char *pathname)
     return fp;
   }
 
-  //printf("pathinput: pathname=%s\n", pathname);
+  if (verbose) printf("pathinput: pathname=%s\n", pathname);
 
   /* Look through the PATH directories if pathname is given. */
   { char *path = getenv(pathname);
@@ -871,9 +872,9 @@ BCPLWORD dosys(register BCPLWORD *p, register BCPLWORD *g)
 */
 
     case Sys_muldiv:
-      //printf("dosys: calling muldiv(%d, %d, %d)\n", p[4], p[5], p[6]);
+      if (verbose) printf("dosys: calling muldiv(%ld, %ld, %ld)\n", p[4], p[5], p[6]);
     { BCPLWORD res =  muldiv(p[4], p[5], p[6]);
-	//printf("res=%d   result2=%d\n", res, result2);
+	if (verbose) printf("res=%ld   result2=%ld\n", res, result2);
       globbase[Gn_result2] = result2;
       return res;
     }
@@ -919,8 +920,7 @@ BCPLWORD dosys(register BCPLWORD *p, register BCPLWORD *g)
       datestamp[0] = days;
       datestamp[1] = msecs;
       datestamp[2] = -1;  // New dat format
-      //printf("filemodtime: name=%s days=%" FormD " msecs=%" FormD "\n",
-      //        name, days, msecs);
+      if (verbose) printf("filemodtime: name=%s days=%" FormD " msecs=%" FormD "\n", name, days, msecs);
       return -1;
     }
 #endif
@@ -1163,9 +1163,6 @@ BCPLWORD dosys(register BCPLWORD *p, register BCPLWORD *g)
               { BCPLWORD res = doflt(p[4], p[5], p[6], p[7]);
                 globbase[Gn_result2] = result2;
 		//g[Gn_result2] = result2;
-		//if(W[p+4]==35)
-		//printf("sys_flt: op=%d res=%08" FormX " result2=%08" FormX "\n",
-                //       W[p+4], (UBCPLWORD)res, (UBCPLWORD)result2);
                 return res;
               }
 
@@ -1241,12 +1238,12 @@ void msecdelay(unsigned int delaymsecs) {
                   diffdays = days - tv[0];
                   diffmsecs = msecs - tv[1];
                   if (diffdays>0) { diffdays--; diffmsecs += msecsperday; }
-		  //printf("Sys_delay: diffmsecs = %" FormD " msec\n", diffmsecs);
+		  if (verbose) printf("Sys_delay: diffmsecs = %" FormD " msec\n", diffmsecs);
                   if (diffmsecs<=0) return;
                   if (diffmsecs>900) diffmsecs = 900;
                   timeout.tv_sec = 0;
                   timeout.tv_usec = diffmsecs * 1000;
-		  //printf("Sys_delay: waiting for %" FormD " msec\n", diffmsecs);
+		  if (verbose) printf("Sys_delay: waiting for %" FormD " msec\n", diffmsecs);
                   select(FD_SETSIZE, NULL, NULL, NULL, &timeout);
                 }
               }
@@ -1270,7 +1267,7 @@ BCPLWORD doflt(BCPLWORD op, BCPLWORD a, BCPLWORD b, BCPLWORD c) {
   FI z;
   double dx, dy, dz;
 
-  //printf("doflt entered op=%" FormD " fl_mk=%" FormD "\n", op, fl_mk);
+  if (verbose) printf("doflt entered op=%" FormD " fl_mk=%" FormD "\n", op, fl_mk);
 
   switch (op) {
   default:
@@ -1298,24 +1295,24 @@ BCPLWORD doflt(BCPLWORD op, BCPLWORD a, BCPLWORD b, BCPLWORD c) {
     int neg = 0;
     x.i = a;
     d = x.f;
-    //printf("d = %15.9g %" FormD "\n", d, exponent);
+    if (verbose) printf("d = %15.9g %" FormD "\n", d, exponent);
     if (d<0.0) { d = -d; neg = 1; }
-    //printf("d = %15.9g %" FormD "\n", d, exponent);
+    if (verbose) printf("d = %15.9g %" FormD "\n", d, exponent);
     while (d>=100000.0) {
       d /= 100000.0; exponent+=5;
-      //printf("d = %15.9g %" FormD "\n", d, exponent);
+      if (verbose) printf("d = %15.9g %" FormD "\n", d, exponent);
     }
     while (d>=1.0) {
       d /= 10.0; exponent++;
-      //printf("d = %15.9g %" FormD "\n", d, exponent);
+      if (verbose) printf("d = %15.9g %" FormD "\n", d, exponent);
     }
     while (d<=0.00001 && exponent>=-400) {
       d *= 100000.0; exponent-=5;
-      //printf("d = %15.9g %" FormD "\n", d, exponent);
+      if (verbose) printf("d = %15.9g %" FormD "\n", d, exponent);
     }
     while (d<0.1 && exponent>=-400) {
       d *= 10.0; exponent--;
-      //printf("d = %15.9g %" FormD "\n", d, exponent);
+      if (verbose) printf("d = %15.9g %" FormD "\n", d, exponent);
     }
     if (exponent>=-400) {
       mantissa = (BCPLWORD) (d * 1000000000.0 + 0.5);
@@ -1568,7 +1565,7 @@ BCPLWORD timestamp(BCPLWORD *v) {
     secs = tb.time;
     //if(tb.dstflag) secs += 60*60;
     secs -= tb.timezone * 60;
-    //printf("tb.dstflag=%" FormD " tb.timezone=%" FormD "\n",
+    if (verbose) printf("tb.dstflag=%" FormD " tb.timezone=%" FormD "\n",
     //        tb.dstflag, tb.timezone);
     msecs = tb.millitm;
   }
@@ -1716,7 +1713,7 @@ This function converts a cintsys/cintpos filename to a Unix filename
 This copies name to winname replacing all '/' characters by '\'s.
 */
   char *p = osname;
-  //printf("unixfname: name=%s\n", name);
+  if (verbose) printf("unixfname: name=%s\n", name);
   while(1) {
     int ch = *name++;
     if(ch=='\\') ch = '/';
@@ -1733,7 +1730,7 @@ format. The possible formats are UNIX, WIN or VMS.
   char *res=0;
   char buf[256];
 
-  //printf("osfname: name=%s\n", name);
+  if (verbose) printf("osfname: name=%s\n", name);
 
 #ifdef VMSNAMES
   res = vmsfname(prepend_prefix(name, buf), osname);
@@ -1763,11 +1760,11 @@ char *prepend_prefix(char *fromstr, char *tostr)
 { char *pfxp = prefixbp;
   int pfxlen = *pfxp++;
   int i = 0;
-  //printf("prepend_prefix: fromstr=%s pfxlen=%d\n", fromstr, pfxlen);
+  if (verbose) printf("prepend_prefix: fromstr=%s pfxlen=%d\n", fromstr, pfxlen);
   if(pfxlen==0) return fromstr;
   if(!relfilename(fromstr)) return fromstr;
 
-  //printf("prepend_prefix: prepending the prefix\n");
+  if (verbose) printf("prepend_prefix: prepending the prefix\n");
 
   while(pfxlen--) tostr[i++] = *pfxp++;
   /* Insert separator '/' between the prefix and name, if necessary. */
@@ -1778,7 +1775,7 @@ char *prepend_prefix(char *fromstr, char *tostr)
     tostr[i++] = ch;
     if(ch==0) break;
   }
-  //printf("prepend_prefix: gives tostr=%s\n", tostr);
+  if (verbose) printf("prepend_prefix: gives tostr=%s\n", tostr);
   return tostr;
 }
 

@@ -493,7 +493,7 @@ switch(B[pc++])
        case sf_neqv:     val ^= b;                break;
        }
        //printf("selst: op=%" FormD " len=%" FormD " sh=%" FormD
-                " oldval=%08" FormX " val=%08" FormX " mask=%08" FormX "\n",
+       //       " oldval=%08" FormX " val=%08" FormX " mask=%08" FormX "\n",
        //       op, len, sh, (UBCPLWORD)oldval, (UBCPLWORD)val, (UBCPLWORD)mask);
        // Replace field by new value
        *ptr ^= ((val ^ oldval)&mask) << sh;

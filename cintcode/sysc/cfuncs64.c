@@ -36,6 +36,7 @@ to res.
 #include <netdb.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 
 #define  c_name2ipaddr 101
 #define  c_name2port   102
@@ -77,13 +78,13 @@ char *b2cstr(BCPLWORD bstr, char *cstr) {
 
 int name2ipaddr(char *hname) { // name => ipaddr (host format)
   struct hostent *hp;
-  int ipaddr = -1;
+  struct in_addr in;
 
   if (hname==0) return INADDR_ANY;
 
   //printf("name2ipaddr: \"%s\"\n", hname);
 
-  if(inet_aton(hname, &ipaddr)) return ntohl(ipaddr);
+  if(inet_aton(hname, &in)) return ntohl(in.s_addr);
 
   hp = gethostbyname(hname);
   if(hp==NULL) return -1; // Unknown host
@@ -152,7 +153,8 @@ int tcplisten(int s, int n) {
 
 int tcpaccept(int s) {
   struct sockaddr_in peer;
-  int peerlen = sizeof(peer);
+  socklen_t peerlen;
+  peerlen = sizeof(peer);
   int res = accept(s, (struct sockaddr *)&peer, &peerlen);
   result2 = ntohl(peer.sin_addr.s_addr);
   return res;

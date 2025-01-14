@@ -1,0 +1,6 @@
+export BCPLROOT=$HOME/bcpl/cintcode
+export BCPL64ROOT=$HOME/bcpl/cintcode
+export BCPLPATH=$HOME/bcpl/cintcode/cin64
+export BCPL64PATH=$HOME/bcpl/cintcode/cin64
+export BCPL64HDRS=$HOME/bcpl/cintcode/g
+export PATH=$HOME/bcpl/cintcode/bin:$PATH

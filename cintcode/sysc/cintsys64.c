@@ -647,7 +647,7 @@ int main(int argc, char* argv[])
     int litend = 0;
     printf("\ncintsys64 27 May 2013  20:26\n\n");
     printf("bytestr=%s word 0 = %8" FormX "\n", bytestr, *((BCPLWORD*)bytestr));
-    if(((BCPLWORD*)bytestr)[0]&255=='A') litend = 1;
+    if((((BCPLWORD*)bytestr)[0]&255)=='A') litend = 1;
 #ifdef BIGENDER
     printf("BIGENDER is defined");
     if(litend==0)  printf(" but the host machine is a little ender");

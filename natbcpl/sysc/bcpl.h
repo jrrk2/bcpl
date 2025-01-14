@@ -56,22 +56,23 @@
 #endif
 
 /* For 32-bit implementations -- uncomment the following */
+/*
 #define B2Wsh 2
 #define BperW 32
 #define BCPLWORD BCPLINT32
 #define UBCPLWORD BCPLUINT32
 #define FormD FormD32
 #define FormX FormX32
+*/
 
 /* For 64-bit implementations -- uncomment the following */
-/*
+
 #define B2Wsh 3
 #define BperW 64
 #define BCPLWORD BCPLINT64
 #define UBCPLWORD BCPLUINT64
 #define FormD FormD64
 #define FormX FormX64
-*/
 
 /*
 ** Cintsys/Cintpos and cinterp need the type signed char but this is
@@ -386,6 +387,7 @@ extern int Readch(void);
 extern int init_keyb(void);
 extern int close_keyb(void);
 extern int intflag(void);
+extern int pollReadch(void);
 
 /* externals defined in init*.c  */
 extern BCPLWORD stackupb;

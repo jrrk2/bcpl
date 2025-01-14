@@ -307,11 +307,11 @@ AND writeinitfile() BE {
   writef("/** Initialisation file written by MakeInit version %s  **/*n",
         getversion(version))
   writes("#include *"bcpl.h*"*n")
-  writef("*nint stackupb=%n;*n", stacksize)
-  writef("*nint gvecupb=%n;*n",  gvecsize)
+  writef("*nBCPLWORD stackupb=%n;*n", stacksize)
+  writef("*nBCPLWORD gvecupb=%n;*n",  gvecsize)
   writes("*n/** BCPL sections  **/*n")
   // List references to other modules
-  listsects(sections, "extern %s(BCPLWORD **g); *t/** file %s  **/*n")
+  listsects(sections, "extern int %s(BCPLWORD **g); *t/** file %s  **/*n")
   newline()
   // List initsections() functions
   writes("void initsections(BCPLWORD **g) {*n")

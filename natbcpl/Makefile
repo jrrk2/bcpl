@@ -30,7 +30,7 @@ TESTS = $(BCPLPROGS)/tests
 COM = $(CINTCODE)/com
 RASPI = $(BCPLPROGS)/raspi
 
-LIBS =  obj/mlib.o obj/clib.o obj/blib.o obj/dlib.o obj/kblib.o obj/sdlfn.o
+LIBS = obj/mlib.o obj/clib.o obj/blib.o obj/dlib.o obj/kblib.o obj/sdlfn.o
 
 # The following line is for cross compilation to the GP2X
 # for use when running under Cygwin. The location of the
@@ -38,13 +38,13 @@ LIBS =  obj/mlib.o obj/clib.o obj/blib.o obj/dlib.o obj/kblib.o obj/sdlfn.o
 # Floating point is not available on the GP2X
 
 # The following for armgcc under cygwin
-#GP2XCC = /cygdrive/c/devkitGP2X/bin/arm-linux-gcc -O9 -static -DforGP2X -DNOFLOAT
+#GP2XCC = /cygdrive/c/devkitGP2X/bin/arm-linux-gcc -O3 -static -DforGP2X -DNOFLOAT
 
 # The following for arm-linux-gcc for GP2X under Linux
-GP2XCC = /home/mr10/devkitPro/devkitGP2X/bin/arm-linux-gcc -O9 -static -DforGP2X -DNOFLOAT
+GP2XCC = /home/mr10/devkitPro/devkitGP2X/bin/arm-linux-gcc -O3 -static -DforGP2X -DNOFLOAT
 
 # The following for arm gnueabi-gcc under Linux
-#GP2XCC = arm-none-linux-gnueabi-gcc -O9 -static -DforLINUX -DNOFLOAT
+#GP2XCC = arm-none-linux-gnueabi-gcc -O3 -static -DforLINUX -DNOFLOAT
 
 # Location of the SD card under Cygwin
 #SD = /cygdrive/g
@@ -56,17 +56,17 @@ SD = /media/535A-B0C2
 # Select the appropriate definition of CC, LIBS and SYSM
 # SYSM gives the location of machine specific code (eg cintasm.s)
 
-#CC = gcc -O9 -DforMAC
+#CC = gcc -O3 -DforMAC
 #NB = nbmac
 
-#CC = gcc -O9 -DforMIPS
+#CC = gcc -O3 -DforMIPS
 #NB = nbmips
 
-# For ARM Linux without the SDL feature
-#CC = gcc -O2 -DforARM
-#MLIB = arm/mlib.s
-#SYSM = ../cintcode/sysasm/arm
-#NB = nbarm
+# For AppleSilicon
+CC = clang -g -arch arm64 -DforMacOSX
+MLIB = arm64/mlib.s
+SYSM = ../cintcode/sysasm/arm
+NB = nbarm64
 
 # For ARM Linux with the SDL feature
 #CC = gcc -O4 -DforARM -DSDLavail `sdl-config --cflags`
@@ -76,10 +76,9 @@ SD = /media/535A-B0C2
 #NB = nbarm
 
 # For Linux without SDL
-CC = gcc -O9 -DforLINUX
-MLIB = i386/mlib.s
+#CC = gcc -O3 -DforLINUX
+#MLIB = i386/mlib.s
 #NB = nb386
-NB = nb686
 
 # For Linux with SDL
 #SDLLIBS =  `sdl-config --libs`
@@ -93,7 +92,7 @@ NB = nb686
 #MLIB = i386/mlib.s
 #NB = nb386
 
-#CC = gcc -O9 -DforARM
+#CC = gcc -O3 -DforARM
 #MLIB = arm/mlib.s
 #NB = nbarm
 
@@ -101,29 +100,29 @@ NB = nb686
 #MLIB = arm/mlib.s
 #NB = nbarm
 
-#CC = gcc -O9 -DforVAX
+#CC = gcc -O3 -DforVAX
 #NB = nbvax
 
-#CC = gcc -O9 -DforSUN4
+#CC = gcc -O3 -DforSUN4
 #NB = nbsun4
 
-#CC = gcc -O9 -DforSPARC
+#CC = gcc -O3 -DforSPARC
 #NB = nbsparc
 
-#CC = gcc -O9 -DforALPHA
+#CC = gcc -O3 -DforALPHA
 #NB = nbalpha
 
-#CC = gcc -O9 -DforMSDOS
+#CC = gcc -O3 -DforMSDOS
 #NB = nbmsdos
 
-#CC = gcc -O9 -DforOS2
+#CC = gcc -O3 -DforOS2
 #NB = nbos2
 
 #run:	prog bench100 cmpltest crdemo edsac natbcpl b2sial
 run:	fcmpltest
 	./fcmpltest
 #	./tst
-#	cintsys -c "sial-sasm sial/fcmpltest.sial"
+#	cintsys64 -c "sial-sasm sial/fcmpltest.sial"
 #	./tstfloat
 #	./cmpltest
 #	./crdemo
@@ -166,14 +165,32 @@ obj/bench100.o:	temps/bench100.s
 	$(CC) -o obj/bench100.o -c temps/bench100.s
 
 temps/bench100.s:	$(TESTS)/bench100.b tempc/INT.h tempc/bcpl.h Makefile
-	cintsys -c "c $(NB) $(TESTS) bench100"
+	cintsys64 -c "c $(NB) $(TESTS) bench100"
 	echo bench100.b compiled to temps/bench100.s
 
 obj/initbench100.o:	tempc/initbench100.c tempc/bcpl.h tempc/INT.h
 	$(CC) -o obj/initbench100.o -c tempc/initbench100.c
 
 tempc/initbench100.c:	$(TESTS)/bench100.b
-	cintsys -c "makeinit $(TESTS)/bench100.b to tempc/initbench100.c"
+	cintsys64 -c "makeinit $(TESTS)/bench100.b to tempc/initbench100.c"
+
+# hello
+
+hello:	obj/inithello.o obj/hello.o $(LIBS)
+	$(CC) -o hello obj/inithello.o obj/hello.o $(LIBS) -lm
+
+obj/hello.o:	temps/hello.s
+	$(CC) -o obj/hello.o -c temps/hello.s
+
+temps/hello.s:	$(COM)/hello.b Makefile
+	cintsys64 -c "c $(NB) $(COM) hello"
+	echo hello.b compiled to temps/hello.s
+
+obj/inithello.o:	tempc/inithello.c tempc/bcpl.h tempc/INT.h
+	$(CC) -o obj/inithello.o -c tempc/inithello.c
+
+tempc/inithello.c:	$(COM)/hello.b
+	cintsys64 -c "makeinit $(COM)/hello.b to tempc/inithello.c"
 
 # prog
 
@@ -184,14 +201,14 @@ obj/prog.o:	temps/prog.s
 	$(CC) -o obj/prog.o -c temps/prog.s
 
 temps/prog.s:	prog.b Makefile
-	cintsys -c "c $(NB) . prog"
+	cintsys64 -c "c $(NB) . prog"
 	echo prog.b compiled to temps/prog.s
 
 obj/initprog.o:	tempc/initprog.c tempc/INT.h tempc/bcpl.h
 	$(CC) -o obj/initprog.o -c tempc/initprog.c
 
 tempc/initprog.c:	prog.b
-	cintsys -c "makeinit prog.b to tempc/initprog.c"
+	cintsys64 -c "makeinit prog.b to tempc/initprog.c"
 
 # tstfloat
 
@@ -202,14 +219,14 @@ obj/tstfloat.o:	temps/tstfloat.s
 	$(CC) -o obj/tstfloat.o -c temps/tstfloat.s
 
 temps/tstfloat.s:	$(COM)/tstfloat.b Makefile
-	cintsys -c "c $(NB) $(COM) tstfloat"
+	cintsys64 -c "c $(NB) $(COM) tstfloat"
 	echo $(COM)/tstfloat.b compiled to temps/tstfloat.s
 
 obj/inittstfloat.o:	tempc/inittstfloat.c tempc/INT.h tempc/bcpl.h
 	$(CC) -o obj/inittstfloat.o -c tempc/inittstfloat.c
 
 tempc/inittstfloat.c:	$(COM)/tstfloat.b
-	cintsys -c "makeinit $(COM)/tstfloat.b to tempc/inittstfloat.c"
+	cintsys64 -c "makeinit $(COM)/tstfloat.b to tempc/inittstfloat.c"
 
 # tst
 
@@ -232,15 +249,15 @@ tst.txt:	temps/tst.s
 	$(CC) -c -Wa,-alh temps/tst.s
 
 temps/tst.s:	$(COM)/tst.b Makefile
-	cintsys -c "c $(NB) $(COM) tst"
+	cintsys64 -c "c $(NB) $(COM) tst"
 	echo tst.b compiled to temps/tst.s
-	cintsys -c "sial-sasm sial/tst.sial"
+	cintsys64 -c "sial-sasm sial/tst.sial"
 
 obj/inittst.o:	tempc/inittst.c tempc/bcpl.h tempc/INT.h
 	$(CC) -o obj/inittst.o -c tempc/inittst.c
 
 tempc/inittst.c:	$(COM)/tst.b
-	cintsys -c "makeinit $(COM)/tst.b to tempc/inittst.c"
+	cintsys64 -c "makeinit $(COM)/tst.b to tempc/inittst.c"
 
 # cmpltest
 
@@ -251,14 +268,14 @@ obj/cmpltest.o:	temps/cmpltest.s
 	$(CC) -o obj/cmpltest.o -c temps/cmpltest.s
 
 temps/cmpltest.s:	$(COM)/cmpltest.b Makefile
-	cintsys -c "c $(NB) $(COM) cmpltest"
+	cintsys64 -c "c $(NB) $(COM) cmpltest"
 	echo cmpltest.b compiled to temps/cmpltest.s
 
 obj/initcmpltest.o:	tempc/initcmpltest.c tempc/bcpl.h tempc/INT.h
 	$(CC) -o obj/initcmpltest.o -c tempc/initcmpltest.c
 
 tempc/initcmpltest.c:	$(COM)/cmpltest.b
-	cintsys -c "makeinit $(COM)/cmpltest.b to tempc/initcmpltest.c"
+	cintsys64 -c "makeinit $(COM)/cmpltest.b to tempc/initcmpltest.c"
 
 # fcmpltest
 
@@ -272,15 +289,15 @@ obj/fcmpltest.o:	temps/fcmpltest.s
 	$(CC) -o obj/fcmpltest.o -c temps/fcmpltest.s
 
 temps/fcmpltest.s:	$(COM)/fcmpltest.b Makefile
-	cintsys -c "c $(NB) $(COM) fcmpltest"
+	cintsys64 -c "c $(NB) $(COM) fcmpltest"
 	echo fcmpltest.b compiled to temps/fcmpltest.s
-	cintsys -c "sial-sasm sial/fcmpltest.sial"
+	cintsys64 -c "sial-sasm sial/fcmpltest.sial"
 
 obj/initfcmpltest.o:	tempc/initfcmpltest.c tempc/bcpl.h tempc/INT.h
 	$(CC) -o obj/initfcmpltest.o -c tempc/initfcmpltest.c
 
 tempc/initfcmpltest.c:	$(COM)/fcmpltest.b
-	cintsys -c "makeinit $(COM)/fcmpltest.b to tempc/initfcmpltest.c"
+	cintsys64 -c "makeinit $(COM)/fcmpltest.b to tempc/initfcmpltest.c"
 
 # crdemo
 
@@ -291,14 +308,14 @@ obj/crdemo.o:	temps/crdemo.s
 	$(CC) -o obj/crdemo.o -c temps/crdemo.s
 
 temps/crdemo.s:	$(DEMOS)/crdemo.b Makefile
-	cintsys -c "c $(NB) $(DEMOS) crdemo"
+	cintsys64 -c "c $(NB) $(DEMOS) crdemo"
 	echo crdemo.b compiled to temps/crdemo.s
 
 obj/initcrdemo.o:	tempc/initcrdemo.c tempc/bcpl.h tempc/INT.h
 	$(CC) -o obj/initcrdemo.o -c tempc/initcrdemo.c
 
 tempc/initcrdemo.c:	$(DEMOS)/crdemo.b
-	cintsys -c "makeinit $(DEMOS)/crdemo.b to tempc/initcrdemo.c"
+	cintsys64 -c "makeinit $(DEMOS)/crdemo.b to tempc/initcrdemo.c"
 
 # edsac
 
@@ -309,14 +326,14 @@ obj/edsac.o:	temps/edsac.s
 	$(CC) -o obj/edsac.o -c temps/edsac.s
 
 temps/edsac.s:	$(EDSAC)/edsac.b Makefile
-	cintsys -c "c $(NB) $(EDSAC) edsac"
+	cintsys64 -c "c $(NB) $(EDSAC) edsac"
 	echo edsac.b compiled to temps/edsac.s
 
 obj/initedsac.o:	tempc/initedsac.c tempc/bcpl.h tempc/INT.h
 	$(CC) -o obj/initedsac.o -c tempc/initedsac.c
 
 tempc/initedsac.c:	$(EDSAC)/edsac.b
-	cintsys -c "makeinit $(EDSAC)/edsac.b to tempc/initedsac.c"
+	cintsys64 -c "makeinit $(EDSAC)/edsac.b to tempc/initedsac.c"
 
 # medfind
 
@@ -327,14 +344,14 @@ obj/medfind.o:	temps/medfind.s
 	$(CC) -o obj/medfind.o -c temps/medfind.s
 
 temps/medfind.s:	$(SORT)/medfind.b Makefile
-	cintsys -c "c $(NB) $(SORT) medfind"
+	cintsys64 -c "c $(NB) $(SORT) medfind"
 	echo medfind.b compiled to temps/medfind.s
 
 obj/initmedfind.o:	tempc/initmedfind.c tempc/bcpl.h tempc/INT.h
 	$(CC) -o obj/initmedfind.o -c tempc/initmedfind.c
 
 tempc/initmedfind.c:	$(SORT)/medfind.b
-	cintsys -c "makeinit $(SORT)/medfind.b to tempc/initmedfind.c"
+	cintsys64 -c "makeinit $(SORT)/medfind.b to tempc/initmedfind.c"
 
 # b2sial
 
@@ -345,14 +362,14 @@ obj/bcpl2sial.o:	temps/bcpl2sial.s
 	$(CC) -o obj/bcpl2sial.o -c temps/bcpl2sial.s
 
 temps/bcpl2sial.s:	$(COM)/bcpl2sial.b $(CINTCODE)/g/sial.h Makefile
-	cintsys -c "c $(NB) $(COM) bcpl2sial"
+	cintsys64 -c "c $(NB) $(COM) bcpl2sial"
 	echo bcpl2sial.b compiled to temps/bcpl2sial.s
 
 obj/initbcpl2sial.o:	tempc/initbcpl2sial.c tempc/bcpl.h tempc/INT.h
 	$(CC) -o obj/initbcpl2sial.o -c tempc/initbcpl2sial.c
 
 tempc/initbcpl2sial.c:	$(COM)/bcpl2sial.b
-	cintsys -c "makeinit $(COM)/bcpl2sial.b to tempc/initbcpl2sial.c"
+	cintsys64 -c "makeinit $(COM)/bcpl2sial.b to tempc/initbcpl2sial.c"
 
 # natbcpl
 
@@ -363,14 +380,14 @@ obj/bcpl.o:	temps/bcpl.s
 	$(CC) -o obj/bcpl.o -c temps/bcpl.s
 
 temps/bcpl.s:	$(COM)/bcpl.b Makefile
-	cintsys -c "c $(NB) $(COM) bcpl"
+	cintsys64 -c "c $(NB) $(COM) bcpl"
 	echo "$(COM)/bcpl.b compiled to temps/bcpl.s"
 
 obj/initbcpl.o:	tempc/initbcpl.c tempc/bcpl.h tempc/INT.h
 	$(CC) -o obj/initbcpl.o -c tempc/initbcpl.c
 
 tempc/initbcpl.c:	$(COM)/bcpl.b
-	cintsys -c "makeinit $(COM)/bcpl.b to tempc/initbcpl.c"
+	cintsys64 -c "makeinit $(COM)/bcpl.b to tempc/initbcpl.c"
 
 
 
@@ -380,14 +397,14 @@ obj/blib.o:	temps/blib.s
 	$(CC) -o obj/blib.o -c temps/blib.s
 
 temps/blib.s:	sysb/blib.b Makefile
-	cintsys -c "c $(NB) sysb blib"
+	cintsys64 -c "c $(NB) sysb blib"
 	echo blib.b compiled to temps/blib.s
 
 obj/dlib.o:	temps/dlib.s
 	$(CC) -o obj/dlib.o -c temps/dlib.s
 
 temps/dlib.s:	sysb/dlib.b Makefile
-	cintsys -c "c $(NB) $(CINTCODE)/sysb dlib"
+	cintsys64 -c "c $(NB) $(CINTCODE)/sysb dlib"
 	echo dlib.b compiled to temps/dlib.s
 
 obj/clib.o:	sysc/clib.c sysc/bcpl.h sysc/INT.h
@@ -407,7 +424,6 @@ obj/sdldrawlib.o:  sysc/sdldrawlib.c
 
 obj/mlib.o:	$(MLIB)
 	$(CC) -o obj/mlib.o -c $(MLIB)
-
 
 demo.txt:	arm/demo.s
 	$(CC) -c -Wa,-alh arm/demo.s >demo.txt

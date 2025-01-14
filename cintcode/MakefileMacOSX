@@ -182,12 +182,12 @@ SD = /media/535A-B0C2
 #ENDER = bigender
 
 # Version for the Macmini running Intel Mac OS-X 32 bit version
-CC = gcc -O3 -m32 -DforMacOSX
+#CC = gcc -O3 -m32 -DforMacOSX
 
 # For OSX with SDL features but no OpenGL
-CC = gcc -O3 -m32 -DforMacOSX -DSOUND -DCALLC -DSDLavail -DEXTavail
-CFLAGS+=`sdl2-config --cflags`
-LDFLAGS+=`sdl2-config --libs`
+#CC = gcc -O3 -m32 -DforMacOSX -DSOUND -DCALLC -DSDLavail -DEXTavail
+#CFLAGS+=`sdl2-config --cflags`
+#LDFLAGS+=`sdl2-config --libs`
 
 # The following is under development for AMD 64 Athlon machines
 #CC = gcc -O4 -DforLinuxAMD64
@@ -209,6 +209,7 @@ LDFLAGS+=`sdl2-config --libs`
 
 #CC = gcc -O4 -DforOS2
 
+CC = gcc -O3 -DforMacOSX
 
 run:	bcplready
 	bin/cintsys

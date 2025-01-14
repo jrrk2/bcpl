@@ -47,14 +47,16 @@ static int endraster(void)
 }
 
 BCPLWORD setraster(BCPLWORD n, BCPLWORD val)
-{ char chbuf[256];
+{ char chbuf[256], chval[8];
+  memcpy(chval, &val, sizeof(val));
   switch((int)n)
-  { case 0: if (val) return initraster(osfname(val, chbuf));
+  { case 0: if (val) return initraster(osfname(chval, chbuf));
             else     return endraster(); // Return 0 if successful
             return 1;
     case 1: if(val>=0) count = val; return count;
     case 2: if(val>=0) scale = val; return scale;
     case 3: return 0;  // Rastering is available
+    default: return -1;
   }
 }
 
