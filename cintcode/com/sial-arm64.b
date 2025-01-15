@@ -321,7 +321,7 @@ AND scan(arg) BE
                    ENDCASE
 
     CASE f_xdiv:   cvf("XDIV") // a := a / b; c := ?
-                   writef("*n sdiv X4, X5, X4")
+                   writef("*n sdiv X4, X4, X5")
                    ENDCASE
     CASE f_xrem:   cvf("XREM") // a := a REM b; c := ?
                    writef("*n sdiv X0, X5, X4")

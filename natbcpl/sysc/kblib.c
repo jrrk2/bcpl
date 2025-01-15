@@ -26,19 +26,24 @@ and
 #include <sgtty.h>
 
 int init_keyb(void)
-{ struct sgttyb ttyb;
-
+{
+  /*
+  struct sgttyb ttyb;
   ioctl(0, TIOCGETP, &ttyb);
   ttyb.sg_flags = CBREAK+EVENP+ODDP+CRMOD;
   ioctl(0, TIOCSETP, &ttyb);
+  */
   return 0;
 }
 
 int close_keyb(void)
-{ struct sgttyb ttyb;
+{
+  /*  
+  struct sgttyb ttyb;
   ioctl(0, TIOCGETP, &ttyb);
   ttyb.sg_flags = ECHO+EVENP+ODDP+CRMOD;
   ioctl(0, TIOCSETP, &ttyb);
+  */
   return 0;
 }
 
