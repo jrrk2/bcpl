@@ -29,6 +29,7 @@ SORT = $(BCPLPROGS)/sort
 TESTS = $(BCPLPROGS)/tests
 COM = $(CINTCODE)/com
 RASPI = $(BCPLPROGS)/raspi
+PROG = hello
 
 LIBS = obj/mlib.o obj/clib.o obj/blib.o obj/dlib.o obj/kblib.o obj/sdlfn.o
 
@@ -119,8 +120,8 @@ NB = nbarm64
 #NB = nbos2
 
 #run:	prog bench100 cmpltest crdemo edsac natbcpl b2sial
-run:	fcmpltest
-	./fcmpltest
+run:	./$(PROG)
+	./$(PROG)
 #	./tst
 #	cintsys64 -c "sial-sasm sial/fcmpltest.sial"
 #	./tstfloat
@@ -176,21 +177,21 @@ tempc/initbench100.c:	$(TESTS)/bench100.b
 
 # hello (and dependencies)
 
-hello:	obj/inithello.o obj/hello.o $(LIBS)
-	$(CC) -o hello obj/inithello.o obj/hello.o $(LIBS) -lm
+$(PROG):	obj/init$(PROG).o obj/$(PROG).o $(LIBS)
+	$(CC) -o $(PROG) obj/init$(PROG).o obj/$(PROG).o $(LIBS) -lm
 
-obj/hello.o:	temps/hello.s
-	$(CC) -o obj/hello.o -c temps/hello.s
+obj/$(PROG).o:	temps/$(PROG).s
+	$(CC) -o obj/$(PROG).o -c temps/$(PROG).s
 
-temps/hello.s:	../cintcode/cin64/sial-arm64 $(COM)/hello.b Makefile
-	cintsys64 -c "c $(NB) $(COM) hello"
-	echo hello.b compiled to temps/hello.s
+temps/$(PROG).s:	../cintcode/cin64/sial-arm64 $(COM)/$(PROG).b Makefile
+	cintsys64 -c "c $(NB) $(COM) $(PROG)"
+	echo $(PROG).b compiled to temps/$(PROG).s
 
-obj/inithello.o:	tempc/inithello.c tempc/bcpl.h tempc/INT.h
-	$(CC) -o obj/inithello.o -c tempc/inithello.c
+obj/init$(PROG).o:	tempc/init$(PROG).c tempc/bcpl.h tempc/INT.h
+	$(CC) -o obj/init$(PROG).o -c tempc/init$(PROG).c
 
-tempc/inithello.c:	../cintcode/bin/cintsys64 $(COM)/hello.b
-	cintsys64 -c "makeinit $(COM)/hello.b to tempc/inithello.c"
+tempc/init$(PROG).c:	../cintcode/bin/cintsys64 $(COM)/$(PROG).b
+	cintsys64 -c "makeinit $(COM)/$(PROG).b to tempc/init$(PROG).c"
 
 ../cintcode/bin/cintsys64:
 	make -f MakefileMacOSX sys64 -C ../cintcode

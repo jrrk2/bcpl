@@ -1,9 +1,9 @@
 /*
-This will be an sial to ARM translator based on sial-386.
+This will be an sial to ARM64 translator based on sial-arm.
 
-Implemented by Martin Richards (c) February 2012
+Implemented by JOnathan Kimmitt based on an idea by Martin Richards (c) February 2012
 
-19/12/2011
+15/01/2025
 UNDER DEVELOPMENT
 */
 
@@ -211,6 +211,7 @@ AND scan(arg) BE
                    genLoadK(X4, kval)
                    ENDCASE
     CASE f_lm:     cvfk("LM") // a := -n
+    	 	   writes("*n// load negative")
                    genLoadK(X4, -kval)
                    ENDCASE
 
@@ -787,16 +788,33 @@ AND genOpRRK(opstr, rd, rn, k) BE
 
 AND genLoadK(r, k) BE
 { LET sh = 0
+  TEST k < 0 THEN
+    {
+    k := ~k;
+    writef("*n movn %s, #%n // %x8", r, (k&#xFFFF)<<sh, k)
 
-  writef("*n movz %s, #%n", r, (k&#xFFFF)<<sh)
-
-  k, sh := k>>16, sh+16
-
-  WHILE k DO
-  { 
-    writef("*n movk %s, #0x%x , LSL #%n", r, (k&#xFFFF), sh)
     k, sh := k>>16, sh+16
-  }
+
+    WHILE k DO
+      { 
+      writef("*n// %x8 %x8", k, sh);
+      writef("*n movk %s, #%n , LSL #%n", r, ((~k)&#xFFFF), sh)
+      k, sh := k>>16, sh+16
+      }
+    }
+  ELSE
+    {
+    writef("*n movz %s, #%n // %x8", r, (k&#xFFFF)<<sh, k)
+
+    k, sh := k>>16, sh+16
+
+    WHILE k DO
+      {
+      writef("*n// %x8 %x8", k, sh);
+      writef("*n movk %s, #%n , LSL #%n", r, (k&#xFFFF), sh)
+      k, sh := k>>16, sh+16
+      }
+    }
 }
 
 AND genLdrStr(opstr, rd, rn, k) BE
@@ -952,7 +970,7 @@ AND cvconst(arg) BE
 { // Place constants in the text (read only) section
   LET lab = rdm()
   LET w = rdw()
-  writef("// CONST  _M%n W%n", lab, w)
+  writef("// CONST  _M%n %n", lab, w)
   writef("*n .section __TEXT, __const")
   writef("*n .p2align 3, 0x0*n")
   writef("*n .global %s_M%c%n", arg, modletter, lab)
