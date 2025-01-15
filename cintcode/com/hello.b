@@ -4,9 +4,9 @@ GET "libhdr"
 
 LET clihook() = start()
 
-LET start() = VALOF
+LET start() BE
 { wrs("Hello*n")
-  RESULTIS 0
+  FINISH
 }
 
 AND wrc(ch) BE sys(11,ch)   //wrch(ch)

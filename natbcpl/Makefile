@@ -174,7 +174,7 @@ obj/initbench100.o:	tempc/initbench100.c tempc/bcpl.h tempc/INT.h
 tempc/initbench100.c:	$(TESTS)/bench100.b
 	cintsys64 -c "makeinit $(TESTS)/bench100.b to tempc/initbench100.c"
 
-# hello
+# hello (and dependencies)
 
 hello:	obj/inithello.o obj/hello.o $(LIBS)
 	$(CC) -o hello obj/inithello.o obj/hello.o $(LIBS) -lm
@@ -182,15 +182,21 @@ hello:	obj/inithello.o obj/hello.o $(LIBS)
 obj/hello.o:	temps/hello.s
 	$(CC) -o obj/hello.o -c temps/hello.s
 
-temps/hello.s:	$(COM)/hello.b Makefile
+temps/hello.s:	../cintcode/cin64/sial-arm64 $(COM)/hello.b Makefile
 	cintsys64 -c "c $(NB) $(COM) hello"
 	echo hello.b compiled to temps/hello.s
 
 obj/inithello.o:	tempc/inithello.c tempc/bcpl.h tempc/INT.h
 	$(CC) -o obj/inithello.o -c tempc/inithello.c
 
-tempc/inithello.c:	$(COM)/hello.b
+tempc/inithello.c:	../cintcode/bin/cintsys64 $(COM)/hello.b
 	cintsys64 -c "makeinit $(COM)/hello.b to tempc/inithello.c"
+
+../cintcode/bin/cintsys64:
+	make -f MakefileMacOSX sys64 -C ../cintcode
+
+../cintcode/cin64/sial-arm64: ../cintcode/bin/cintsys64 ../cintcode/com/sial-arm64.b
+	(cd ../cintcode/com; cintsys64 -c "bcpl sial-arm64.b to sial-arm64 t64"; mv sial-arm64 ../cin64)
 
 # prog
 
