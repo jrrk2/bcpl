@@ -450,16 +450,20 @@ AND scan(arg) BE
                    writef("*n uxtb X4, w4") 
                    ENDCASE
     CASE f_xgbyt:  cvf("XGBYT") // a := a % b 
-                   writef("*n add X4, X4, X5, lsl #3")
-                   writef("*n ldrb w4, [X4]") 
+                   writef("*n lsl X0, X4, #3") 
+                   writef("*n add X5, X5, X0") 
+                   writef("*n ldrb w4, [X5]") 
+                   writef("*n uxtb X4, w4") 
                    ENDCASE
     CASE f_pbyt:   cvf("PBYT") // b % a := c
-                   writef("*n add X4, X4, X5, lsl #3")
+                   writef("*n lsl X0, X5, #3") 
+                   writef("*n add X4, X4, X0") 
                    writef("*n strb w6, [X4]") 
                    ENDCASE
     CASE f_xpbyt:  cvf("XPBYT") // a % b := c 
-                   writef("*n add X4, X4, X5, lsl #3")
-                   writef("*n strb w6, [X4]") 
+                   writef("*n lsl X0, X4, #3") 
+                   writef("*n add X5, X5, X0") 
+                   writef("*n strb w6, [X5]") 
                    ENDCASE
 
 // swb       Kn Ld K1 L1 ... Kn Ln   Binary chop switch, Ld default
@@ -886,18 +890,16 @@ AND cvswl(arg) BE
   writef("// SWL K%n _N%n", n, dlab)
   writef("*n adrp X1, %s_K%n_M%c%n @PAGE", arg, cnt, modletter, dlab)
   writef("*n add X1, X1, %s_K%n_M%c%n @PAGEOFF", arg, cnt, modletter, dlab)
-  writef("*n%s_K%n_N%c%n:", arg, cnt, modletter, dlab)
   genCmpRK(X4, n)
-  writef("*n lsl X0, X4, #3")
-  writef("*n ldrsw X9, [X10, X11, lsl #2]")
-  writef("*n add X8, X8, X9")
-  writef("*n br X8")
+  writef("*n ldrsw X9, [X1, X4, lsl #2]")
+  writef("*n add X1, X1, X9")
+  writef("*n br X1")
   writef("*n .p2align 2, 0x0*n")
   writef("*n%s_K%n_M%c%n:", arg, cnt, modletter, dlab)
   
   FOR i = 1 TO n DO
   { LET l = rdl()
-    writef("*n .long %s_L%c%n - %s_K%n_N%c%n // cvswl", arg, modletter, l, arg, cnt, modletter, dlab)
+    writef("*n .long %s_L%c%n - %s_K%n_M%c%n // cvswl", arg, modletter, l, arg, cnt, modletter, dlab)
   }
 
   writef("*n .section __TEXT, __text,regular,pure_instructions")

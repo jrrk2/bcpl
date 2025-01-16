@@ -1,5 +1,7 @@
 // header file for the bench mark test
 
+SECTION "bench"
+
 MANIFEST $( // Comment out one of the following lines
   Count=10000;      Qpktcountval=23246;   Holdcountval=9297
 //Count=10000*100;  Qpktcountval=2326410; Holdcountval=930563
@@ -87,6 +89,8 @@ $)
 //SECTION "main"
  
 //GET "HDR"
+
+LET clihook() = start()
 
 LET start() = VALOF
 $( LET wkq = 0

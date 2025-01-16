@@ -1,4 +1,8 @@
+SECTION "tstmuldivbits"
+
 GET "libhdr"
+
+LET clihook() = start()
 
 LET start() = VALOF
 { LET x, xs, y, ys, z, zs = 1, 16, 1, 8, 1, 20
