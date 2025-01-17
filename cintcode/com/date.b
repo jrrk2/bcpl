@@ -8,11 +8,15 @@ SECTION "DATE"
 
 GET "libhdr"
 
+LET clihook() = start()
+
 LET start() = VALOF
 { LET tostream = 0
   LET days, msecs = 0, 0
   LET argv = VEC 50
   LET v = VEC 14
+  selectoutput(findoutput("**"))
+  selectinput(findinput("**"))
 
   UNLESS rdargs("TO/K", argv, 50) DO
   { writef("Bad arguments for DATE*n")

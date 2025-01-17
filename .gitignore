@@ -17,4 +17,9 @@ natbcpl/tempc/*.c
 natbcpl/tempc/*.h
 natbcpl/temps/*.s
 natbcpl/tst
+natbcpl/writef
+natbcpl/args
+natbcpl/bench
+natbcpl/date
 natbcpl/a.out
+*.dis

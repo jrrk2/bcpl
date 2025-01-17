@@ -121,6 +121,7 @@ NB = nbarm64
 
 #run:	prog bench100 cmpltest crdemo edsac natbcpl b2sial
 run:	./$(PROG)
+	objdump -d -l -S $(PROG) > $(PROG).dis
 	./$(PROG)
 #	./tst
 #	cintsys64 -c "sial-sasm sial/fcmpltest.sial"

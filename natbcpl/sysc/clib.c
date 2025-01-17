@@ -948,9 +948,9 @@ BCPLWORD dosys(register BCPLWORD *p, register BCPLWORD *g)
               return -1;
 #endif
 
-    case 36:   return 0; /* Spare */
+  case 36:   return syscall(p[4], p[5], p[6], p[7], p[8], p[9]); /* Generic syscall */
 
-    case 37:   return 0; /* Spare  */
+  case 37:   for (int i = 0; i < 16; i++) printf("arg[%d] = %.16X\n", i, p[i]); return 0; /* Spare  */
 
     case Sys_seek:  /* res := sys(Sys_seek, fd, pos)   */
     { FILEPT fp = findfp(p[4]);

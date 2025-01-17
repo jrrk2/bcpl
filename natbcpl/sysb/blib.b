@@ -65,7 +65,9 @@ LET stop(code, reason) BE
   // It must be called from the command's main coroutine, ie
   // not an inner coroutine.
   result2 := reason
-  cowait(code)
+  // temporary hack till coroutines working
+  sys(36, code)
+  // cowait(code)
 }
 
 LET clihook(stackupb) = VALOF

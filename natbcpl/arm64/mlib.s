@@ -89,12 +89,16 @@ _callstart:
 
 //  res = sys(n, x, y, x,...)  the BCPL callable sys function
 sys:
- sub sp, sp, #64
+ sub sp, sp, #96
  stp X10,lr,[sp]
  stp X1,X4,[sp, #16]
  ldp X0,X1,[X2, #32]
  stp X0,X1,[sp, #32]
- stp X2,X11,[sp, #48]
+ ldp X0,X1,[X2, #48]
+ stp X0,X1,[sp, #48]
+ ldp X0,X1,[X2, #64]
+ stp X0,X1,[sp, #64]
+ stp X2,X11,[sp, #80]
 //  P = NP -> [<old P>, <return addr>, <entry addr>, <arg1>, ...]
  mov X0, sp         //  first argument  = P
  mov X1, X11        //  second argument = G
@@ -102,10 +106,10 @@ sys:
  add X2, X2, _dosys @PAGEOFF
  blr X2             //  Call _dosys(P, G)
 
- ldp X2,X11,[sp, #48]
+ ldp X2,X11,[sp, #80]
  ldp X1,X4,[sp, #16]
  ldp X10,lr,[sp]
- add sp, sp, #64
+ add sp, sp, #96
  mov X4, X0         //  put result in Cintcode A register
  ret //  BCPL function return
 
