@@ -23,7 +23,10 @@ GLOBAL {
 
 LET start() = VALOF
 { LET argv = VEC 50
-
+  AND midiname = "/dev/midi1" // This works when running Linux on
+                              // VM VirtualBox when connected to my
+			      // Casio Bechstein piano by USB cable.
+  
   stdout := output()
   stdin  := input()
 
@@ -44,7 +47,6 @@ LET start() = VALOF
   IF argv!3 DO legatoval   := !(argv!3)   // LEGATO
 
   msecsperbeat := 60_000 / tempo
-
   midifd := sys(Sys_sound, snd_midiOutOpen, midiname)
 
   UNLESS midifd DO
@@ -128,11 +130,6 @@ AND bankselect(bank) BE
   writef("Selecting Bank %n %n*n", mm, ll)
   wrmid3(#xB0+channelno, #x00, mm)
   wrmid3(#xB0+channelno, #x20, ll)
-}
-AND delay(msecs) BE
-{ LET ticks = tickspersecond * msecs / 1000
-  deplete(cos)
-  sys(Sys_delay, ticks)
 }
 
 AND wrmid1(a) BE

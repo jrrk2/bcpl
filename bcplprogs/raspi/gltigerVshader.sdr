@@ -1,20 +1,30 @@
 uniform mat4 landmatrix;  // matrix for land points
 uniform mat4 modelmatrix; // Matrix for model points
-uniform mat4 control; // Control matrix
+uniform mat4 control;     // Control matrix containing elevator, rudder
+                          // and airleron values.
 
 attribute vec4 g_vVertex;
 attribute vec4 g_vColor;
 attribute vec2 g_vData;   // data[0]=ctrl   data[1]=value
-
+                          // ctrl = 0.0  for fixed points on the aircraft
+                          // ctrl = 1.0  for rudder
+                          // ctrl = 2.0  for elevator
+                          // ctrl = 3.0  for left aileron
+                          // ctrl = 4.0  for right aileron
+                          // ctrl = 5.0  for point on the land
 varying   vec4 g_vVSColor;
 
 void main()
 { float ctrl = g_vData[0];
+  // 1.0 rudder 2.0 elevator 3.0 left aileron 4.0 right aileron
 
-  g_vVSColor = g_vColor;
+  g_vVSColor.r = g_vColor.r;
+  g_vVSColor.g = g_vColor.g;
+  g_vVSColor.b = g_vColor.b;
+  //g_vVSColor.b = 1.0;
 
   // For fun, use the xyz coordinates to adjust the colour a little
-  //g_vVSColor = g_vColor*0.9 + g_vVertex * 0.40;
+  //g_vVSColor = g_vColor*0.9 + g_vVertex * 0.010;
 
   // Deal with the control surfaces
 
@@ -53,14 +63,14 @@ void main()
     if(ctrl==5.0) { // Points on the land
       gl_Position = (landmatrix * g_vVertex);
       return;
-    } else {
-      // Rotate and translate the control surface
-      gl_Position = (modelmatrix * Pos);
     }
 
-  } else {
+    // Rotate and translate the control surface
+    gl_Position = (modelmatrix * Pos);
+    return;
 
-    // Rotate and translate the model
-    gl_Position = (modelmatrix * g_vVertex);
   }
+
+  // Rotate and translate the model
+  gl_Position = (modelmatrix * g_vVertex);
 }

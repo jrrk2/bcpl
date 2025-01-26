@@ -1,3 +1,5 @@
+# This is the assembly code library suitable for i386 and i686 machines.
+
 # C Linkage:
 #   On entry 0(%esp)   is the return address
 #            4(%esp)   is the first argument
@@ -17,7 +19,7 @@
 .text
 	.align 16
 
-# callstart(p, g)
+# Typical callstart(p, g);
    
 callstart:
 _callstart:
@@ -29,7 +31,7 @@ _callstart:
  movl 60(%esp),%ebp      #  stackbase (first  argument)
  movl 64(%esp),%esi      #  gvec      (second argument)
 
-# Save caller's FPH contol word -- 16 bits
+# Save caller's FPH control word -- 16 bits
  fnstcw 36(%esp)
 
 # Set FPH control word rounding to nearest with 24 bits precision
@@ -46,11 +48,11 @@ _callstart:
 #                        1  0     53 bit procision
 #                        1  1     64 bit procision
 
+ fninit                  # Initialise the floating point hardware
  movzwl	36(%esp), %eax
  movb	$0xC0, %ah    
  movw	%ax, 38(%esp)
  fldcw	38(%esp)
-
 
 # Register usage while executing BCPL compiled code
 
@@ -79,7 +81,7 @@ _callstart:
 #      (%esp) )    of external calls
 
 #      (%esp)  is also used as a work location in the compilation
-#              of some floating point operations.
+#              of some floating point operations. Now using 44(%esi) instead.
 
    # make sure global 3 (sys) is defined
    movl $sys, 4*3(%esi)
@@ -91,10 +93,10 @@ _callstart:
    # BCPL call of clihook(stackupb)
    movl stackupb,%ebx    # A := stackupb
    leal 24(%ebp),%edx    # NP := P + 6
-   movl 16(%esi),%eax    # clihook entry address
+   movl 16(%esi),%eax    # clihook (G4) entry address
    call *%eax
    movl %ebx,%eax    # return the clihook result as callstart result
-
+   
 # Restore caller's FPH contol word -- 16 bits
  fldcw 36(%esp)
 	

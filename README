@@ -1,74 +1,57 @@
-This is an alpha version of BCPL for AppleSilcon,
-not bad for a language invented in 1959.
+BCPL CINTCODE DISTRIBUTION   (Revised 30 sep 2023)
 
-I decided to check in this version that prints 'Hello'
-as a first milestone.
+(This README file comes from the directory BCPL/cintcode/doc of
+the standard BCPL distribution bcpl.tgz)
 
-SECTION "hello"
+31/102023
+The BCPL Cintcode system can now be built for Pentium machines and
+Raspberry Pis using Makefile. The makefiles MakfileSDL, MakefileGL,
+MakefileRaspi, MakefileRaspiSDL and makefileRaspiGL are now obsolete
+and should not be used. They will be deleted in due course.  SDL and
+GL will be available automatically to BCPL if the SDL and GL libraries
+are installed. The appropriate macro names are #defined in
+sysc/defines.h which is created by running the program
+sysc/mkdefines-h.c. In due course this will be extended for other
+systems such as MAC OSX, and the version of linux (iSH) that runs on
+iPhones and iPads. The mechanism will soon work for 64 bit BCPL
+systems.
 
-GET "libhdr"
-
-LET clihook() = start()
-
-LET start() = VALOF
-{ wrs("Hello*n")
-  RESULTIS 0
-}
-
-AND wrc(ch) BE sys(11,ch)   //wrch(ch)
-
-AND wrs(s) BE
-  FOR i = 1 TO s%0 DO wrc(s%i)
-
-AND nl() BE wrc('*n')
-
-the existing instructions should work, except that you should type
-'make hello' in the natbcpl directory to get this listing.
-
-the assembly language source for this program would like like the following:
-
- .global temps_hello_s_LA3
-temps_hello_s_LA3:
- stp X10,lr, [X2], #16
- stp X1,X4, [X2]
- sub X10, X2, #16
-// LSTR   _M9001
- adrp X4, temps_hello_s_MA9001 @PAGE
- add X4, X4, temps_hello_s_MA9001 @PAGEOFF
- lsr X4, X4, #3
-// ATB
- mov X5, X4
-// LF      _L5
- adrp X4, temps_hello_s_LA5 @PAGE
- add X4, X4, temps_hello_s_LA5 @PAGEOFF
-// K       P3
- add X2, X10, #24 // 00000018
- mov X1, X4
- mov X4, X5
- blr X1
-// L       K0
- movz X4, #0
-// RTN
- ldp X10, lr, [X10]
- ret
-
-The use of globals to represent internal labels was a conscious choice
-to ease debugging in the early stages, so don't bother complaining about that
-at this stage.
-
-BCPL CINTCODE DISTRIBUTION   (Revised 28 June 2013)
-
-The following change was made on 31 May 2013.
+30/09/2023
+On 30/09/2023 at about 17:25 the standard distribution of the BCPL
+Cintcode system was updated with a substantially modified version.
+The files that were replaced were bcpl.tgz and bcpl.zip. These files
+had not be updated for many months. For more information about the
+changes see the file changes in directory BCPL/cintcode/doc/.
 
 
-The BCPL compiler has just been upgraded with options t32 and t64
+05/10/2022
+The current version of bcpl.tgz (and bcpl.zip) has significant changes
+since the one made in March 2022. It now has a complete implementation
+of the new pattern matching features and several demonstration
+programs using them in bcplprogs/patdemos. The system passes all its
+normal tests so should be safe to use, but I am still in the process
+of performing systematc tests of the entire implementation to ensure
+that it agrees with every detail specified in the BCPL manual.
+
+There is a new command cintcode/checksyn.b to test that BCPL programs
+are syntactically correct as specified by the new syntax diagrams
+given in the appendix at the end of the manual. This program will in
+due course be modified to attempt to find minimum cost repairs to
+syntactically incorrect programs in the hope of producing more helpful
+error messages.
+
+The BCPL compiler has been upgraded with options t32 and t64
 to allow it to generate 64-bit Cintcode when running on a 32-bit
 system, and 32-bit Cintcode when running on a 64-bit system.
 The 32-bit Cintcode compiled code is placed in cintcode/cin, and
 the 64-bit code is placed in cintcode/cin64. The old BCPL64
-distribution is now obsolete.
+distribution is now obsolete. More recently the option t16 has been
+added for 16-bit target machines.
 
-In directory BCPL/cintcode the command
+The current compiler now includes floating point and pattern
+matching features.
+
+In directory BCPL/cintcode under a Linux system the commands
 
 make clean
 make
@@ -76,9 +59,15 @@ make
 will rebuild the 32-bit Cintcode system called cintsys, and
 
 make clean64
-make sys64
+make run64
 
 will rebuild the 64-bit Cintcode system called cintsys64.
+
+On some systems you will need to specify appropriate Makefiles,
+as in
+
+make -f MafileRaspi
+make -f MakefileMacOSX
 
 The command-commands b64, bc64, bs64, bcb64, bsb64, bcl64 and bsl64
 will compile to 64-bit Cintode when the compiler is running on either
@@ -94,28 +83,19 @@ The directory BCPL/cintcode/cin64 holds 64-bit Cintcode compiled code.
 c compall     will recompile all the BCPL code for the 32-bit version
 c compall64   will recompile all the BCPL code for the 64-bit version
 
-******************** IMPORTANT *****************************
-
-On 12 Oct 2006, the location of cintsys and rastsys moved from
-$BCPLROOT to BCPLROOT/bin. This will require a change in the setting
-of the PATH environment variable.
 
 Before installing BCPL, read this README file and remember to edit the
 Makefile and set the environment variable BCPLROOT to your chosen
 absolute location for the cintcode directory, and include this in the
 PATH environment variable.
 
-On my system (using bash under Linux), this is done by:
+On my system (using bash under Ubuntu Linux), this is done by:
 
 export BCPLROOT=/home/mr10/distribution/BCPL/cintcode
 export PATH=$PATH:$BCPLROOT/bin
 
 (The variables BCPLPATH and BCPLHDRS now do not need to be set if
  their values would be $BCPLROOT/cin and $BCPLROOT/g, respectively)
-
-************************************************************
-
-
 
 
 
@@ -125,7 +105,7 @@ on it, such as Cintpos, Cobench, Tcobench, Bench, MCPL, VSPL, etc.
 
 A manual for Cintcode BCPL and Cintpos is available via my home page.
 
-Latest changes: ---------------------------------------------------
+Some historic changes:   (This needs to be updated)
 
 04/10/07
 Several files changed to make it easier to compile the system
@@ -354,7 +334,7 @@ Notes:
    hand written interpreters seem to give only about 20% improvements.
    So new ones will not be written.
 
-LINUX INSTALLATION 
+Linux INSTALLATION 
 
 This section describes how to install Cintcode BCPL on an IBM PC
 running Linux.
@@ -544,7 +524,7 @@ SUN4, SPARC, MSDOS, MAC, OS2, BC4, Win32, CYGWIN32 and shWinCE. These
 contain files that are architecture (or compiler) dependent, typically
 including cintasm.s (or cintasm.asm).  For some old versions of Linux,
 it is necessary to change _dosys to dosys (or vice-versa) in the file
-sys/LINUX/cintasm.s.
+sys/linux/cintasm.s.
 
 Edit Makefile (typically by adding and removing comment
 symbols) as necessary for your system/machine and then execute 
@@ -560,19 +540,22 @@ running Unix.
 
 BCPL on Windows machines running Cygwin.
 
-I recommend using the GNU development tools and utilities for Windows
-95/98/NT/2000/XP that are available from
+I recommend using the GNU development tools and utilities for Windows.
+You can find out how to install Cygwin by visiting. On my Windows XP
+machine installation use to be really easy, but now Cygwin no longer
+supports XP, but there is a link in the Cygwin home page that tells
+you how to get round the problem. I will assume that you have somehow
+managed to install Cygwin and have a shortcut allowing you to enter
+Cygwin and another probabaly called setup allowing you to add and
+remove packages to/from your installation. You should probably install
+the default (minimal) Cygwin system initially and add extra packages
+later as you need them. What follows is a description based on an old
+version of Cygwin installed on a Windows XP machine. 
 
-    http://sources.redhat.com/cygwin/download.html.
 
-(Or do a Google search on Cygwin).
+Edit the cintcode/Makefile to comment out the Linux version
 
-I would recommend clicking on the "Install Cygwin Now!" link, and if
-you have room install everything.
-
-Edit the cintcode/Makefile to comment out the LINUX version
-
-#CC = gcc -O9 -DforLINUX
+#CC = gcc -O9 -DforLinux
 #SYSM = ../cintcode/sysasm/linux
 #FASTERP = obj/cintasm.o
 
@@ -886,11 +869,9 @@ Have fun and good luck!
 
 
 Martin Richards
-     (mr@cl.cam.ac.uk, http://www.cl.cam.ac.uk/users/mr)
+     (mr10@cl.cam.ac.uk, http://www.cl.cam.ac.uk/users/mr10)
 University Computer Laboratory
-New Museums Site                  
-Pembroke Street
+JJ Thomson Avenue
 Cambridge
 UK
 
-18 May 2013

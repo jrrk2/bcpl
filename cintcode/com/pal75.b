@@ -10,6 +10,11 @@ does not yet run.
 
 Martin Richards 18 Oct 2010
 
+History
+
+04/11/2018
+Removed all occurence of <> so that this program can be compiled using
+the standard BCPL compiler rather than xbcpl.
 
 As time allows I am reformating the source and will ultimately attempt
 to make it run. Simultaneously, I am constructing a new implementation
@@ -123,10 +128,12 @@ LET add (a, b) = VALOF SWITCHON coerce (@a, TRUE) INTO
       IF a=y0 RESULTIS y0
       UNLESS ga1=1 DO
       { TEST a<=0
-        THEN ga1 := igcd (a+ny0, ga1) <>
-             a := (a+ny0)/ga1+y0
-        ELSE ga1 := gcd1 (a, ga1+y0) <>
-             a := longdiv1 (a, ga1+y0)
+        THEN { ga1 := igcd (a+ny0, ga1)
+               a := (a+ny0)/ga1+y0
+             }
+        ELSE { ga1 := gcd1 (a, ga1+y0)
+               a := longdiv1 (a, ga1+y0)
+             }
         v := (v+ny0)/ga1+y0
       }
       u := smul (u, v)
@@ -250,10 +257,12 @@ LET minu (a, b) = VALOF SWITCHON coerce (@a, FALSE) INTO
       IF a=y0 RESULTIS y0
       UNLESS ga1=1 DO
       { TEST a<=0
-        THEN ga1 := igcd (a+ny0, ga1) <>
-             a := (a+ny0)/ga1+y0
-        ELSE ga1 := gcd1 (a, ga1+y0) <>
-             a := longdiv1 (a, ga1+y0)
+        THEN { ga1 := igcd (a+ny0, ga1)
+               a := (a+ny0)/ga1+y0
+             }
+        ELSE { ga1 := gcd1 (a, ga1+y0)
+               a := longdiv1 (a, ga1+y0)
+             }
         v := (v+ny0)/ga1+y0
       }
       u := smul (u, v)
@@ -732,8 +741,9 @@ LET setio () BE
   q_output := 0
   TEST sysout=0
   THEN { LET s = findlog ()
-         IF s=0 DO writetolog ("NO SYSPRINT") <>
-                   stop (104)
+         IF s=0 DO { writetolog ("NO SYSPRINT")
+                     stop (104)
+                   }
          selectoutput (s)
        }
   ELSE q_seloutput (sysout)
@@ -825,37 +835,41 @@ AND wch1 (b) BE
  
  
 AND escw (c) BE
- { LET t = chc
- chc := chc+1
- wch ('#')
- IF chc<t
- chc := chc+1
- wrc (c) }
+{ LET t = chc
+  chc := chc+1
+  wch ('#')
+  IF chc<t
+  chc := chc+1
+  wrc (c)
+}
  
  
 AND tab (n) BE
- { TEST n<=chc
- newline ()
- ELSE IF n>chz
- { newline ()
- RETURN }
- UNTIL n<=chc
- wch (' ') }
- 
+{ TEST n<=chc
+  THEN newline ()
+  ELSE IF n>chz DO
+       { newline ()
+         RETURN
+       }
+ UNTIL n<=chc DO
+ { wch (' ')
+ }
+} 
  
 AND xtab (n) BE
- tab (n+chc)
+  tab (n+chc)
  
  
 AND ytab (n) BE
- UNLESS n=0 | chc=0
- xtab (n-chc REM n)
+  UNLESS n=0 | chc=0
+  xtab (n-chc REM n)
  
  
 AND ztab (n) BE
- { ytab (n)
- IF chc+n>=chz
- newline () }
+{ ytab (n)
+  IF chc+n>=chz
+  newline ()
+}
  
  
 AND writes (s) BE
@@ -870,15 +884,16 @@ AND unpackstring (s, v) BE
  
 AND packstring (v, s) = VALOF
  
- { LET n = !v & #xFF
- LET i = n/4
- LET x = v!i       //       SAVE IN CASE  S=V
+{ LET n = !v & #xFF
+  LET i = n/4
+  LET x = v!i       //       SAVE IN CASE  S=V
  
- s!i := 0
- FOR p=0 TO n DO
- putbyte (s, p, v!p)
- putbyte (s, i, x)
- RESULTIS i }
+  s!i := 0
+  FOR p=0 TO n DO
+   putbyte (s, p, v!p)
+   putbyte (s, i, x)
+  RESULTIS i
+}
  
  
 AND eqdd (p, q) = VALOF
@@ -1253,14 +1268,17 @@ AND writearg (v) BE
       RETURN
     }
   }
-  IF validcode (v) DO writef ("'%X2:%N", v>>24, a) <>
-                      RETURN
+  IF validcode (v) DO { writef ("'%X2:%N", v>>24, a)
+                        RETURN
+                      }
  
-  IF v=evenstack | v=oddstack DO writes ("STACK") <>
-                                 RETURN
+  IF v=evenstack | v=oddstack DO { writes ("STACK")
+                                   RETURN
+                                 }
  
-  IF v>p_addr | v<-p_addr DO writef ("%X2:%N", v>>24, a) <>
-                             RETURN
+  IF v>p_addr | v<-p_addr DO { writef ("%X2:%N", v>>24, a)
+                               RETURN
+                             }
  
   writen (v)
 }
@@ -1359,27 +1377,33 @@ AND writex (n) BE
  
  
 AND wrflt (x) BE
-{ IF x #= 0.0 DO writes ("0.0") <>
-                 RETURN
-  IF x #< 0.0 DO wch ('-') <>
-                 x :=  #- x
+{ IF x #= 0.0 DO { writes ("0.0")
+                   RETURN
+                 }
+  IF x #< 0.0 DO { wch ('-')
+                   x :=  #- x
+                 }
   { LET e = 7
-    UNTIL x #> 1000000.0 DO x := x #* 10.0 <>
-                            e := e-1
-    UNTIL x #< 10000000.0 DO x := x #/ 10.0 <>
-                             e := e+1
+    UNTIL x #> 1000000.0 DO { x := x #* 10.0
+                              e := e-1
+                            }
+    UNTIL x #< 10000000.0 DO { x := x #/ 10.0
+                               e := e+1
+                             }
     x := (FIX x+5)/10
     TEST x<100000
     THEN x := 100000
     ELSE WHILE x>=1000000 DO x, e := x/10, e+1
     TEST e=1
-    THEN wch ('0'+x/100000) <>
-         e, x := 0, x REM 100000
+    THEN { wch ('0'+x/100000)
+           e, x := 0, x REM 100000
+         }
     ELSE wch ('0')
     wch ('.')
     writel (x, 5)
-    UNLESS e=0 DO wch ('E') <>
-                  writen (e)
+    UNLESS e=0 DO { wch ('E')
+                    writen (e)
+                  }
   }
 }
  
@@ -1699,13 +1723,13 @@ GET "pal75hdr"
 LET eval (c) = VALOF
  { LET f, p1, p2, p3 = z, -m, e, j
  j, m := zj, s_j
- IF @c>stackl
- stkover ()
+ IF @c>stackl DO
+   stkover ()
  
  { {   // extend frame
  ll_ev:   cycles := cycles+1
- IF c<=0
- arg1 := c <> BREAK
+ IF c<=0 DO
+ { arg1 := c; BREAK }
  
  SWITCHON !c INTO
  {
@@ -1728,11 +1752,13 @@ LET eval (c) = VALOF
  
  CASE s_gensy:
  CASE s_name: { LET g = e
- { IF c=h3!g
- arg1 := h2!g <> ENDCASE
- g := h1!g } REPEATUNTIL g=z }
- msg1 (15, c)
- BREAK
+                { IF c=h3!g DO
+                  { arg1 := h2!g; ENDCASE }
+                  g := h1!g
+                } REPEATUNTIL g=z
+              }
+              msg1 (15, c)
+              BREAK
  
  CASE s_unset:
  msg1 (25)
@@ -1743,9 +1769,10 @@ LET eval (c) = VALOF
  BREAK
  
  CASE s_j: TEST f=z
- { IF m>=s_mz
- m := m-jgap
- j := keep2 (j) }
+ THEN { IF m>=s_mz
+        m := m-jgap
+        j := keep2 (j)
+      }
  ELSE j := keep1 (j, f)
  arg1 := j
  BREAK
@@ -1764,7 +1791,7 @@ LET eval (c) = VALOF
  
  CASE s_reca: e := get4 (s_e, e, zsy, h2!c)
  arg1 := h1!c
- UNLESS arg1<=0
+ UNLESS arg1<=0 DO
  arg1 := (fff!!arg1)(arg1)
  arg1 := (h3!c)(arg1, h2!c)
  BREAK
@@ -1786,7 +1813,7 @@ LET eval (c) = VALOF
  
  CASE s_apple:
  arg1 := h2!c
- UNLESS arg1<=0
+ UNLESS arg1<=0 DO
  arg1 := (fff!!arg1)(arg1)
  c := h1!c
  UNLESS c<=0
@@ -1797,11 +1824,11 @@ LET eval (c) = VALOF
  LOOP
  
  CASE s_a1a: arg1 := h2!c
- UNLESS arg1<=0
- arg1 := (fff!!arg1)(arg1)
+ UNLESS arg1<=0 DO
+   arg1 := (fff!!arg1)(arg1)
  c := h3!c
- UNLESS f=z
- j, f, m := get4 (m, e, j, f)+yfj, z, s_mz
+ UNLESS f=z DO
+   j, f, m := get4 (m, e, j, f)+yfj, z, s_mz
  la_a1:            e := get4 (s_e, h1!c, arg1, h2!c)
  c := h3!c
  LOOP
@@ -1815,15 +1842,17 @@ LET eval (c) = VALOF
  LOOP
  
  CASE s_aa2: { LET c1 = h2!c
- f, m, c := get4 (m, f, h3!c, h2!c1)+yfj, s_mma2l, h2!(h1!c1) }
- LOOP
+               f, m, c := get4 (m, f, h3!c, h2!c1)+yfj, s_mma2l, h2!(h1!c1)
+             }
+             LOOP
  
  CASE s_ap2: { LET c1 = h2!c
- f, m, c := get4 (m, f, h3!c, h2!c1)+yfj, s_mmf2l, h2!(h1!c1) }
- LOOP
+               f, m, c := get4 (m, f, h3!c, h2!c1)+yfj, s_mmf2l, h2!(h1!c1)
+             }
+             LOOP
  
  CASE s_a1e: arg1 := h2!c
- UNLESS arg1<=0
+ UNLESS arg1<=0 DO
  arg1 := (fff!!arg1)(arg1)
  arg1 := (h3!c)(arg1)
  BREAK
@@ -1901,8 +1930,8 @@ LET eval (c) = VALOF
  CASE s_condb:
  { LET a = h1!c
  a := (fff!!a)(a)
- IF a=z | (a>=yloc & h1!a=z)
- c := h3!c <> LOOP
+ IF a=z | (a>=yloc & h1!a=z) DO
+ { c := h3!c; LOOP }
  c := h2!c
  LOOP }
  
@@ -2074,9 +2103,10 @@ LET eval (c) = VALOF
  
  la_apcode2:       CASE s_code2:
  UNTIL arg1>0 & !arg1=s_tuple & h3!arg1=y2
- { IF arg1>=yloc
- arg1 := h1!arg1 <> LOOP
- msg1 (28, arg1, y2) }
+ { IF arg1>=yloc DO
+   { arg1 := h1!arg1; LOOP }
+   msg1 (28, arg1, y2)
+ }
  arg1 := (h2!c)(h2!(h1!arg1), h2!arg1)
  LOOP
  
@@ -2110,42 +2140,46 @@ LET eval (c) = VALOF
  GOTO la_aptup }
  msg1 (20, c, arg1) }
  }
- UNLESS y0<arg1<=h3!c
- arg1 := z <> LOOP
- FOR i=arg1+1 TO h3!c
+ UNLESS y0<arg1<=h3!c DO
+ { arg1 := z; LOOP }
+ FOR i=arg1+1 TO h3!c DO
  c := h1!c
  arg1 := h2!c
  LOOP
  
  CASE s_xtupl:
- UNLESS arg1<0
+ UNLESS arg1<0 DO
  { IF arg1>=yloc
- arg1 := h1!arg1
- UNLESS arg1<0
- msg1 (20, c, arg1) }
- IF arg1<=y0
- arg1 := z <> LOOP
- { LET c3 = h3!c
- IF arg1<=c3
- l:    { FOR i=arg1 TO c3
- c := h1!c
- arg1 := h2!c
- LOOP }
- { LET c2, a = h2!c, arg1
- { LET c31 = c3+1
- apply (c2, c31)
- TEST h3!c=c3
- { h1!c := get4 (s_tuple, h1!c, arg1, c31)
- h3!c := c31
- IF c31=a
- BREAK
- c3 := c31 }
- ELSE { c3 := h3!c
- IF c3>=a
- { arg1 := a
- GOTO l } }
- } REPEAT
+   arg1 := h1!arg1
+   UNLESS arg1<0 DO
+     msg1 (20, c, arg1)
  }
+ IF arg1<=y0 DO
+ { arg1 := z; LOOP }
+ { LET c3 = h3!c
+   IF arg1<=c3 DO
+ l:    { FOR i=arg1 TO c3 DO
+           c := h1!c
+         arg1 := h2!c
+         LOOP
+       }
+   { LET c2, a = h2!c, arg1
+     { LET c31 = c3+1
+       apply (c2, c31)
+       TEST h3!c=c3
+       THEN { h1!c := get4 (s_tuple, h1!c, arg1, c31)
+              h3!c := c31
+              IF c31=a BREAK
+              c3 := c31
+            }
+       ELSE { c3 := h3!c
+              IF c3>=a DO
+              { arg1 := a
+                GOTO l
+              }
+             }
+     } REPEAT
+   }
  }
  LOOP
  
@@ -2214,9 +2248,10 @@ LET eval (c) = VALOF
  j, f, m := get4 (m, e, j, f)+yfj, z, s_mz
  ll_apeclos:                { LET c2 = h2!c
  UNTIL arg1>0 & !arg1=s_tuple & h3!arg1=h3!c2
- { IF arg1>=yloc
- arg1 := h1!arg1 <> LOOP
- msg1 (6, c2, arg1) }
+ { IF arg1>=yloc DO
+   { arg1 := h1!arg1; LOOP }
+   msg1 (6, c2, arg1)
+ }
  e := binda (c2, arg1, h1!c) }
  c := h3!c
  BREAK
@@ -2779,7 +2814,7 @@ LET eval (c) = VALOF
  ll_apcf:     // Apply known code
  TEST f<yfj
  f := get4 (s_mmcf, h1!f, h2!f, h1!c)+yfj
- OR
+ ELSE
  ll_apcf1: h3!f := h1!c
  j, f, m := get4 (m, e, j, f)+yfj, z, s_mmcf
  c := h2!c
@@ -2806,7 +2841,7 @@ LET eval (c) = VALOF
  ll_apbf:
  TEST f<yfj
  f := get4 (s_mmcf, h1!f, h2!f, h1!c)+yfj
- OR
+ ELSE
  ll_apbf1: h3!f := h1!c
  j, f, m := get4 (m, e, j, f)+yfj, z, s_mmcf
  c := h2!c
@@ -2833,7 +2868,7 @@ LET eval (c) = VALOF
  c := h1!c
  TEST f<yfj
  f := get4 (s_mmcf, h1!f, h2!f, h1!c)+yfj
- OR
+ ELSE
  ll_apkf1: h3!f := h1!c
  j, f, m := get4 (m, e, j, f)+yfj, z, s_mmcf
  { LET t = h3!c
@@ -3830,48 +3865,51 @@ AND sadd (n) = VALOF
  
  
 AND longadd (a, b) = VALOF
- { LET c, c0 = z, @b | signbit       // ??B?? C0=@C-1
- sg, cy := a & ysg, 0
- { gw1 := h3!a+h3!b+cy
- TEST gw1>=numba
- { gw1 := gw1-numba
- cy := 1 }
- ELSE cy := 0
- gw2 := h2!a+h2!b+cy
- TEST gw2>=numba
- { gw2 := gw2-numba
- cy := 1 }
- ELSE cy := 0
- a, b := h1!a, h1!b
- h1!c0 := getx (s_numj, zsy, gw2, gw1)
- c0 := h1!c0
- IF a=z
- { h1!c0 := b
- IF cy=0
- RESULTIS c+sg
- a := b
- GOTO l }
- } REPEATUNTIL b=z
- IF cy=0
- h1!c0 := a <> RESULTIS c+sg
- { gw1 := h3!a+1
- UNLESS gw1=numba
- { gw2 := h2!a
- BREAK }
- gw2 := h2!a+1
- UNLESS gw2=numba
- { gw1 := 0
- BREAK }
- a := h1!a
- h1!c0 := getx (s_numj, zsy, 0, 0)
- c0 := h1!c0
- l:    IF a=z
- { h1!c0 := getx (s_numj, z, 0, 1)
- RESULTIS c+sg }
- } REPEAT
- h1!c0 := getx (s_numj, h1!a, gw2, gw1)
- RESULTIS c+sg
- }
+{ LET c, c0 = z, @b | signbit       // ??B?? C0=@C-1
+  sg, cy := a & ysg, 0
+  { gw1 := h3!a+h3!b+cy
+  TEST gw1>=numba
+  { gw1 := gw1-numba
+  cy := 1 }
+  ELSE cy := 0
+  gw2 := h2!a+h2!b+cy
+  TEST gw2>=numba
+  { gw2 := gw2-numba
+  cy := 1 }
+  ELSE cy := 0
+  a, b := h1!a, h1!b
+  h1!c0 := getx (s_numj, zsy, gw2, gw1)
+  c0 := h1!c0
+  IF a=z
+  { h1!c0 := b
+  IF cy=0
+  RESULTIS c+sg
+  a := b
+  GOTO l }
+  } REPEATUNTIL b=z
+  IF cy=0 DO
+  { h1!c0 := a; RESULTIS c+sg }
+  { gw1 := h3!a+1
+    UNLESS gw1=numba DO
+    { gw2 := h2!a
+      BREAK
+    }
+    gw2 := h2!a+1
+    UNLESS gw2=numba DO
+    { gw1 := 0
+      BREAK
+    }
+    a := h1!a
+    h1!c0 := getx (s_numj, zsy, 0, 0)
+    c0 := h1!c0
+l:  IF a=z DO
+    { h1!c0 := getx (s_numj, z, 0, 1)
+      RESULTIS c+sg
+    }
+  } REPEAT
+  h1!c0 := getx (s_numj, h1!a, gw2, gw1)
+  RESULTIS c+sg
+}
  
  
 AND longsub (a, b) = VALOF      // |A| > |B|
@@ -3910,7 +3948,7 @@ AND longsub (a, b) = VALOF      // |A| > |B|
  { s := z
  GOTO l2 }
  ELSE h1!s0 := z
- OR
+ ELSE
  l1:   h1!s0 := getx (s_numj, h1!a, gw2, gw1)
  }
  ELSE IF a=z
@@ -4158,43 +4196,44 @@ AND longdiv1 (a, n) = VALOF
 // could try IF H1!A=Z ...
  { gl1, n := n-y0, zsy
  TEST gl1>1
- sg := a & ysg
+ THEN sg := a & ysg
  ELSE TEST gl1<-1
- gl1, sg := -gl1, (a & ysg) NEQV ysg
- ELSE TEST gl1=0
- msg1 (7) <> RESULTIS z
- ELSE { result2 := 0
- TEST gl1=1
- RESULTIS a
- ELSE RESULTIS a NEQV ysg }
+      THEN gl1, sg := -gl1, (a & ysg) NEQV ysg
+      ELSE TEST gl1=0
+           THEN { msg1 (7); RESULTIS z }
+           ELSE { result2 := 0
+                  TEST gl1=1
+                  THEN RESULTIS a
+                  ELSE RESULTIS a NEQV ysg }
  { n := getx (s_numj, n, h2!a, h3!a)
- a := h1!a } REPEATUNTIL a=z
+   a := h1!a } REPEATUNTIL a=z
  a := n
- UNLESS h2!n=0
+ UNLESS h2!n=0 DO
  { result2 := h2!n REM gl1
- h2!n := h2!n/gl1
- GOTO l }
+   h2!n := h2!n/gl1
+   GOTO l
+ }
  result2 := h3!n REM gl1
  h3!n := h3!n/gl1
  IF h3!n=0
  a := h1!a
  n := h1!n // H2!N=0 -> H1!N ~= ZSY
  { h2!n := sdiv (result2, h2!n, gl1)
- l:      h3!n := sdiv (result2, h3!n, gl1)
- n := h1!n } REPEATUNTIL n=zsy
- IF sg>0
- result2 := -result2
- IF h1!a=zsy & h2!a=0
- TEST sg=0
- RESULTIS h3!a+y0
- ELSE RESULTIS y0-h3!a
+l: h3!n := sdiv (result2, h3!n, gl1)
+   n := h1!n
+ } REPEATUNTIL n=zsy
+ IF sg>0 DO result2 := -result2
+ IF h1!a=zsy & h2!a=0 TEST sg=0
+                      THEN RESULTIS h3!a+y0
+                      ELSE RESULTIS y0-h3!a
  { LET b = z      // Unreverse A
- { LET t = h1!a
- h1!a := b
- IF t=zsy
- RESULTIS a+sg
- b, a := a, t } REPEAT }
+   { LET t = h1!a
+     h1!a := b
+     IF t=zsy RESULTIS a+sg
+     b, a := a, t
+   } REPEAT
  }
+}
  
  
 AND longdiv (a, b) = msg1 (26, "longdiv")
@@ -4446,8 +4485,9 @@ AND indir (p) BE
  
 AND scanp (f) BE
 { FOR i=st1 TO st2 BY 4 DO
-  { IF !i>=mm3 DO f (i+3) <>
-                  f (i+2)
+  { IF !i>=mm3 DO { f (i+3)
+                    f (i+2)
+                  }
     f (i+1)
   }
   FOR i=@e TO @a_null DO f (i)
@@ -4659,14 +4699,16 @@ AND eql (p, q) = VALOF
             b := FALSE   // since U~=V
             LOOP
           CASE s_flt:
-            UNLESS h2!u #= h2!v DO b := FALSE <>
-                                   LOOP
+            UNLESS h2!u #= h2!v DO { b := FALSE
+                                     LOOP
+                                   }
             ENDCASE
           CASE s_fpl:
             msg1 (14)
           CASE s_ratn:
-            UNLESS h1!u=h1!v DO b := FALSE <>
-                                LOOP
+            UNLESS h1!u=h1!v DO { b := FALSE
+                                  LOOP
+                                }
           CASE s_rds:
           CASE s_wrs:
           CASE s_bcplf:
@@ -4678,8 +4720,9 @@ AND eql (p, q) = VALOF
           CASE s_code2:
           CASE s_code3:
           CASE s_code4:
-            UNLESS h2!u=h2!v DO b := FALSE <>
-                                LOOP
+            UNLESS h2!u=h2!v DO { b := FALSE
+                                  LOOP
+                                }
             ENDCASE
           CASE s_numj:
             IF (u NEQV v)<ysg DO
@@ -4867,8 +4910,10 @@ AND div (a, b) = VALOF
  { SWITCHON coerce (@a, FALSE) INTO
  {
  CASE s_num: ga1, ga2 := a+ny0, b+ny0
- IF ga2=0
- msg1 (7) <> RESULTIS z
+ IF ga2=0 DO
+ { msg1 (7)
+   RESULTIS z
+ }
  ga3 := ga1 REM ga2
  IF ga3=0
  RESULTIS ga1/ga2+y0
@@ -4948,8 +4993,10 @@ AND div (a, b) = VALOF
  gw1, a := signbit-h1!a, signbit-h2!a
  ELSE gw1, a := h1!a, h2!a
  b := smul (gw1, b) }
- ELSE { IF b=y0
- msg1 (7) <> RESULTIS z
+ ELSE { IF b=y0 DO
+        { msg1 (7)
+          RESULTIS z
+        }
  ga1 := igcd (h2!a+ny0, b+ny0)
  IF b<y0
  ga1 := -ga1
@@ -5086,8 +5133,10 @@ AND div (a, b) = VALOF
  
  CASE s_poly: TEST worse
  TEST worse1
- { IF b=y0
- msg1 (7) <> RESULTIS z
+ { IF b=y0 DO
+   { msg1 (7)
+     RESULTIS z
+   }
  RESULTIS polymapf (a, b, div) }
  ELSE IF a=y0
  RESULTIS y0
@@ -5167,8 +5216,10 @@ AND div (a, b) = VALOF
  a := c
  LOOP }
  
- CASE s_flt: IF gw2 #= 0.0
- msg1 (7) <> RESULTIS z
+ CASE s_flt: IF gw2 #= 0.0 DO
+             { msg1 (7)
+               RESULTIS z
+             }
  RESULTIS getx (s_flt, 0, gw1 #/ gw2, 0)
  CASE s_fpl: msg1 (14)
  DEFAULT: IF b=y1
@@ -5186,10 +5237,11 @@ AND div (a, b) = VALOF
 AND modv (a, b) = VALOF
  { coerce (@a, FALSE)
  IF b<=0
- { IF b=y0
- msg1 (7) <> RESULTIS z
- IF a<=0
- RESULTIS (a+ny0) REM (b+ny0)+y0
+ { IF b=y0 DO
+   { msg1 (7)
+     RESULTIS z
+   }
+ IF a<=0 RESULTIS (a+ny0) REM (b+ny0)+y0
  SWITCHON !a INTO
  {
  CASE s_numj: longdiv1 (a, b)
@@ -5406,16 +5458,20 @@ AND chpoly (a) BE
  UNLESS validp (a)
  errorp (a)
  IF !a=s_ratp
- { IF h2!a=y0
- s := "RATP" <> GOTO l
+ { IF h2!a=y0 DO
+   { s := "RATP"
+     GOTO l
+   }
  chpoly (h1!a)
  chpoly (h2!a)
  RETURN }
  IF !a=s_poly
  { LET p = h1!a
  UNTIL p=z
- { IF (p & p_addr)=zsy | h2!p=y0
- s := "POLY" <> GOTO l
+ { IF (p & p_addr)=zsy | h2!p=y0 DO
+   { s := "POLY"
+     GOTO l
+   }
  p := h1!p }
  RETURN }
  RETURN
@@ -5908,16 +5964,20 @@ AND prinl (l) = VALOF
  { IF l>0
  { IF !l=s_tuple
  { LET p, c = l, '('+signbit
- IF @l>stackl
- writes ("#etc#") <> RESULTIS l
+ IF @l>stackl DO
+ { writes ("#etc#")
+   RESULTIS l
+ }
  { wch (c)
  c := '*S'+signbit
  prinl (h2!p)
  p := h1!p } REPEATUNTIL p=z
  wch (')')
  RESULTIS l }
- IF l>=yloc | !l=s_xtupl
- l := h1!l <> LOOP
+ IF l>=yloc | !l=s_xtupl DO
+ { l := h1!l
+   LOOP
+ }
  }
  RESULTIS print (l)
  } REPEAT
@@ -5928,8 +5988,10 @@ AND prinl (l) = VALOF
  
 AND print0 (p, f) BE    // P is a tuple
  { LET n, q = h3!p, z
- IF @p>stackl
- writes ("#etc#") <> RETURN
+ IF @p>stackl DO
+ { writes ("#etc#")
+   RETURN
+ }
  { n := n-1
  IF h3!p>=0
  { writes ("#loop#")
@@ -6080,8 +6142,10 @@ AND prc (c, b) BE
  c3 := h3!c3 }
  writes (" = ")
  prc (c3, y1) }
- UNLESS h1!c=ze
- writes (" IN ") <> prc (h1!c, y1)
+ UNLESS h1!c=ze DO
+ { writes (" IN ")
+   prc (h1!c, y1)
+ }
  ENDCASE
  CASE s_cond:
  CASE s_conda:
@@ -6192,7 +6256,9 @@ AND prc (c, b) BE
  
  
 AND printa (c) = VALOF
- prc (c, y0) <> RESULTIS c
+{ prc (c, y0)
+  RESULTIS c
+}
  
  
 .
@@ -6216,7 +6282,7 @@ LET prink (f, p, n) = VALOF
  f (p)
  wrc, chc := -w1, -w2
  TEST g>=y0
- f (p) <> RESULTIS TRUE
+ THEN { f (p); RESULTIS TRUE }
  ELSE RESULTIS FALSE
  }
  
@@ -6304,10 +6370,10 @@ STATIC
 LET linkword (n, a, a2, a3) = VALOF
  { LET g = @root | signbit   // ??B??
  n, c0 := -n, 0
- UNTIL c0!g=z
- g, c0 := c0!g, compl (a, h1!(h2!g))+2 <>
- IF c0=2
- RESULTIS g  // found
+ UNTIL c0!g=z DO
+ { g, c0 := c0!g, compl (a, h1!(h2!g))+2
+   IF c0=2 RESULTIS g  // found
+ }
  a := get4 (-n, a, a2, a3)
  c0!g := get4 (s_name, z, a, z)
  RESULTIS c0!g }
@@ -6316,22 +6382,23 @@ LET linkword (n, a, a2, a3) = VALOF
 AND findword (a) = VALOF
  { LET g = @root | signbit   // ??B??
  c0 := 0
- UNTIL c0!g=z
- g, c0 := c0!g, compl (a, h1!(h2!g))+2 <>
- IF c0=2
- RESULTIS g
+ UNTIL c0!g=z DO
+ { g, c0 := c0!g, compl (a, h1!(h2!g))+2
+   IF c0=2 RESULTIS g
+ }
  RESULTIS 0 }
  
  
 AND putword (b) = VALOF
- { LET a, g = h1!b, @root | signbit  // ??B??
- c0 := 0
- UNTIL c0!g=z
- g, c0 := c0!g, compl (a, h1!(h2!g))+2 <>
- IF c0=2
- msg1 (13, putword)
- c0!g := get4 (s_name, z, b, z)
- RESULTIS c0!g }
+{ LET a, g = h1!b, @root | signbit  // ??B??
+  c0 := 0
+  UNTIL c0!g=z DO
+  { g, c0 := c0!g, compl (a, h1!(h2!g))+2
+    IF c0=2 DO msg1 (13, putword)
+  }
+  c0!g := get4 (s_name, z, b, z)
+  RESULTIS c0!g
+}
  
  
 AND stov (s, v, m) = VALOF
@@ -6341,8 +6408,10 @@ AND stov (s, v, m) = VALOF
  { LET b = getbyte (s1, i)
  IF b=0
  GOTO l
- IF n>=m
- msg1 (5, s) <> GOTO l
+ IF n>=m DO
+ { msg1 (5, s)
+   GOTO l
+ }
  n := n+1
  v!n := b }
  s1 := h1!s1 } REPEATUNTIL s1=z
@@ -6356,10 +6425,14 @@ AND ttov (a, v, m) = VALOF
  !v := 0
  IF a1>0 & !a1=s_tuple
  { LET l = h3!a1-y0
- IF l>m
- msg1 (5, a) <> RESULTIS v
- FOR i=l TO 1 BY -1
- v!i := rvv (h2!a1) <> a1 := h1!a1
+ IF l>m DO
+ { msg1 (5, a)
+   RESULTIS v
+ }
+ FOR i=l TO 1 BY -1 DO
+ { v!i := rvv (h2!a1)
+   a1 := h1!a1
+ }
  !v := l }
  RESULTIS v
  }
@@ -6403,23 +6476,29 @@ AND g_posint (n) = VALOF
  { yz = y0+numba }
  IF y0<n<yz
  RESULTIS n
- IF n>=yloc
- n := h1!n <> LOOP
+ IF n>=yloc DO
+ { n := h1!n
+   LOOP
+ }
  msg1 (29, n) } REPEAT
  
  
 AND g_np (a, t) = VALOF
  { UNLESS a>0 & !a=t
- { IF a>=yloc
- a := h1!a <> LOOP
+ { IF a>=yloc DO
+   { a := h1!a
+     LOOP
+   }
  msg1 (22, a) }
  RESULTIS a } REPEAT
  
  
 AND g_nt (a, n) = VALOF
  { UNLESS a>0 & !a=s_tuple & h3!a=n
- { IF a>=yloc | a>0 & !a=s_xtupl
- a := h1!a <> LOOP
+ { IF a>=yloc | a>0 & !a=s_xtupl DO
+   { a := h1!a
+     LOOP
+   }
  msg1 (28, a, n) }
  RESULTIS a } REPEAT
  
@@ -6729,12 +6808,15 @@ AND transbcpl (a, n) = VALOF
  { LET u, l = v, h3!a-y0
  IF @l>stackl
  stkover ()
- IF u+l>n
- msg1 (5, a) <> l := n-u
+ IF u+l>n DO
+ { msg1 (5, a)
+   l := n-u
+ }
  v := u+l+1
- FOR i=l TO 1 BY -1
- u!i := transbcpl (h2!a, n) <>
- a := h1!a
+ FOR i=l TO 1 BY -1 DO
+ { u!i := transbcpl (h2!a, n)
+   a := h1!a
+ }
  !u := l
  RESULTIS u
  }} REPEAT
@@ -6744,18 +6826,18 @@ AND transpal (a) = VALOF
  { IF a=signbit
  { a := transpal (signbit/2)
  RESULTIS add (a, a) }
- IF ABS a<numba
- RESULTIS a+y0
+ IF ABS a<numba RESULTIS a+y0
  TEST a<0
- a, v := -a, ysg
+ THEN a, v := -a, ysg
  ELSE v := 0
  RESULTIS getx (s_numj, z, a/numba, a REM numba)+v }
  
  
 LET tempus (a) = VALOF
- { writef ("*N*N# Tempus fugit (%P) after %V+%V s*N*N",
- a, time ()-rtime, rtime)
- RESULTIS a }
+{ writef ("*N*N# Tempus fugit (%P) after %V+%V s*N*N",
+  a, time ()-rtime, rtime)
+  RESULTIS a
+}
  
  
 AND error (a) = VALOF
@@ -6840,21 +6922,28 @@ LET number (v) = VALOF
  c1 := c0+(c2-c0+1) REM nw2
  UNLESS c0=c1
  { n, m := 0, 0
- UNTIL c0>=c1-numwi
- n := n*10+!c0-'0' <> c0 := c0+1
- UNTIL c0=c1
- m := m*10+!c0-'0' <> c0 := c0+1
- IF c0>c2 & n=0
- RESULTIS m+y0
+ UNTIL c0>=c1-numwi DO
+ { n := n*10+!c0-'0'
+   c0 := c0+1
+ }
+ UNTIL c0=c1 DO
+ { m := m*10+!c0-'0'
+   c0 := c0+1
+ }
+ IF c0>c2 & n=0 RESULTIS m+y0
  v := getx (s_numj, z, n, m) }
- UNTIL c0>c2
+ UNTIL c0>c2 DO
  { n, m := 0, 0
+   c1 := c0+numwi
+ UNTIL c0=c1 DO
+ { n := n*10+!c0-'0'
+   c0 := c0+1
+ }
  c1 := c0+numwi
- UNTIL c0=c1
- n := n*10+!c0-'0' <> c0 := c0+1
- c1 := c0+numwi
- UNTIL c0=c1
- m := m*10+!c0-'0' <> c0 := c0+1
+ UNTIL c0=c1 DO
+ { m := m*10+!c0-'0'
+   c0 := c0+1
+ }
  v := getx (s_numj, v, n, m) }
  RESULTIS v
  }
@@ -6970,10 +7059,11 @@ AND recip (p) = VALOF
  p := y0
  ELSE RESULTIS y1
  IF p<=y0
- { IF p=y0
- msg1 (7) <> RESULTIS z
- IF p=ym
- RESULTIS ym
+ { IF p=y0 DO
+   { msg1 (7)
+     RESULTIS z
+   }
+ IF p=ym RESULTIS ym
  RESULTIS get4 (s_ratn, signbit-p, ym, 0) }
  IF p=y1
  RESULTIS y1
@@ -7124,14 +7214,16 @@ AND bind (v, w, k) = VALOF
  LOOP
  CASE s_tuple:
  UNTIL w>0 & !w=s_tuple & h3!v=h3!w
- { IF w>=yloc
- w := h1!w <> LOOP
- IF order (w)=y1
- w := lmapt (w, h3!v) <>
- LOOP
+ { IF w>=yloc DO
+   { w := h1!w
+     LOOP
+   }
+ IF order (w)=y1 DO
+ { w := lmapt (w, h3!v)
+   LOOP
+ }
  msg1 (6, v, w) }
- IF @w>stackl
- RESULTIS bind1 (v, w, k)
+ IF @w>stackl RESULTIS bind1 (v, w, k)
  { k := bind (h2!v, h2!w, k)
  v := h1!v
  IF v=z
@@ -7140,10 +7232,10 @@ AND bind (v, w, k) = VALOF
  CASE s_qu: w := get4 (s_clos, e, z, w) // But bad scene if W is CD? Maybe OK
  v := h2!v
  LOOP
- CASE s_aa: UNLESS w>=yloc
- w := get4 (s_loc, w, 0, 0)+yloc
- v := h2!v
- LOOP
+ CASE s_aa: UNLESS w>=yloc DO
+              w := get4 (s_loc, w, 0, 0)+yloc
+            v := h2!v
+            LOOP
  CASE s_zz: IF w>=yloc
  w := h1!w
  v := h2!v
@@ -7175,11 +7267,14 @@ AND bind1 (v, w, k) = VALOF
  LOOP
  CASE s_tuple:
  UNTIL w>0 & !w=s_tuple & h3!v=h3!w
- { IF w>=yloc
- w := h1!w <> LOOP
- IF order (w)=y1
- w := lmapt (w, h3!v) <>
- LOOP
+ { IF w>=yloc DO
+   { w := h1!w
+     LOOP
+   }
+ IF order (w)=y1 DO
+ { w := lmapt (w, h3!v)
+   LOOP
+ }
  msg1 (6, v, w) }
  f := get4 (s_mb, f, h1!v, h1!w)+yfj
  v, w := h2!v, h2!w
@@ -7350,10 +7445,14 @@ LET eqlv (p, q) = VALOF
  RESULTIS FALSE
  RESULTIS h1!p=q }
  UNLESS !p=!q
- { IF p>=yloc
- p := h1!p <> LOOP
- IF q>=yloc
- q := h1!q <> LOOP
+ { IF p>=yloc DO
+   { p := h1!p
+     LOOP
+   }
+ IF q>=yloc DO
+ { q := h1!q
+   LOOP
+ }
  RESULTIS FALSE }
  SWITCHON !p INTO
  {
@@ -8574,8 +8673,10 @@ AND fixc (a) BE
 AND rtails (i) BE
  { LET p = !i
  { LET t = (p & p_tagp)>>24
- IF t>=mm3
- fixc (i+3) <> fixc (i+2)
+ IF t>=mm3 DO
+ { fixc (i+3)
+   fixc (i+2)
+ }
  !i := t }
  IF (p & p_addr)=0
  RETURN
@@ -9315,10 +9416,12 @@ AND rsym (b) BE // B -> GLOBAL
  { rch ()
  s2 := s2+readn () }
  TEST s2>0
- UNTIL s2=0
- s1 := s1 #* 10.0 <> s2 := s2-1
- ELSE UNTIL s2=0
- s1 := s1 #/ 10.0 <> s2 := s2+1
+ UNTIL s2=0 DO
+ { s1 := s1 #* 10.0
+   s2 := s2-1
+ }
+ ELSE UNTIL s2=0 DO
+ { s1 := s1 #/ 10.0; s2 := s2+1 }
  sym, s0 := s_flt, getx (s_flt, 0, s1, 0)
  RETURN
  }
@@ -9909,8 +10012,8 @@ AND ap1 (a, b) = VALOF
  h3!a := get4 (s_apz, a, b, h3!a)
  RESULTIS h3!a
  CASE s_cdy: TEST matchbv (h3!v, b, TRUE)
- l := la_enty
- OR
+ THEN l := la_enty
+ ELSE
  CASE s_cdx: l := la_entx
  ENDCASE
  CASE s_aclos:

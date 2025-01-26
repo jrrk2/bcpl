@@ -93,18 +93,18 @@ s_pand=82
 s_por=83
 
 s_inc1=85
-s_inc4=86
+//s_inc4=86
 s_dec1=87
-s_dec4=88
+//s_dec4=88
 
 s_inc1b=90
-s_inc4b=91
+//s_inc4b=91
 s_dec1b=92
-s_dec4b=93
+//s_dec4b=93
 s_inc1a=94
-s_inc4a=95
+//s_inc4a=95
 s_dec1a=96
-s_dec4a=97
+//s_dec4a=97
 
 s_let=100
 s_scope=101
@@ -355,7 +355,7 @@ LET lex() BE
                                    synerr("Bad +:= symbol")
                                 }
                    IF ch='+' DO {  rch()
-                                   IF ch='+' DO {  token := s_inc4; BREAK }
+                                   //IF ch='+' DO {  token := s_inc4; BREAK }
                                    token := s_inc1
                                    RETURN
                                 }
@@ -469,7 +469,7 @@ LET lex() BE
          CASE '-': rch()
               IF ch='>' DO {  token := s_cond; BREAK  }
               IF ch='-' DO {  rch()
-                              IF ch='-' DO {  token := s_dec4; BREAK }
+                              //IF ch='-' DO {  token := s_dec4; BREAK }
                               token := s_dec1
                               RETURN
                            }
@@ -491,9 +491,9 @@ LET lex() BE
          CASE '"':
            {  LET len, strch = 0, ?
               rch()
-
+              // Changed to BCPL style string constant
               UNTIL ch='"' DO
-              {  IF len=charvupb DO synerr("String too long")
+              {  IF len=255 DO synerr("String too long")
                  strch := rdstrch()
                  IF strch>=0 DO {  len := len + 1
                                    charv%len := strch
@@ -501,10 +501,9 @@ LET lex() BE
               }
 
               charv%0 := len
-              wordnode := newvec(len/bytesperword+3)
+              wordnode := newvec(len/bytesperword+2)
               h1!wordnode := s_string
-              h2!wordnode := len-1
-              FOR i = 0 TO len-1 DO (@h3!wordnode)%i := charv%(i+1)
+              FOR i = 0 TO len DO (@h2!wordnode)%i := charv%i
               token := s_string
               BREAK
            }
@@ -654,6 +653,13 @@ AND rdtag(ch1) = VALOF
    } REPEAT
 
    charv%0 := upb
+   WHILE upb<255 DO
+   { upb := upb+1
+     UNLESS upb MOD bytesperword BREAK
+     charv%upb := 0
+   }
+   //writef("charv=%n*n", charv)
+   //abort(1100)
    RESULTIS charv
 }
 
@@ -687,7 +693,7 @@ AND performget() BE // Changed 13/10/06
     charv%0, charv%(len-1), charv%len := len, '.', 'h'
   }
 
-  // replace all ':'s by '/'s.
+  // Replace all ':'s by '/'s.
   FOR i = 1 TO charv%0 IF charv%i=':' DO charv%i := '/'
 
   // First look in the current directory
@@ -903,42 +909,50 @@ AND rdprog() = VALOF
 
    IF token=s_module DO
    {  lex()
+   writef("rdprog: MODULE*n")
       UNLESS token=s_vid DO synerr("Bad MODULE directive")
       modulename := wordnode
       lex()
    }
 
 recover:
+   // Parse all the manifest, global, static, external and function declarations
+   // in the program, returning a linear list of them.
    UNTIL token=s_eof DO
    {  ln := lineno
       SWITCHON token INTO
       {  DEFAULT:  synerr("Bad outer level declaration")
 
          CASE s_manifest:
+   writef("rdprog: MANIFEST*n")
               lex()
               a := mk4(s_manifest, rdmlist(), 0, ln)
               !ptr := a
               ptr := @ h3!a
               LOOP
          CASE s_global:
+   writef("rdprog: GLOBAL*n")
               lex()
               a := mk4(s_global, rdglist(), 0, ln)
               !ptr := a
               ptr := @ h3!a
               LOOP
          CASE s_static:
+   writef("rdprog: STATIC*n")
               lex()
               a := mk4(s_static, rdslist(), 0, ln)
               !ptr := a
               ptr := @ h3!a
               LOOP
          CASE s_external:
+   writef("rdprog: EXTERNAL*n")
               lex()
               a := mk4(s_external, rdxlist(), 0, ln)
               !ptr := a
               ptr := @ h3!a
               LOOP
          CASE s_fun:
+   writef("rdprog: FUN*n")
               lex()
               a := rdvid()
               a := mk6(s_fun, a, rdfundef(), 0, 0, ln)
@@ -948,9 +962,11 @@ recover:
       }
    }
 
+   // Insert the module name, if given, at the start of the program.
    UNLESS modulename=0 DO
        res := mk4(s_module, modulename, res, moduleln)
-
+   writef("rdprog: res=%n*n", res)
+abort(1000)
    rec_p, rec_l := recp, recl
    RESULTIS res
 }
@@ -1154,9 +1170,9 @@ LET rbexp() = VALOF
       CASE s_cvec:   RESULTIS mk3(op, rnexp(14), 0)
 
       CASE s_inc1:   RESULTIS mk2(s_inc1b, rnexp(12))
-      CASE s_inc4:   RESULTIS mk2(s_inc4b, rnexp(12))
+      //CASE s_inc4:   RESULTIS mk2(s_inc4b, rnexp(12))
       CASE s_dec1:   RESULTIS mk2(s_dec1b, rnexp(12))
-      CASE s_dec4:   RESULTIS mk2(s_dec4b, rnexp(12))
+      //CASE s_dec4:   RESULTIS mk2(s_dec4b, rnexp(12))
 
       CASE s_plus:   RESULTIS rnexp(10)  // prefixed
 
@@ -1243,12 +1259,12 @@ AND rexp(n) = VALOF
 
          CASE s_inc1:   IF nlpending RESULTIS a
                         a := mk2(s_inc1a, a); lex(); LOOP
-         CASE s_inc4:   IF nlpending RESULTIS a
-                        a := mk2(s_inc4a, a); lex(); LOOP
+         //CASE s_inc4:   IF nlpending RESULTIS a
+         //               a := mk2(s_inc4a, a); lex(); LOOP
          CASE s_dec1:   IF nlpending RESULTIS a
                         a := mk2(s_dec1a, a); lex(); LOOP
-         CASE s_dec4:   IF nlpending RESULTIS a
-                        a := mk2(s_dec4a, a); lex(); LOOP
+         //CASE s_dec4:   IF nlpending RESULTIS a
+         //               a := mk2(s_dec4a, a); lex(); LOOP
 
          CASE s_indb:
          CASE s_indw:   IF nlpending RESULTIS a
@@ -1319,7 +1335,8 @@ AND rexplist() = VALOF
 }
 
 AND rdalist() = VALOF
-{  LET a = 0
+{  // Read an argument list, used in MATCH, EVERY
+   LET a = 0
 
    UNLESS token=s_rbra RESULTIS rexp(0)
 
@@ -1420,8 +1437,8 @@ LET rbcom() = VALOF
       CASE s_vid:CASE s_cid:CASE s_numb:CASE s_string:
       CASE s_rbra:CASE s_sbra:
       CASE s_true:CASE s_false:
-      CASE s_inc1:CASE s_inc4:
-      CASE s_dec1:CASE s_dec4:
+      CASE s_inc1://CASE s_inc4:
+      CASE s_dec1://CASE s_dec4:
       CASE s_lv:CASE s_abs:CASE s_bitnot:CASE s_not:
       CASE s_vec:CASE s_cvec:CASE s_table:CASE s_valof:
       CASE s_indb:CASE s_indw:
@@ -1554,6 +1571,7 @@ LET plist(x, n, d) BE WHILE x SWITCHON h1!x INTO
                     LOOP
 
    CASE s_fun:      newline()
+writef("%i6:", x)
                     plist1(x, 0, 20)
                     x := h4!x
                     LOOP
@@ -1573,10 +1591,9 @@ AND plist1(x, n, d) BE
       CASE s_cid:      writef("%s", x+2); RETURN
 
       CASE s_string:
-             {  LET len = h2!x
-                AND s = x+2
+             {  LET s = x+1
                 wrch('"')
-                FOR i = 0 TO len DO wrch(s%i)
+                FOR i = 1 TO s%0 DO wrch(s%i)
                 wrch('"')
                 RETURN
              }
@@ -1588,9 +1605,9 @@ AND plist1(x, n, d) BE
       CASE s_valof:  opstr, size := "VALOF", 1; ENDCASE
       CASE s_lv:     opstr, size := "LV", 1; ENDCASE
       CASE s_inc1b:  opstr, size := "INC1B", 1; ENDCASE
-      CASE s_inc4b:  opstr, size := "INC4B", 1; ENDCASE
+      //CASE s_inc4b:  opstr, size := "INC4B", 1; ENDCASE
       CASE s_dec1b:  opstr, size := "DEC1B", 1; ENDCASE
-      CASE s_dec4b:  opstr, size := "DEC4B", 1; ENDCASE
+      //CASE s_dec4b:  opstr, size := "DEC4B", 1; ENDCASE
       CASE s_neg:    opstr, size := "NEG", 1; ENDCASE
       CASE s_ltable: opstr, size := "LTABLE", 1; ENDCASE
       CASE s_table:  opstr, size := "TABLE", 1; ENDCASE
@@ -1605,9 +1622,9 @@ AND plist1(x, n, d) BE
       CASE s_indw:   opstr, size := "INDW", 2; ENDCASE
       CASE s_indw0:  opstr, size := "INDW0", 1; ENDCASE
       CASE s_inc1a:  opstr, size := "INC1A", 1; ENDCASE
-      CASE s_inc4a:  opstr, size := "INC4A", 1; ENDCASE
+      //CASE s_inc4a:  opstr, size := "INC4A", 1; ENDCASE
       CASE s_dec1a:  opstr, size := "DEC1A", 1; ENDCASE
-      CASE s_dec4a:  opstr, size := "DEC4A", 1; ENDCASE
+      //CASE s_dec4a:  opstr, size := "DEC4A", 1; ENDCASE
       CASE s_mod:    opstr, size := "MOD", 2; ENDCASE
       CASE s_mult:   opstr, size := "MULT", 2; ENDCASE
       CASE s_div:    opstr, size := "DIV", 2; ENDCASE
@@ -1692,19 +1709,19 @@ AND plist1(x, n, d) BE
       CASE s_orass:  opstr, size, ln := "ORASS", 2, h4!x; ENDCASE
 
 // Declarations
-      CASE s_module:   opstr, size, ln := "MODULE", 2, h4!x; ENDCASE
-      CASE s_fun:      opstr, size, ln := "FUN", 2, h6!x; ENDCASE
-      CASE s_funpat:   opstr, size, ln := "FUNPAT", 3, h5!x; ENDCASE
+      CASE s_module:   opstr, size, ln := "MODULE",   2, h4!x; ENDCASE
+      CASE s_fun:      opstr, size, ln := "FUN",      2, h6!x; ENDCASE
+      CASE s_funpat:   opstr, size, ln := "FUNPAT",   3, h5!x; ENDCASE
       CASE s_manifest: opstr, size, ln := "MANIFEST", 1, h4!x; ENDCASE
-      CASE s_mdef:     opstr, size := "MDEF", 3; ENDCASE
-      CASE s_global:   opstr, size, ln := "GLOBAL", 1, h4!x; ENDCASE
-      CASE s_gdef:     opstr, size := "GDEF", 3; ENDCASE
-      CASE s_static:   opstr, size, ln := "STATIC", 1, h4!x; ENDCASE
-      CASE s_sdef:     opstr, size := "SDEF", 3; ENDCASE
+      CASE s_mdef:     opstr, size     := "MDEF",     3;       ENDCASE
+      CASE s_global:   opstr, size, ln := "GLOBAL",   1, h4!x; ENDCASE
+      CASE s_gdef:     opstr, size     := "GDEF",     3;       ENDCASE
+      CASE s_static:   opstr, size, ln := "STATIC",   1, h4!x; ENDCASE
+      CASE s_sdef:     opstr, size     := "SDEF",     3;       ENDCASE
       CASE s_external: opstr, size, ln := "EXTERNAL", 1, h4!x; ENDCASE
-      CASE s_xdef:     opstr, size := "XDEF", 3; ENDCASE
+      CASE s_xdef:     opstr, size     := "XDEF",     3;       ENDCASE
 
-      DEFAULT:  opstr, size := "Unknown", 0; ENDCASE
+      DEFAULT:         opstr, size     := "Unknown",  0;       ENDCASE
    }
 
    IF n=d DO {  writes("Etc"); RETURN }

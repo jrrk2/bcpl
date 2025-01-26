@@ -1,12 +1,15 @@
-/* This is a re-inplementation of a moon lander program
-   I originally wrote in BCPL in September 1973 for the PDP-7
-   and the Vector General display.
+/*
+This file is now obsolete, look at bcplprogs/raspi/lander.b instead.
 
-   This implementation is intended to run on a handheld PC
-   and will be tested under the BCPL Cintcode System for
-   Windows CE running on an HP 620LX
+This is a re-inplementation of a moon lander program
+I originally wrote in BCPL in September 1973 for the PDP-7
+and the Vector General display.
 
-   (c) Martin Richards   Oct 2000
+This implementation is intended to run on a handheld PC
+and will be tested under the BCPL Cintcode System for
+Windows CE running on an HP 620LX
+
+c) Martin Richards   Oct 2000
 
 ****** UNDER DEVELOPMENT *******************
 

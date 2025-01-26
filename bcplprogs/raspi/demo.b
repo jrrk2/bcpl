@@ -3,7 +3,7 @@ GET "libhdr"
 LET start() = VALOF
 { LET n = 7
   LET count = 0
-
+  result2 := 0
   { count := count+1
     IF n=1 RESULTIS count
     TEST n MOD 2 = 0

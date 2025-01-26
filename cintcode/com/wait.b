@@ -66,7 +66,7 @@ LET start() = VALOF
 
   //sawritef("Delaying until %n days %n msecs*n", days, msecs)
 
-  { LET ds, ms = ?, ?
+  { LET ds, ms, dummy = 0, 0, 0
     datstamp(@ds)
   //sawritef("Delaying until %n days %n msecs*n", days, msecs)
   //sawritef("Time now       %n days %n msecs*n", ds, ms)

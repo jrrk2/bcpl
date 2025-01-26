@@ -11,9 +11,11 @@ Made Cintsys and Cintpos versions of c.b identical.
 07/09/2010
 Changed the lookup sequence for the command-command filename
 to:
-1) the current directory.
-2) the directories specified by the scripts environment variable
-   whose name in the rtn_scriptsvar field of the rootnode.
+1) The current directory.
+2) The directories specified by the scripts environment variable
+   whose name in the rtn_scriptsvar field of the rootnode. This
+   environment variable is usually BCPLSCRIPTS and usually refers
+   to directory s in the BCPL root directory.
 3) The root directory specified by the environment variable in
    the rtn_rootvar field of the rootnode.
 

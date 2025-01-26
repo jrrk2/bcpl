@@ -77,9 +77,9 @@ LET start() = VALOF
   plotset()
 
   setcolour(col_white)
-  plotf(5, 50, "s     = "); plotf(50, 50, " %i4*n", s)
-  plotf(5, 35, "a     = %11.8d b = %11.8d size = %11.8d", a, b, size)
-  plotf(5, 20, "limit = "); plotf(50, 20, " %i4*n", limit)
+  drawf(5, 50, "s     = "); drawf(50, 50, " %i4*n", s)
+  drawf(5, 35, "a     = %11.8d b = %11.8d size = %11.8d", a, b, size)
+  drawf(5, 20, "limit = "); drawf(50, 20, " %i4*n", limit)
   updatescreen()
 
   sdldelay(60_000) //Pause for 60 secs

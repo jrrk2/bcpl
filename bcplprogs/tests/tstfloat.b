@@ -24,8 +24,19 @@ LET start() = VALOF
   AND k = a #+ b #- g
   AND l = #+ b
 
+/*
+  FOR i = 0 TO 100 DO
+  { LET fi = sys(Sys_flt, fl_float, i)
+    LET f100 = sys(Sys_flt, fl_float, 100)
+    LET x = sys(Sys_flt, fl_sin, fi #* 2.0 #* 3.14159 #/ f100)
+    LET y = sys(Sys_flt, fl_fix, x #* 1000.0)
+    writef("y=%i5*n", y)
+  }
+RESULTIS 0
+*/
   testno := 0
   errors := 0
+
 
   IF a #<= a DO writef("a<=a*n")
   IF a #>= a DO writef("a>=a*n")

@@ -12,11 +12,12 @@ tracing
 }
 
 MANIFEST {
+// These special characters were last modified on 5/9/2016.
+c_call   = '['; c_apply  = ']'; c_sep = ','; c_skip = '*'' 
+c_lquote = '{'; c_rquote = '}'; c_arg = '#'
+
 s_eof = -1; s_eom = -2; s_def = -3; s_set = -4; s_eval = -5
 s_lquote = -6; s_rquote = -7
-
-c_call   = '['; c_apply  = ']'; c_sep = '\'; c_skip = '`' 
-c_lquote = '{'; c_rquote = '}'; c_arg = '^'
 }
 
 LET start() = VALOF

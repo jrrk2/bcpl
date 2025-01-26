@@ -948,7 +948,7 @@ AND plotscreen() BE
 { LET mx = screenxsize/2
   LET my = screenysize - 70
 
-  fillscreen(col_blue)
+  fillsurf(col_blue)
 
   setcolour(col_lightcyan)
   

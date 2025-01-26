@@ -83,7 +83,7 @@ MANIFEST {
 
 LET start() BE
 { LET argv       = VEC 50
-  AND datv       = VEC 1
+  AND datv       = VEC 2
   AND datstrings = VEC 12
   AND sysin      = input()
   AND sysout     = output()
@@ -123,8 +123,8 @@ LET start() BE
 
     CASE 1:
     CASE 2: FOR r = 0 TO 7 DO bootregs!r := 0
-            bootregs!r_p := mem(rootnode+rtn_lastp)
-            bootregs!r_g := mem(rootnode+rtn_lastg)
+            bootregs!r_p := mem(rootnode+rtn_sysp) // ????
+            bootregs!r_g := mem(rootnode+rtn_sysg)
 
     CASE 3: // In BOOT
     CASE 6: // In sadebug in BOOT
@@ -161,7 +161,7 @@ LET start() BE
   }
   newline()
 
-  { LET st = mem(rootnode+rtn_lastst)
+  { LET st = mem(rootnode+rtn_sysst)
     SWITCHON st INTO
     { DEFAULT: sawritef("Unexpected ST value: %n*n", st); ENDCASE
       CASE 0:  sawritef("while in user code -- interrupts enabled*n"); ENDCASE
@@ -203,6 +203,7 @@ AND memdatstamp(v) = VALOF
  
   v!0 := mem(tv+0)
   v!1 := mem(tv+1)
+  v!2 := mem(tv+2) // For compatibility with old dat format
 
   RESULTIS TRUE
 }
@@ -489,8 +490,8 @@ AND dumprootnode() BE
   writef("  klib       %iA*n", mem(rtn_klib+rootnode))
   writef("  abortcode  %iA*n", mem(rtn_abortcode+rootnode))
   writef("  context    %iA*n", mem(rtn_context+rootnode))
-  writef("  lastp      %iA*n", mem(rtn_lastp+rootnode))
-  writef("  lastg      %iA*n", mem(rtn_lastg+rootnode))
+  writef("  sysp       %iA*n", mem(rtn_sysp+rootnode))
+  writef("  sysg       %iA*n", mem(rtn_sysg+rootnode))
   writef("  days       %iA*n", mem(rtn_days+rootnode))
   writef("  msecs      %iA*n", mem(rtn_msecs+rootnode))
   writef("  idletcb    %iA*n", mem(rtn_idletcb+rootnode))
@@ -781,7 +782,7 @@ AND wrcortns(tcb) BE
   { TEST cptr=cont(gptr+g_currco)
     THEN TEST 1<=mem(rootnode+rtn_context)<=2 & // SIGINT or SIGSEGV
               mem(rootnode+rtn_crntask)=tcb
-         THEN pptr := mem(rootnode+rtn_lastp)
+         THEN pptr := mem(rootnode+rtn_sysp)
          ELSE pptr := mem(regs+r_p)>>2
     ELSE pptr := cont(cptr+co_pptr)>>2
 
@@ -853,17 +854,21 @@ AND wrframe() BE
 }
 
 AND writearg(n) BE TEST isfun(n)
-                   THEN { LET s = (n>>2)-3  // MR 1/11/03
-//FOR i = 1 TO 11 DO writef("i=%i2  ch=%n*n", 
-                          wrch(' ')
-                          FOR i = 1 TO memb(s, 0) DO wrch(memb(s, i))
-                          wrch(' ')
+                   THEN { // Write the function name right justified
+                          LET s = (n>>2)-3  // MR 1/11/03
+                          LET len = 0
+                          FOR i = 1 TO 11 DO
+                          { IF memb(s, i)='*s' BREAK
+                            len := len+1
+                          }
+                          FOR i = len+1 TO 15 DO wrch('*s')
+                          FOR i = 1 TO len DO wrch(memb(s, i))
                         }
                    ELSE TEST globword<=n<=globword+1000  // MR 1/11/03
-                        THEN writef("   #G%z3#    ", n-globword)
+                        THEN writef("         #G%z3#", n-globword)
                         ELSE TEST -10_000_000<=n<=10_000_000
-                             THEN writef(" %iB ", n)
-                             ELSE writef("  #x%x8 ", n)
+                             THEN writef("    %11i", n)
+                             ELSE writef("     #x%8x", n)
 
 AND isfun(f) = VALOF
 { LET a = f>>2
@@ -978,7 +983,7 @@ AND selectask(id) BE
   // leaving cinterp, otherwise select the tcb for task id
   // and the registers corresponding to that task.
   LET tasktab = mem(rtn_tasktab+rootnode)
-  AND st      = mem(rootnode+rtn_lastst)  // The latest ST value
+  AND st      = mem(rootnode+rtn_sysst)   // The latest ST value
   AND ctxt    = mem(rootnode+rtn_context) // The context
   LET t = 0                               // To hold the TCB address
 

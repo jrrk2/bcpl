@@ -2,32 +2,20 @@ SECTION "prog"
 
 GET "libhdr"
 
-LET start() = VALOF {
-  LET argv = VEC 50
-  LET buf  = VEC 50
-  LET len  = 0
-
-  UNLESS rdargs("x,y/K,sw/S", argv, 50) DO
-  { writes("Bad arguments for PROG*n")
-    RESULTIS 20
-  }
-  writes("The arguments were:*n*n")
-
-  writef("arg1: keyword x:    %s*n", argv!0 -> argv!0, "<not given>")
-  writef("arg1: keyword y/K:  %s*n", argv!1 -> argv!1, "<not given>")
-  writef("arg1: keyword sw/S: %s*n", argv!2 -> "TRUE", "FALSE")
-
-  writes("*nType a line of input: ")
-  deplete(cos)
-
-  { LET ch = rdch()
-    IF ch='*n' | ch=endstreamch BREAK
-    len := len+1
-    buf%len := ch
-  } REPEAT
-
-  buf%0 := len
-
-  writef("You typed: %s*n*n", buf)
+LET start() = VALOF
+{ wrs("ABCD*n")
+  wrx(#x3770, 6)
+  wrs("XXX*n")
   RESULTIS 0
 }
+
+AND wrs(s) BE FOR i = 1 TO s%0 DO sawrch(s%i)
+
+AND wrx(n, d) BE
+{ IF d>1 DO wrx(n>>4, d-1)
+  sawrch((n&15)!TABLE '0','1','2','3','4','5','6','7',
+                      '8','9','A','B','C','D','E','F' )
+}
+
+
+

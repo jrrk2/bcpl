@@ -4,19 +4,61 @@ It was also used as a test harness to help design a 3d model
 of a Tigermoth for the flight simulator.
 
 Implemented by Martin Richards (c) January 2012
+
+History
+
+12/03/2018
+Extensively modified to use floating point and the new FLT feature.
+
+
+Notes
+
+There are three coordinate systems.
+
+(t,w,l) are for points of the model in the direction of thrust, left wing
+        and lift.
+
+(n,w,h) are world coordinates in direction north, west and up.
+
+(sx,sy,sz) are coordinates of points on the screen with distance to the
+           right in sx, distance up in sy and depth in sz, greater depths
+           are more negative.
+
+The model can be rotated about its origin using a rotation matrix as follows
+
+     ( n )    ( ctn  cwn  cln)   ( t )
+     ( w ) =  ( ctw  cww  clw) x ( w )
+     ( h )    ( cth  cwh  clh)   ( l )
+
+Note that (ctn, ctw, cth) are the world coordinate of (1,0,0) in the model,
+and       (cwn, cww, cwh) are the world coordinate of (0,1,0) in the model,
+and       (cln, clw, clh) are the world coordinate of (0,0,1) in the model.
+
+The elements of the rotation matrix are all direction cosines. For
+instance, ctn is the cosine of the angle between the model's t axis
+and north.
+
+The model is viewed by the eye located on the north-south axis at a
+distance eyedist south of the world origin. It is oriented so that
+points on the west-east axis appear on a horizontal line halfway down
+the screen.  The field of view is chosen so that a horizontal line of
+length eyedist in a plane eyedist from the eye will exactly fit the
+width of the screen. Points on the have horizontal and vertical positions
+scaled by the factor eyedist/d where d is the z distance of the point
+from the eye.
+
+
 */
 
 GET "libhdr"
 GET "sdl.h"
-GET "sdl.b"          // Insert the library source code
+GET "sdl.b"          // Insert the SDL BCPL library
 .
 GET "libhdr"
 GET "sdl.h"
 
 MANIFEST {
-  One = 1_000000     // Direction cosines scaling factor
-                     // ie 6 decimal digits after the decimal point.
-  Sps = 20           // Steps per second
+  FLT Sps = 20.0     // Steps per second
 }
 
 GLOBAL {
@@ -27,297 +69,258 @@ GLOBAL {
 
   stepping     // =FALSE if not rotating the object
 
-  c_elevator   // Controls
-  c_aileron
-  c_rudder
-  c_thrust
+  FLT c_elevator  // Range -1.0 to +1.0
+  FLT c_aileron   // Range -1.0 to +1.0
+  FLT c_rudder    // Range -1.0 to +1.0
 
-  ctx; cty; ctz    // Direction cosines of direction t
-  cwx; cwy; cwz    // Direction cosines of direction w
-  clx; cly; clz    // Direction cosines of direction l
+  FLT ctn; FLT ctw; FLT cth    // Direction cosines of direction t
+  FLT cwn; FLT cww; FLT cwh    // Direction cosines of direction w (left)
+  FLT cln; FLT clw; FLT clh    // Direction cosines of direction l
 
-  cetx; cety; cetz // Eye direction cosines of direction t
-  cewx; cewy; cewz // Eye direction cosines of direction w
-  celx; cely; celz // Eye direction cosines of direction l
+  FLT eyedist                  // Eye x or y distance from aircraft
 
-  eyex; eyey; eyez // Relative position of the eye
-  eyedist          // Eye x or y distance from aircraft
+  FLT rtdot; FLT rwdot; FLT rldot // Model rotation rates about t, w and l axes
 
-  rtdot; rwdot; rldot // Rotation rates about t, w and l axes
-
-  // Rotational forces are scaled with 6 digits after the decimal point
-  // as are direction cosines.
-  rft     // Rotational force about t axis
-  rfw     // Rotational force about w axis
-  rfl     // Rotational force about l axis
-
-  cdrawquad3d
-  cdrawtriangle3d
+  cdrawtriangle3d   // (x1,y1,z1, x2,y2,z2, x3,y3,z3)
+  cdrawquad3d       // (x1,y1,z1, x2,y2,z2, x3,y3,z3, x4,y4,z4)
+                    // All floating point values.
 }
 
-// Insert the definitition of drawtigermoth()
+// Insert the definition of drawtigermoth()
 GET "drawtigermoth.b"
 
-AND inprod(a,b,c, x,y,z) =
+LET inprod(FLT a, FLT b, FLT c,
+           FLT x, FLT y, FLT z) =
   // Return the cosine of the angle between two unit vectors.
-  muldiv(a, x, One) + muldiv(b, y, One) + muldiv(c, z, One)
+  a*x + b*y + c*z
 
-AND rotate(t, w, l) BE
+AND rotate(FLT t, FLT w, FLT l) BE
 { // Rotate the orientation of the aircraft
   // t, w and l are assumed to be small and cause
   // rotation about axis t, w, l. Positive values cause
   // anti-clockwise rotations about their axes.
 
-  LET tx = inprod(One, -l,  w, ctx,cwx,clx)
-  LET wx = inprod(  l,One, -t, ctx,cwx,clx)
-  LET lx = inprod( -w,  t,One, ctx,cwx,clx)
+  LET FLT tn = inprod(1.0,  -l,   w,  ctn,cwn,cln)
+  LET FLT wn = inprod(  l, 1.0,  -t,  ctn,cwn,cln)
+  LET FLT ln = inprod( -w,   t, 1.0,  ctn,cwn,cln)
 
-  LET ty = inprod(One, -l,  w, cty,cwy,cly)
-  LET wy = inprod(  l,One, -t, cty,cwy,cly)
-  LET ly = inprod( -w,  t,One, cty,cwy,cly)
+  LET FLT tw = inprod(1.0,  -l,   w,  ctw,cww,clw)
+  LET FLT ww = inprod(  l, 1.0,  -t,  ctw,cww,clw)
+  LET FLT lw = inprod( -w,   t, 1.0,  ctw,cww,clw)
 
-  LET tz = inprod(One, -l,  w, ctz,cwz,clz)
-  LET wz = inprod(  l,One, -t, ctz,cwz,clz)
-  LET lz = inprod( -w,  t,One, ctz,cwz,clz)
+  LET FLT th = inprod(1.0,  -l,   w,  cth,cwh,clh)
+  LET FLT wh = inprod(  l, 1.0,  -t,  cth,cwh,clh)
+  LET FLT lh = inprod( -w,   t, 1.0,  cth,cwh,clh)
 
-  ctx, cty, ctz := tx, ty, tz
-  cwx, cwy, cwz := wx, wy, wz
-  clx, cly, clz := lx, ly, lz
+  ctn, ctw, cth := tn, tw, th
+  cwn, cww, cwh := wn, ww, wh
+  cln, clw, clh := ln, lw, lh
 
-  adjustlength(@ctx);      adjustlength(@cwx);      adjustlength(@clx) 
-  adjustortho(@ctx, @cwx); adjustortho(@ctx, @clx); adjustortho(@cwx, @clx)
+  // Make minor corrections to ensure that the axes are orthogonal and
+  // of unit length.
+  adjustlength(@ctn);      adjustlength(@cwn);      adjustlength(@cln) 
+  adjustortho(@ctn, @cwn); adjustortho(@ctn, @cln); adjustortho(@cwn, @cln)
+}
+
+AND radius(FLT x, FLT y, FLT z) = VALOF
+{ LET FLT rsq = x*x + y*y + z*z
+  RESULTIS sys(Sys_flt, fl_sqrt, rsq)
 }
 
 AND adjustlength(v) BE
 { // This helps to keep vector v of unit length
-  LET x, y, z = v!0, v!1, v!2
-  LET corr = One + (inprod(x,y,z, x,y,z) - One)/2
-  v!0 := muldiv(x, One, corr)
-  v!1 := muldiv(y, One, corr)
-  v!2 := muldiv(z, One, corr)
+  LET FLT x, FLT y, FLT z = v!0, v!1, v!2
+  LET FLT r = radius(x,y,z)
+  v!0 := x / r
+  v!1 := y / r
+  v!2 := z / r
 }
 
 AND adjustortho(a, b) BE
 { // This helps to keep the unit vector b orthogonal to a
-  LET a0, a1, a2 = a!0, a!1, a!2
-  LET b0, b1, b2 = b!0, b!1, b!2
-  LET corr = inprod(a0,a1,a2, b0,b1,b2)
-  b!0 := b0 - muldiv(a0, corr, One)
-  b!1 := b1 - muldiv(a1, corr, One)
-  b!2 := b2 - muldiv(a2, corr, One)
+  LET FLT a0, FLT a1, FLT a2 = a!0, a!1, a!2
+  LET FLT b0, FLT b1, FLT b2 = b!0, b!1, b!2
+  LET FLT corr = inprod(a0,a1,a2, b0,b1,b2)
+  b!0 := b0 - a0 * corr
+  b!1 := b1 - a1 * corr
+  b!2 := b2 - a2 * corr
 }
 
 LET step() BE
 { // Apply rotational forces
-  rtdot := -c_aileron  * 200 / Sps
-  rwdot := -c_elevator * 200 / Sps
-  rldot :=  c_rudder   * 200 / Sps
+  rtdot := -c_aileron  * 20.0 / Sps
+  rwdot := -c_elevator * 20.0 / Sps
+  rldot :=  c_rudder   * 20.0 / Sps
 
   rotate(rtdot/Sps, rwdot/Sps, rldot/Sps)
 }
 
 AND plotcraft() BE
-{ IF depthscreen FOR i = 0 TO screenxsize*screenysize-1 DO
-    depthscreen!i := maxint
-
+{ LET FLT z, FLT d = 0.0, 5.0
+  IF depthv FOR i = 0 TO screenxsize*screenysize-1 DO
+    depthv!i := maxdepth
+/*
+                               //                                 l   t
+                               //                                 C  A
+  setcolour(maprgb(255,  0, 0))// Red,   orthogonal to t          | /
+  cdrawtriangle3d(  z,  z,  z, // O                               |/
+                    z,  d,  z, // B                       wB------O
+                    z,  z,  d) // C
+  setcolour(maprgb(  0,255, 0))// Green, orthogonal to w
+  cdrawtriangle3d(  z,  z,  z, // O
+                    z,  z,  d, // C
+                    d,  z,  z) // A
+  setcolour(maprgb(  0, 0,255))// Blue, orthogonal to l
+  cdrawtriangle3d(  z,  z,  z, // O
+                    d,  z,  z, // A
+                    z,  d,  z) // B
+*/
   IF object=0 DO
-  { // Simple aircraft
-    setcolour(maprgb(64,128,64))  // Fuselage
-    cdrawtriangle3d(6_000,0,0,  2_000,0,-1_000, -2_000,0,2_000)
-    setcolour(maprgb(40,100,40))
-    cdrawtriangle3d(2_000,0,-1_000, -2_000,0,2_000, -12_000,0,0)
-    setcolour(maprgb(255,255,255))
-    cdrawtriangle3d(2_000,0, 1_000, -2_000,0,2_000, 0_800,0,2_000)
+  { // Simple missile
 
-    setcolour(maprgb(255,0,0))  // Port wing -- Red
-    cdrawtriangle3d(2_500,0,0, -2_500,0,0,  -2_000, 18_000,2_000)
-    setcolour(maprgb(0,255,0))  // Starboard wing -- Green
-    cdrawtriangle3d(2_500,0,0, -2_500,0,0,  -2_000,-18_000,2_000)
+    // Directions xyz  (right hand orientation)
+    
+    //   t  direction of thrust
+    //   w  direction of left wing
+    //   l  direction of lift
 
-    setcolour(maprgb(255,0,255))  // Stabliser
-    cdrawtriangle3d(-9_000,0,0, -12_000,0,0,  -13_000,-4_000,0)
-    setcolour(maprgb(255,255,0))
-    cdrawtriangle3d(-9_000,0,0, -12_000,0,0,  -13_000, 4_000,0)
+    //  The body is a hollow square tube of diameter 2.0
+    //  and length 10.0
+    setcolour(maprgb(64,128,64))    // Body base
+    cdrawquad3d(-10.0,  1.0, -1.0,  //  G                        A-------------B
+                  0.0,  1.0, -1.0,  //  C                       /|            /|
+                  0.0, -1.0, -1.0,  //  D                      / |           / |
+                -10.0, -1.0, -1.0)  //  H                     /  |      o   /  |
+    setcolour(maprgb(40, 80,140))   // Body right side       /   |         /   |
+    cdrawquad3d(-10.0, -1.0, -1.0,  //  H                   /    |        /    |
+                  0.0, -1.0, -1.0,  //  D                  /     C-------/-----D
+                  0.0, -1.0,  1.0,  //  B                 /     /       /     /
+                -10.0, -1.0,  1.0)  //  F                /     /       /     /
+    setcolour(maprgb(140, 30,100))  // Body top         E-------------F     /
+    cdrawquad3d(-10.0,  1.0,  1.0,  //  E               |    /        |    /
+                  0.0,  1.0,  1.0,  //  A               |   /         |   /
+                  0.0, -1.0,  1.0,  //  B               |  /          |  /
+                -10.0, -1.0,  1.0)  //  F               | /           | /
+    setcolour(maprgb(240, 180, 30)) // Body left side   |/            |/
+    cdrawquad3d(-10.0,  1.0, -1.0,  //  G               G-------------H
+                  0.0,  1.0, -1.0,  //  C
+                  0.0,  1.0,  1.0,  //  A
+                -10.0,  1.0,  1.0)  //  E
 
-    setcolour(maprgb(0,255,255))  // Fin
-    cdrawtriangle3d(-9_000,0,0_600, -12_000,0,0,  -13_000,0,4_000)
-
+    // The nose is a pyramid of length 12.0 on a 2.0x2.0 square base.
+    
+    setcolour(maprgb(255,  0,255))     // Nose base
+    cdrawtriangle3d(  0.0,  1.0, -1.0,
+                     12.0,  0.0,  0.0,
+                      0.0, -1.0, -1.0)
+    setcolour(maprgb(255,100, 55))     // Nose right side
+    cdrawtriangle3d(  0.0, -1.0, -1.0,
+                     12.0,  0.0,  0.0,
+                      0.0, -1.0,  1.0)
+    setcolour(maprgb(255,  0,255))     // Nose top
+    cdrawtriangle3d(  0.0,  1.0,  1.0,
+                     12.0,  0.0,  0.0,
+                      0.0, -1.0,  1.0)
+    setcolour(maprgb( 55,150,255))     // Nose left side
+    cdrawtriangle3d(  0.0,  1.0, -1.0,
+                     12.0,  0.0,  0.0,
+                      0.0,  1.0,  1.0)
   }
 
   IF object=1 DO
-  { // Create a coloured cube with side length 2s
-    LET s = 10_000
-
-    setcolour(maprgb(0,0,0))                // Front
-    cdrawquad3d(s,-s,s, s,s,s, s,s,-s, s,-s,-s)
-    setcolour(maprgb(255,255,255))          // Back
-    cdrawquad3d(-s,-s,s, -s,s,s, -s,s,-s, -s,-s,-s)
-    setcolour(maprgb(255,0,0))              // Left
-    cdrawquad3d( s,s,s,  s,s,-s, -s,s,-s, -s,s,s)
-    setcolour(maprgb(0,255,0))              // Right
-    cdrawquad3d( s,-s,s,  s,-s,-s, -s,-s,-s, -s,-s,s)
-  }
-
-  IF object=2 DO
-  { LET s = 10_000
-    LET r =  muldiv(s, c_thrust, 32768)
-
-    // top
-    setcolour(maprgb(0,0,0))
-    cdrawquad3d( r,0,s,  0,r,s,  -r,0,s,  0,-r,s)
-
-    // top wings
-    setcolour(maprgb(255,0,0))
-    cdrawtriangle3d( r, 0, s,  s, 0, s,  s, 0, r) // N
-    setcolour(maprgb(0,255,0))
-    cdrawtriangle3d( 0, r, s,  0, s, s,  0, s, r) // W
-    setcolour(maprgb(255,0,0))
-    cdrawtriangle3d(-r, 0, s, -s, 0, s, -s, 0, r) // S
-    setcolour(maprgb(0,255,0))
-    cdrawtriangle3d( 0,-r, s,  0,-s, s,  0,-s, r) // E
-
-    // Sides  
-    setcolour(maprgb(128,0,0))
-    cdrawquad3d(s,0,r,  s,r,0,  s,0,-r,  s,-r,0)     // N
-
-    setcolour(maprgb(255,128,0))
-    cdrawquad3d(0,s,r,  r,s,0,  0,s,-r,  -r,s,0)     // W
-
-    setcolour(maprgb(255,0,128))
-    cdrawquad3d(-s,0,r,  -s,r,0,  -s,0,-r,  -s,-r,0) // S
-
-    setcolour(maprgb(255,128,128))
-    cdrawquad3d(0,-s,r,  r,-s,0,  0,-s,-r,  -r,-s,0) // W
-
-    // Centre wings
-    setcolour(maprgb(255,128,0))
-    cdrawtriangle3d( s, s, 0,  r, s, 0,  s, r, 0) // NW
-    setcolour(maprgb(0,255,128))
-    cdrawtriangle3d(-s, s, 0, -s, r, 0, -r, s, 0) // SW
-    setcolour(maprgb(128,0,255))
-    cdrawtriangle3d(-s,-s, 0, -r,-s, 0, -s,-r, 0) // SE
-    setcolour(maprgb(127,255,255))
-    cdrawtriangle3d( s,-s, 0,  s,-r, 0,  r,-s, 0) // NE
-
-    // bottom wings
-    setcolour(maprgb(255,0,0))
-    cdrawtriangle3d( r, 0,-s,  s, 0,-s,  s, 0,-r) // N
-    setcolour(maprgb(0,255,0))
-    cdrawtriangle3d( 0, r,-s,  0, s,-s,  0, s,-r) // W
-    setcolour(maprgb(255,0,255))
-    cdrawtriangle3d(-r, 0,-s, -s, 0,-s, -s, 0,-r) // S
-    setcolour(maprgb(0,255,255))
-    cdrawtriangle3d( 0,-r,-s,  0,-s,-s,  0,-s,-r) // E
-
-    // Bottom
-    setcolour(maprgb(128,128,128))
-    cdrawquad3d( r,0,-s,  0,r,-s,  -r,0,-s,  0,-r,-s)
-  }
-
-  IF object=3 DO
   { // Tigermoth
     drawtigermoth()
   }
 }
 
-AND cdrawquad3d(x1,y1,z1, x2,y2,z2, x3,y3,z3, x4,y4,z4) BE
-{ LET rx1 = inprod(x1,y1,z1, ctx,cwx,clx)
-  LET ry1 = inprod(x1,y1,z1, cty,cwy,cly)
-  LET rz1 = inprod(x1,y1,z1, ctz,cwz,clz)
-
-  LET rx2 = inprod(x2,y2,z2, ctx,cwx,clx)
-  LET ry2 = inprod(x2,y2,z2, cty,cwy,cly)
-  LET rz2 = inprod(x2,y2,z2, ctz,cwz,clz)
-
-  LET rx3 = inprod(x3,y3,z3, ctx,cwx,clx)
-  LET ry3 = inprod(x3,y3,z3, cty,cwy,cly)
-  LET rz3 = inprod(x3,y3,z3, ctz,cwz,clz)
-
-  LET rx4 = inprod(x4,y4,z4, ctx,cwx,clx)
-  LET ry4 = inprod(x4,y4,z4, cty,cwy,cly)
-  LET rz4 = inprod(x4,y4,z4, ctz,cwz,clz)
-
-  LET sx1,sy1,sz1 = ?,?,?
-  LET sx2,sy2,sz2 = ?,?,?
-  LET sx3,sy3,sz3 = ?,?,?
-  LET sx4,sy4,sz4 = ?,?,?
-
-  UNLESS screencoords(rx1-eyex, ry1-eyey, rz1-eyez, @sx1) RETURN
-  UNLESS screencoords(rx2-eyex, ry2-eyey, rz2-eyez, @sx2) RETURN
-  UNLESS screencoords(rx3-eyex, ry3-eyey, rz3-eyez, @sx3) RETURN
-  UNLESS screencoords(rx4-eyex, ry4-eyey, rz4-eyez, @sx4) RETURN
-
-  drawquad3d(sx1,sy1,sz1, sx2,sy2,sz2, sx3,sy3,sz3, sx4,sy4,sz4)
+AND cdrawquad3d(FLT t1, FLT w1, FLT l1,
+                FLT t2, FLT w2, FLT l2,
+                FLT t3, FLT w3, FLT l3,
+                FLT t4, FLT w4, FLT l4) BE
+{ cdrawtriangle3d(t1,w1,l1,  t2,w2,l2,  t3,w3,l3)
+  cdrawtriangle3d(t1,w1,l1,  t4,w4,l4,  t3,w3,l3)
 }
 
-AND cdrawtriangle3d(x1,y1,z1, x2,y2,z2, x3,y3,z3) BE
-{ LET rx1 = inprod(x1,y1,z1, ctx,cwx,clx)
-  LET ry1 = inprod(x1,y1,z1, cty,cwy,cly)
-  LET rz1 = inprod(x1,y1,z1, ctz,cwz,clz)
+AND cdrawtriangle3d(FLT t1, FLT w1, FLT l1,
+                    FLT t2, FLT w2, FLT l2,
+                    FLT t3, FLT w3, FLT l3) BE
+{ LET FLT rn1 = t1*ctn + w1*cwn + l1*cln        // Rotated coordinates
+  LET FLT rw1 = t1*ctw + w1*cww + l1*clw
+  LET FLT ru1 = t1*cth + w1*cwh + l1*clh
 
-  LET rx2 = inprod(x2,y2,z2, ctx,cwx,clx)
-  LET ry2 = inprod(x2,y2,z2, cty,cwy,cly)
-  LET rz2 = inprod(x2,y2,z2, ctz,cwz,clz)
+  LET FLT rn2 = t2*ctn + w2*cwn + l2*cln
+  LET FLT rw2 = t2*ctw + w2*cww + l2*clw
+  LET FLT ru2 = t2*cth + w2*cwh + l2*clh
 
-  LET rx3 = inprod(x3,y3,z3, ctx,cwx,clx)
-  LET ry3 = inprod(x3,y3,z3, cty,cwy,cly)
-  LET rz3 = inprod(x3,y3,z3, ctz,cwz,clz)
+  LET FLT rn3 = t3*ctn + w3*cwn + l3*cln
+  LET FLT rw3 = t3*ctw + w3*cww + l3*clw
+  LET FLT ru3 = t3*cth + w3*cwh + l3*clh
 
-  LET sx1,sy1,sz1 = ?,?,?
-  LET sx2,sy2,sz2 = ?,?,?
-  LET sx3,sy3,sz3 = ?,?,?
+  LET FLT sx1, FLT sy1, FLT sz1 = ?,?,?         // Screen coordinates
+  LET FLT sx2, FLT sy2, FLT sz2 = ?,?,?
+  LET FLT sx3, FLT sy3, FLT sz3 = ?,?,?
 
-  UNLESS screencoords(rx1-eyex, ry1-eyey, rz1-eyez, @sx1) RETURN
-  UNLESS screencoords(rx2-eyex, ry2-eyey, rz2-eyez, @sx2) RETURN
-  UNLESS screencoords(rx3-eyex, ry3-eyey, rz3-eyez, @sx3) RETURN
+  UNLESS screencoords(rn1, rw1, ru1, @sx1) RETURN
+  UNLESS screencoords(rn2, rw2, ru2, @sx2) RETURN
+  UNLESS screencoords(rn3, rw3, ru3, @sx3) RETURN
 
-  drawtriangle3d(sx1,sy1,sz1, sx2,sy2,sz2, sx3,sy3,sz3)
+//newline()
+//writef("t1=%13.3f w1=%13.3f l1=%13.3f*n", t1, w1, l1)
+//writef("t2=%13.3f w2=%13.3f l2=%13.3f*n", t2, w2, l2)
+//writef("t3=%13.3f w3=%13.3f l3=%13.3f*n", t3, w3, l3)
+
+//writef("ctn=%6.3f cwn=%6.3f cln=%6.3f radius=%8.3f*n",
+//        ctn, cwn, cln, radius(ctn,cwn,cln))
+//writef("ctw=%6.3f cww=%6.3f cly=%6.3f radius=%8.3f*n",
+//        ctw, cww, clw, radius(ctw,cww,clw))
+//writef("cth=%6.3f cwh=%6.3f clz=%6.3f radius=%8.3f*n",
+//        cth, cwh, clh, radius(cth,cwh,clh))
+
+//writef("sx1=%13.3f sy1=%13.3f sz1=%13.3f*n", sx1, sy1, sz1)
+//writef("sx2=%13.3f sy2=%13.3f sz2=%13.3f*n", sx2, sy2, sz2)
+//writef("sx3=%13.3f sy3=%13.3f sz3=%13.3f*n", sx3, sy3, sz3)
+
+  drawtriangle3d(sx1, sy1, sz1,
+                 sx2, sy2, sz2,
+                 sx3, sy3, sz3)
+
+//updatescreen()
+//delay(1000)
+//abort(1000)
 }
 
-AND screencoords(x,y,z, v) = VALOF
-{ // If the point (x,y,z) is in view, set v!0, v!1 and v!2 to
-  // the screen coordinates and depth and return TRUE
-  // otherwise return FALSE
-  LET sx = inprod(x,y,z, cewx,cewy,cewz) // Horizontal
-  LET sy = inprod(x,y,z, celx,cely,celz) // Vertical
-  LET sz = inprod(x,y,z, cetx,cety,cetz) // Depth
-  LET screensize = screenxsize>=screenysize -> screenxsize, screenysize
+AND screencoords(FLT n, FLT w, FLT u, v) = VALOF
+{ // This calculates the screen coordinate of point (n,w,u) when viewed
+  // by the eye. If the point is in view, it sets v!0, v!1 and v!2 to
+  // the screen and depths coordinates (floating point) and return TRUE.
 
-//writef("screencoords: x=%9.3d  y=%9.3d  z=%9.3d*n", x,y,z)
-//writef("cetx=%9.6d  cety=%9.6d  cetz=%9.6d*n", cetx,cety,cetz)
-//writef("cewx=%9.6d  cewy=%9.6d  cewz=%9.6d*n", cewx,cewy,cewz)
-//writef("celx=%9.6d  cely=%9.6d  celz=%9.6d*n", celx,cely,celz)
-//writef("eyex=%9.3d  eyey=%9.3d  eyez=%9.3d*n", eyex,eyey,eyez)
-  // Test that the point is in view, ie at least 1.000ft in front
-  // and no more than about 27 degrees (inverse tan 1/2) from the
-  // direction of view.
-  IF sz<1_000 &
-    muldiv(sz, sz, 2000) >= muldiv(sx, sx, 1000) + muldiv(sy, sy, 1000)
-    RESULTIS FALSE
+  LET FLT d = eyedist + n     // The n distance from the eye to the point
+  LET FLT scale = eyedist/2.0 // Giving a field of view of about 27 degrees.
+  LET FLT sfac = fscreenxsize/scale // x and y magnification at n=0
+  LET pfac = d >= 10.0 -> eyedist/d, 1.0 // Perspective factor
+  
+  LET FLT sx = fscreencentrex - (w * sfac)
+  LET FLT sy = fscreencentrey + (u * sfac)
+  LET FLT sz =  -(n+eyedist)
+  
+  //writef("  n=%13.3f  w=%13.3f  u=%13.3f    sfac=%13.3f  pfac=%13.3f*n",
+  //          n, w, u,  sfac, pfac)
 
-  // A point screensize pixels away from the centre of the screen is
-  // 45 degrees from the direction of view.
-  // Note that many pixels in this range are off the screen.
-  v!0 := -muldiv(sx, screensize, sz)*2  + screenxsize/2
-  v!1 := +muldiv(sy, screensize, sz)*2  + screenysize/2
-  v!2 := sz // This distance into the screen in arbitrary units, used
-            // for hidden surface removal.
-//writef("in view  position=(x=%i4  y=%i4  depth=%n)*n", v!0, v!1, sz)
+  IF d<10.0 RESULTIS FALSE // Not sufficiently in front.
+
+  // Apply the perspective transform
+  sx := sx * pfac
+  sy := sy * pfac
+
+v!0, v!1, v!2 := sx, sy, sz
+//writef("v!0= %13.3f  v!1= %13.3f  v!2= %13.3f*n",  sx,  sy,  sz)
 //abort(1119)
   RESULTIS TRUE
 }
 
 AND plotscreen() BE
 { fillsurf(maprgb(100,100,255))
-  seteyeposition()
   plotcraft()
-}
-
-AND seteyeposition() BE
-{ cetx, cety, cetz :=  One,   0,   0
-  cewx, cewy, cewz :=    0, One,   0
-  celx, cely, celz :=    0,   0, One
-  eyex, eyey, eyez :=  -eyedist,   0, 0   // Relative eye position
 }
 
 AND processevents() BE WHILE getevent() SWITCHON eventtype INTO
@@ -332,7 +335,8 @@ AND processevents() BE WHILE getevent() SWITCHON eventtype INTO
                 LOOP
 
       CASE 'S': // Select next object to display
-                object := (object + 1) MOD 4
+                object := (object + 1) MOD 2
+                writef("*nObject %n selected*n", object)
                 LOOP
 
       CASE 'P': // Toggle stepping
@@ -340,62 +344,53 @@ AND processevents() BE WHILE getevent() SWITCHON eventtype INTO
                 LOOP
 
       CASE 'R': // Reset the orientation and rotation rate
-                ctx, cty, ctz := One,   0,   0
-                cwx, cwy, cwz :=   0, One,   0
-                clx, cly, clz :=   0,   0, One
-                rtdot, rwdot, rldot := 0, 0, 0
+                ctn, ctw, cth       :=  0.0, 1.0, 0.0
+                cwn, cww, cwh       := -1.0, 0.0, 0.0
+                cln, clw, clh       :=  0.0, 0.0, 1.0
+		
+                rtdot, rwdot, rldot :=  0.0, 0.0, 0.0
                 LOOP
 
       CASE 'N': // Reduce eye distance
-                eyedist := eyedist*5/6
-                IF eyedist<65_000 DO eyedist := 65_000
+                eyedist := eyedist*5 / 6
+                IF eyedist<5.0 DO eyedist := 5.0
                 LOOP
 
       CASE 'F': // Increase eye distance
-                eyedist := eyedist*6/5
-                LOOP
-
-      CASE 'Z': c_thrust := c_thrust-2048
-                IF c_thrust<0 DO c_thrust := 0
-                writef("c_thrust=%n*n", c_thrust)
-                LOOP
-
-      CASE 'X': c_thrust := c_thrust+2048
-                IF c_thrust>32768 DO c_thrust := 32768
-                writef("c_thrust=%n*n", c_thrust)
+                eyedist := eyedist * 6 / 5
                 LOOP
 
       CASE ',':
-      CASE '<': c_rudder := c_rudder - 4096
-                IF c_rudder<-32768 DO c_rudder := -32768
-                writef("c_rudder=%n*n", c_rudder)
+      CASE '<': c_rudder := c_rudder - 0.05
+                IF c_rudder<-1.0 DO c_rudder := -1.0
+                //writef("c_rudder=%6.3f*n", c_rudder)
                 LOOP
 
       CASE '.':
-      CASE '>': c_rudder := c_rudder + 4096
-                IF c_rudder> 32768 DO c_rudder := 32768
-                writef("c_rudder=%n*n", c_rudder)
+      CASE '>': c_rudder := c_rudder + 0.05
+                IF c_rudder> 1.0 DO c_rudder := 1.0
+                //writef("c_rudder=%6.3f*n", c_rudder)
                 LOOP
 
       CASE sdle_arrowup:
-                c_elevator := c_elevator+4096
-                IF c_elevator> 32768 DO c_elevator := 32768
-                writef("c_elevator=%n*n", c_elevator)
+                c_elevator := c_elevator+0.05
+                IF c_elevator> 1.0 DO c_elevator := 1.0
+                //writef("c_elevator=%6.3f*n", c_elevator)
                 LOOP
       CASE sdle_arrowdown:
-                c_elevator := c_elevator-4096
-                IF c_elevator< -32768 DO c_elevator := -32768
-                writef("c_elevator=%n*n", c_elevator)
+                c_elevator := c_elevator-0.05
+                IF c_elevator< -1.0 DO c_elevator := -1.0
+                //writef("c_elevator=%6.3f*n", c_elevator)
                 LOOP
       CASE sdle_arrowright:
-                c_aileron := c_aileron+4096
-                IF c_aileron> 32768 DO c_aileron := 32768
-                writef("c_aileron=%n*n", c_aileron)
+                c_aileron := c_aileron+0.05
+                IF c_aileron> 1.0 DO c_aileron := 1.0
+                //writef("c_aileron=%6.3f*n", c_aileron)
                 LOOP
       CASE sdle_arrowleft:
-                c_aileron := c_aileron-4096
-                IF c_aileron< -32768 DO c_aileron := -32768
-                writef("c_aileron=%n*n", c_aileron)
+                c_aileron := c_aileron-0.05
+                IF c_aileron< -1.0 DO c_aileron := -1.0
+                //writef("c_aileron=%6.3f*n", c_aileron)
                 LOOP
     }
 
@@ -406,22 +401,49 @@ AND processevents() BE WHILE getevent() SWITCHON eventtype INTO
 }
 
 LET start() = VALOF
-{ // The initial direction cosines giving the orientation of
-  // the object.
-  ctx, cty, ctz := One,   0,   0  // The cosines are scaled with
-  cwx, cwy, cwz :=   0, One,   0  // six decimal digits
-  clx, cly, clz :=   0,   0, One  // after to decimal point.
+{ LET argv = VEC 50
 
-  eyedist := 120_000  // Eye distance from the object.
-  object := 3  // Tigermoth
+  UNLESS rdargs("object/n", argv, 50) DO
+  { writef("Bad argument for draw3d*n")
+    RESULTIS 0
+  }
+  object := 0
+  IF argv!0 DO object := !argv!0
+  UNLESS 0<=object<=1 DO
+  { writef("Bad object number %n*n", object)
+    RESULTIS 0
+  }
+  
+  // The initial direction cosines giving the orientation of
+  // the object.
+  ctn, ctw, cth := 1.0, 0.0, 0.0
+  cwn, cww, cwh := 0.0, 1.0, 0.0
+  cln, clw, clh := 0.0, 0.0, 1.0
+
+  eyedist := 80.0  // Eye distance from the object.
+  object := 0  // Missile 
+  //object := 1  // Tigermoth
   stepping := TRUE
   // Initial rate of rotation about each axis
-  rtdot, rwdot, rldot := 0, 0, 0
-  c_elevator, c_aileron, c_rudder, c_thrust := -4096*4, 4096*3, 4096*5, 10240
+  rtdot, rwdot, rldot := 0.0, 0.0, 0.0
+  c_elevator, c_aileron, c_rudder := 0.0, 0.0, 0.0
+
+//testinprod(-1.0, -2.0, -3.0,   100.0,  10.0,  1.0)
+//testinprod( 1.0, 2.0, 3.0,   100.0,  10.0,  1.0)
+//writef("FIX  123.456 = %i6*n", FIX -123.456)
+//writef("FIX -123.456 = %i6*n", FIX -123.456)
+//writef("FIX  123.789 = %i6*n", FIX  123.789)
+//RESULTIS 0
 
   initsdl()
   mkscreen("Draw 3D Demo", 800, 500)
-
+  updatescreen()
+  
+  fscreenxsize, fscreenysize := FLOAT screenxsize, FLOAT screenysize
+//writef("fscreenxsize=%13.3f fscreenysize=%13.3f*n", fscreenxsize, fscreenysize)
+  fscreencentrex := fscreenxsize / 2.0
+  fscreencentrey := fscreenysize / 2.0
+  
   done := FALSE
 
   UNTIL done DO
@@ -429,13 +451,11 @@ LET start() = VALOF
     IF stepping DO step()
     plotscreen()
     updatescreen()
-    sdldelay(50)
+    sdldelay(20)
   }
 
   writef("*nQuitting*n")
-  sdldelay(1_000)
+  sdldelay(0_20)
   closesdl()
   RESULTIS 0
 }
-
-

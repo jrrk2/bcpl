@@ -8,6 +8,42 @@ regions much smaller than a proton assuming one corresponds to a
 metre.
 
 Implemented by Martin Richards (c) January 2014
+
+Usage: s/n,a,b,size,limit/n
+
+s  If s=0 the image has a size length of 1.8 and
+          is centred about (-0.5, 0.0).
+   If 1 <= s <= 39 the image has a size length of 10^-s
+                   and is centred about approximately
+                   (-0.529_899_999, 0.665_010_889).
+                   A suitable limit is chosen for each s.
+
+a, b and size are the coordinates of the centre of the
+              image and its side length if s=0.
+
+2*size is the side length of the square to be displayed.
+
+limit is the maximum number of iterations before choosing
+      the pixel colour.
+
+The algorithm
+
+Set c to x+iy
+and z to 0
+then repeatedly performs:
+
+z := z^2 + c
+
+up to limit times or until z^2 is greater than 3.0.
+
+The colour of the pixel is determined by the final iteration
+count. If greater than limit the colour is black indicating
+that this point is assumed to belong to the Mandelbrot set.
+
+History
+
+06/02/2021
+Made minor changes.
 */
 
 
@@ -23,24 +59,40 @@ GET "sdl.b"
 //GET "sdl.h"
 
 GLOBAL {
-  limit:ug    // The iteration limit
-  v
+  limit:ug    // The iteration limit before deciding on the colour
+  v           // This will hold a 
 
   // High precision numbers
-  av; bv; sizev
-  v1; v2; v3
-  minav; minbv
-  pv; qv
-  tv
+  av; bv           // The real and imaginary parts of z that
+                   // is at the centre of the image.
+  sqradiusv        // Half the side length of the square
+                   // region to be displayed.
+  sizev            // Half the size of the square region
+  minav; minbv     // The real and imaginary parts of z
+                   // corresponding to the bottom lefthand
+		   // pixel of the image.
+  pv; qv           // The real and imaginary parts of the
+                   // current z being displayed.
+  v1; v2; v3; tv   // Temporary high precision numbers.
 
   // Some colours
   col_white; col_gray; col_black
 }
 
 MANIFEST {
-  width=512
-  height=width      // Ensure the window is square
+  pxradius=300      // Half the side length of the
+                    // square image in pixels.
+  width=2*pxradius
+  height=width      // Ensure the image is square
+  
+//upb =  4          // Upb of high precision numbers
   upb = 10          // Upb of high precision numbers
+//upb = 20          // Upb of high precision numbers
+                    // These are radix 10000 number
+		    // with one "digit" to the left
+		    // of the decimal point. These
+		    // numbers must always be greater
+		    // than -10000 and less than 10000.
   upb1 = upb+1
 }
 
@@ -54,7 +106,7 @@ LET start() = VALOF
     RESULTIS 0
   }
 
-  v := 0
+  v  := 0
 
   // Allocate high precision number vectors
   // They all have a guard digit at subscript upb1 used for rounding
@@ -140,12 +192,12 @@ mul(v3, v1, v2); print(v1); print(v2); print(v3)
 */
 
   // Default settings
-  numfromstr(   av, upb, "-0.500_000_00")
-  numfromstr(   bv, upb, " 0.000_000_00")
-  numfromstr(sizev, upb, " 1.800_000_00")
+  numfromstr(   av, upb, "-0.500_000_00") // x coord of centre of image
+  numfromstr(   bv, upb, " 0.000_000_00") // x coord of centre of image
+  numfromstr(sizev, upb, " 1.800_000_00") // side length of square image
   limit := 38
 
-  IF argv!0 DO s     := !argv!0               // s/n
+  IF argv!0 DO s     := !argv!0  // s/n -- Multiply size by 10^-s
 
   IF 1<=s<=39 DO
   { LET limtab = TABLE  38,  38,  38,  54,  70,  //  0 
@@ -158,13 +210,12 @@ mul(v3, v1, v2); print(v1); print(v2); print(v3)
                        370, 380, 385, 390, 395   // 35 
 
     limit := limtab!s
-                         // s= 000 000 000 111 111 111 122_222 222 223 333 333 333 4
-                         //    123 456 789 012 345 678 901 234 567 890 123 456 789 0
+
     numfromstr(   av, upb, "-0.529_899_999_999_998_948_805_000_900_100_099_901_340_0")
     numfromstr(   bv, upb, " 0.665_010_889_500_000_000_000_629_209_407_380_001_010_2")
     numfromstr(sizev, upb, " 0.500_000_000_000_000_000_000_000_000_000_000_000_000_3")
     // Multiply size by 10^-s
-    FOR i = 1 TO s DO divbyk(sizev, sizev, 10)
+    FOR i = 1 TO s-1 DO divbyk(sizev, sizev, 10)
     
   }
 
@@ -185,12 +236,19 @@ mul(v3, v1, v2); print(v1); print(v2); print(v3)
 
   // Declare a few colours in the pixel format of the screen
   col_white := maprgb(255, 255, 255)
-  col_gray  := maprgb(128, 128, 128)
+  col_gray  := maprgb(100, 100, 100)
   col_black := maprgb(  0,   0,   0)
 
-  v := getvec(width*height-1)
-  // Initialise v
-  FOR i = 0 TO width*height - 1 DO v!i := i
+  v  := getvec(width*height-1)
+
+// Initialise v
+  
+  FOR i = 0 TO width*height - 1 DO
+  { LET x = i MOD width
+    LET y = i  /  width
+    // Pack x and y as two 16 bit numbers in each element of v
+    v!i := y<<16 | x      // Changed 06/02/2021
+  }
   // Random shuffle v so that the screen pixels are filled in
   // in random order.
   FOR i = width*height - 1 TO 1 BY -1 DO
@@ -203,11 +261,11 @@ mul(v3, v1, v2); print(v1); print(v2); print(v3)
   plotset()
 
   setcolour(col_white)
-  plotf(5, 80, "s     = "); plotf(50, 80, " %i5*n", s)
-  plotf(5, 65, "a     = "); plotv(50, 65, av)
-  plotf(5, 50, "b     = "); plotv(50, 50, bv)
-  plotf(5, 35, "size  = "); plotv(50, 35, sizev)
-  plotf(5, 20, "limit = "); plotf(50, 20, " %i5*n", limit)
+  drawf(5, 80, "s     = "); drawf(50, 80, " %i5*n", s)
+  drawf(5, 65, "a     = "); plotv(50, 65, av)
+  drawf(5, 50, "b     = "); plotv(50, 50, bv)
+  drawf(5, 35, "size  = "); plotv(50, 35, sizev)
+  drawf(5, 20, "limit = "); drawf(50, 20, " %i5*n", limit)
 
   updatescreen()
 
@@ -265,7 +323,7 @@ AND setpalette(p, lim, colv, n) BE
 }
 
 AND plotset() BE
-{ // The following table hold 8-bit rgb colours packed
+{ // The following table holds 8-bit rgb colours packed
   // in three 9-bit fields. It is used to construct a palette
   // of colours depending on the current limit setting.
   LET coltab = TABLE
@@ -301,8 +359,15 @@ AND plotset() BE
    }
   }
 */
-  sub(minav, av, sizev)
-  sub(minbv, bv, sizev)
+  sub(minav, av, sizev) // (x,y) values of the bottom
+  sub(minbv, bv, sizev) // left pixel of the image.
+                        // Remember that sizev is half
+			// the image side length.
+
+  writef("mina  = "); print(minav)
+  writef("minb  = "); print(minbv)
+
+
 //writef("sizev="); print(sizev)
 //writef("av=   "); print(av)
 //writef("bv=   "); print(bv)
@@ -311,7 +376,8 @@ AND plotset() BE
 
   fillsurf(col_gray)
 
-  // Draw a small white square at the centre
+  // Draw a small white square at the centre of the image
+  // with a side length one tenth of that of the image.
   setcolour(col_white)
   drawrect(width*45/100, height*45/100,
            width*55/100, height*55/100)
@@ -336,24 +402,46 @@ AND plotset() BE
     IF i MOD 100 = 0 DO updatescreen()
 
     // Find the coordinates of the next random pixel
-    x := vi      & #x1FF     // 0 .. 511
-    y := (vi>>9) & #x1FF     // 0 .. 511
+    x := vi MOD width  // 0 .. width-1   changed 06/02/2021
+    y := vi>>16        // 0 .. height-1
 
     // Calculate c = p + iq corresponding to pixel (x,y)
-//writef("pixel address: (%i3, %i3)*n", x, y)
-    divbyk(pv, sizev, 511) // p := mina + 2*size*x / 511
-//writef("size/511=         "); print(pv)
-    mulbyk(pv, pv, 2*x)
-//writef("2**size**x/511=     "); print(pv)
-    add(pv, pv, minav)
-//writef("mina+2**size**x/511="); print(pv)
 
-    divbyk(qv, sizev, 511) // q := minb + 2*size*y / 511
-//writef("size/511=         "); print(qv)
-    mulbyk(qv, qv, 2*y)
-//writef("2**size**y/511=     "); print(qv)
-    add(qv, qv, minbv)
-//writef("minb+2**size**y/511="); print(qv)
+//writef("pixel address: (%i4, %i4)*n", x, y)
+    divbyk(pv, sizev, height)           // pv := sizev/height
+//writef("size/height=           ");    print(pv)
+    mulbyk(pv, pv, 2*x)                 // pv := (sizev/height)*2*x
+//writef("(sizev/height)**2**x=     "); print(pv)
+    add(pv, pv, minav)                  // pv := (sizev/height)*2*x+mina
+//writef("(sizev/height)**2**x+mina="); print(pv)
+
+    divbyk(qv, sizev, height)           // qv := sizev/height
+//writef("size/height=           ");    print(qv)
+    mulbyk(qv, qv, 2*y)                 // qv := (sizev/height)*2*y
+//writef("(sizev/height)**2**y=     "); print(qv)
+    add(qv, qv, minbv)                  // qv := (sizev/height)*2*y+mina
+//writef("(sizev/height)**2**y+mina="); print(qv)
+
+// pv and qv hold the high precision real and imaginary parts
+// of z for the pixel at coordinates (x,y).
+// ie z= pv + ipq
+
+// The algorithm is to repeatedly set
+// z = z^2 + c
+// upto limit times or until pv^2+qv^2 > 9.0
+// The colour of the pixel depends on the number of
+// iterations required.
+// If the number of iterations is limit, z is assument to be
+// a member of the Mandelbrot set and it pixel is coloured black.
+
+// When x=0     pv equals mina
+// When x=width pv = mina + 2*sizev
+// Other values are computed by linear interpolation.
+// ie  pv = mina + 2*sizev * x / width
+// The calculation for qv is similar
+//     qv = minb + 2*sizev * y / height
+// Currently the image is always square with width=height
+
 
 //abort(1000)
 
@@ -388,12 +476,13 @@ AND mandset(av, bv, n) = VALOF
   settok(xv, 0, upb)
   settok(yv, 0, upb)
 
-  // c = a + ib is the point we are testing
+  // c = a + ib is the point we are testing.
+  // It remains constant during the iteration.
 
   FOR i = 0 TO n DO
   { mul(x2v, xv, xv)
     mul(y2v, yv, yv)
-    add(sqv, x2v, y2v) // v3 = x^2 + y^2
+    add(sqv, x2v, y2v) // sqv = xv^2 + yv^2
 
 //writef("%i2: *n", i)
 //writef("a=  "); print(av)
@@ -404,12 +493,14 @@ AND mandset(av, bv, n) = VALOF
 //writef("y^2="); print(y2v)
 //writef("r^2="); print(sqv)
 //abort(1000)
-    // Test whether z is diverging, ie is x^2+y^2 > 9
+    // Test whether z is diverging, ie is xv^2+yv^2 > 9
     IF sqv!0 > 9 RESULTIS i
 
     // Square z and add c
     // Note that (x + iy)^2 = (x^2-y^2) + i(2xy)
 
+    // Perform z = z^2 + c
+    
     mul(yv, xv, yv)     // y := 2xy + b
     mulbyk(yv, yv, 2)
     add(yv, yv, bv)
@@ -418,7 +509,9 @@ AND mandset(av, bv, n) = VALOF
     add(xv, xv, av)
   }
 
-  // z did not diverge after n iterations
+  // z did not diverge after n iterations, so c is
+  // assumed to be a member of the Mandelbrot set.
+  
   RESULTIS -1
 }
 
@@ -474,13 +567,13 @@ AND prv(x, y, v, negative) BE
 { LET xpos = x
   //writef("v => [%z4 %z4 %z4]  negative=%n*n", v!0, v!1, v!2, negative)
   TEST v!0=0 & negative
-  THEN plotf(xpos, y, "    -0.")
-  ELSE plotf(xpos, y, " %i5.", negative -> -v!0, v!0)
+  THEN drawf(xpos, y, "    -0.")
+  ELSE drawf(xpos, y, " %i5.", negative -> -v!0, v!0)
   xpos := xpos+8*8
   FOR i = 1 TO upb DO
   { IF i MOD 15 = 0 DO xpos, y := x, y+15
     xpos := plotpn(xpos, y, v!i, 4)
-    plotf(xpos, y, "*s")
+    drawf(xpos, y, "*s")
     xpos := xpos+8
   }
 } 
@@ -488,7 +581,7 @@ AND prv(x, y, v, negative) BE
 AND plotpn(x, y, n, d) = VALOF
 { IF d>1 DO x := plotpn(x, y, n/10, d-1)
   n := n MOD 10
-  plotf(x, y, "%c", n+'0')
+  drawf(x, y, "%c", n+'0')
   RESULTIS x+8
 }
 
@@ -498,7 +591,8 @@ AND plotpn(x, y, n, d) = VALOF
 // numbers.
 
 AND numfromstr(v, upb, s) BE
-{ LET p, k, val = 0, 0, 0
+{ // Set multi length number v to the value represented by string s
+  LET p, k, val = 0, 0, 0
   LET negative = FALSE
 
   FOR i = 1 TO s%0 DO
@@ -521,7 +615,8 @@ AND numfromstr(v, upb, s) BE
 }
 
 AND mul(x, y, z) BE
-{ // Beware is x=y, y is destroyed
+{ // Set multi length number x to y * z
+  // Beware is x=y, y is destroyed
   // Beware is x=z, z is destroyed
   LET negative = FALSE
 
@@ -554,7 +649,8 @@ AND mul(x, y, z) BE
 }
 
 AND add(x, y, z) BE
-{ LET c = 0
+{ // Set multi length number x to y + z
+  LET c = 0
   FOR i = upb TO 1 BY -1 DO
   { LET d = c + y!i + z!i
 //writef("%i2: c=%n yi=%i4 zi=%i4 d=%n", i, c, y!i, z!i, d)
@@ -569,12 +665,14 @@ AND add(x, y, z) BE
 }
  
 AND sub(x, y, z) BE
-{ neg(x, z)
+{ // Set multi length number x to y - z
+  neg(x, z)
   add(x, x, y)
 }
 
 AND mulbyk(x, y, k) BE
-{ LET c = 0
+{ // Set multi length number x to y * single length integer k
+  LET c = 0
   LET negative = FALSE
   IF k<0 DO { negative := TRUE; k := - k }
   IF y!0<0 DO
@@ -599,7 +697,8 @@ AND mulbyk(x, y, k) BE
 }
 
 AND divbyk(x, y, k) BE
-{ LET c = 0
+{ // Set multi length number x to y / single length integer k
+  LET c = 0
   LET negative = FALSE
   IF k < 0 DO negative, k := TRUE, -k
   IF y!0 < 0 DO
@@ -621,7 +720,8 @@ AND divbyk(x, y, k) BE
 }
  
 AND neg(a, b) BE
-{ LET carry = 1
+{ // Set multi length number a to -b
+  LET carry = 1
   FOR i = upb TO 1 BY -1 DO
   { LET d = 9999 - b!i + carry
     a!i := d MOD 10000

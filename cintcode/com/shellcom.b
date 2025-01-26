@@ -7,7 +7,7 @@ LET start() BE
 
   UNLESS rdargs("COM/A", argv, 80) DO
   { writef("Bad argument for SHELLCOM*n")
-    stop(20)
+    stop(20, 0)
   }
 
   sys(Sys_shellcom, argv!0)

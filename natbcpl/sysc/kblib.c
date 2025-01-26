@@ -26,24 +26,19 @@ and
 #include <sgtty.h>
 
 int init_keyb(void)
-{
-  /*
-  struct sgttyb ttyb;
+{ struct sgttyb ttyb;
+
   ioctl(0, TIOCGETP, &ttyb);
   ttyb.sg_flags = CBREAK+EVENP+ODDP+CRMOD;
   ioctl(0, TIOCSETP, &ttyb);
-  */
   return 0;
 }
 
 int close_keyb(void)
-{
-  /*  
-  struct sgttyb ttyb;
+{ struct sgttyb ttyb;
   ioctl(0, TIOCGETP, &ttyb);
   ttyb.sg_flags = ECHO+EVENP+ODDP+CRMOD;
   ioctl(0, TIOCSETP, &ttyb);
-  */
   return 0;
 }
 
@@ -113,7 +108,7 @@ int init_keyb(void)
   ttdesc.buff = ttname;
   sts = sys$assign (&ttdesc, &ttchan, 0, 0);
   if (!(sts & 1)) {
-    fprintf (stderr, "error 0x%x assigning channel to terminal %s\n", sts, ttname);
+    fprintf(stderr, "error 0x%x assigning channel to terminal %s\n", sts, ttname);
     return sts;
   }
 
@@ -218,7 +213,8 @@ int intflag(void)
 #endif
 
 #if defined(forLINUX)||defined(forCYGWIN32)||defined(forSPARC)||\
-    defined(forGP2X)||defined(forLINUXAMD64)||defined(forARM)
+    defined(forGP2X)||defined(forLINUXAMD64)||defined(forARM)||\
+    defined(forAMD64b64)
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>

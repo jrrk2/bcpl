@@ -1,19 +1,20 @@
 /*
-This program is a demonstration of the OpenGL interface.
-
 ################ STILL UNDER DEVELOPMENT ########################
 
-It is soon going to be modified to make extensive use of the floating
-point facilities now available in BCPL. This modification involves
-changing the BCPL GL library to use floating point.
+This is a flight simulator for a Tigermoth Biplane implemented in
+BCPL using the OpenGL Graphics library.
+
+Implemented by Martin Richards (c) July 2014
 
 The BCPL GL library is in g/gl.b with header g/gl.h and is designed to
 work unchanged with either OpenGL using SDL or OpenGL ES using EGL and
 some SDL features.
 
-Implemented by Martin Richards (c) July 2014
 
 History
+
+08/05/18
+Extensively modified to use 32-bit floating point and the FLT feature.
 
 20/12/14
 Modified the cube to be like a square missile with control surfaces.
@@ -22,13 +23,8 @@ It will display a rotating tigermoth by default.
 03/12/14
 Began conversion to use floating point numbers.
 
-
-
 Command argument:
 
--a/n      Aircraft number, default = 0 for the tigermoth
-          = 1 for the cube-like missile used in gltst.b 
-OBJ       Use OpenGL Objects for vertex and index data
 -d        Turn on debugging
 
 Controls:
@@ -58,9 +54,9 @@ The transformations
 Three coordinate systems are used in this program.
 
 The first specifies point (t,w,l) on the aircraft where t is the
-distance fron the centre of gravity (CG) forward in the direction of
+distance from the centre of gravity (CG) forward in the direction of
 thrust. w is the distance from the CG in the direction of the left
-wing, and l is the distance in the direction of lift. these three
+wing, and l is the distance in the direction of lift. These three
 directions are at right angles to each other. Mathematicians describe
 them as orthogonal.
 
@@ -102,9 +98,9 @@ direction cosines.
                       on the line of sight of the eye.
 
 Since standard BCPL now supports floating point operations and the
-latest Raspberry Pi (Model B-2) has proper support for floating point
-this program will phase out scales fixed point arithmetic and use
-floating point instead. This is a simple but extensive change.
+latest Raspberry Pi (Model B-2 and later) has proper support for
+floating point this program now uses floating point and the FLT
+feature.
 */
 
 GET "libhdr"
@@ -116,9 +112,20 @@ GET "gl.h"
 
 GLOBAL {
   done:ug
-  aircraft          // =0 or 1
   stepping
   debug
+  
+  vvec       // Vector of 32-bit floating point numbers
+             // holding the vertex attributes.
+  vvecupb    // The number of numbers in vvec.
+  ivec       // Vector of 16-bit unsigned integers
+  ivecupb    // The number of 16-bit values in ivec
+  dvec       // The display items vector
+  dvecupb    // The number of display items. (3 index values per item).
+
+  model      // Normally points to vvec
+             // It is set to 0 if load model fails.
+  
   glprog
   Vshader
   Fshader
@@ -131,44 +138,62 @@ GLOBAL {
   LandMatrixLoc
   ControlLoc
 
-  CosElevator
-  SinElevator
-  CosRudder
-  SinRudder
-  CosAileron
-  SinAileron
+  FLT CosElevator
+  FLT SinElevator
+  FLT CosRudder
+  FLT SinRudder
+  FLT CosAileron
+  FLT SinAileron
 
-  modelfile
+  modelfile // Holds the name of the model file, typically tigermothmodel.mdl
 
-  // The following variables are floating point number
+  FLT ctx; FLT cty; FLT ctz   // Direction cosines of direction t
+  FLT cwx; FLT cwy; FLT cwz   // Direction cosines of direction w
+  FLT clx; FLT cly; FLT clz   // Direction cosines of direction l
 
-  ctn; ctw; cth   // Direction cosines of direction t
-  cwn; cww; cwh   // Direction cosines of direction w
-  cln; clw; clh   // Direction cosines of direction l
+  FLT ctn; FLT ctw; FLT cth   // Direction cosines of direction t
+  FLT cwn; FLT cww; FLT cwh   // Direction cosines of direction w
+  FLT cln; FLT clw; FLT clh   // Direction cosines of direction l
 
-  rtdot; rwdot; rldot // Anti-clockwise rotation rates
-                      // about the t, w and l axes
+  FLT rtdot; FLT rwdot; FLT rldot    // Anti-clockwise rotation rates
+                         // about the t, w and l axes
  
-  cgn; cgw; cgh          // Coordinates of the CG of the aircraft
-                         // in feet as a floating point number
-  cgndot; cgwdot; cghdot // CG velocity
+  FLT cgn; FLT cgw; FLT cgh  // Coordinates of the CG of the aircraft
+                             // in feet as floating point numbers
+  FLT cgndot; FLT cgwdot; FLT cghdot // CG velocity
+
+  FLT mass                   // Aircraft mass in lbs
+  FLT moit                   // Moment of inertia about t axis in ft-lbs
+  FLT moiw                   // Moment of inertia about w axis
+  FLT moil                   // Moment of inertia about l axis
+
+  // The following are relative to the aircraft CG
+  // These are used to check contact with the ground.
+  FLT wingtiplt        // Left lower wing tip t coord
+  FLT wingtiplw        // Left lower wing tip w coord
+  FLT wingtipll        // Left lower wing tip l coord
+  FLT wingtiprt        // Right lower wing tip t coord
+  FLT wingtiprw        // Right lower wing tip w coord
+  FLT wingtiprl        // Right lower wing tip l coord
+  FLT wheellt          // Left wheel tip t coord
+  FLT wheellw          // Left wheel tip w coord
+  FLT wheelll          // Left wheel tip l coord
+  FLT wheelrt          // Right wheel tip t coord
+  FLT wheelrw          // Right wheel tip w coord
+  FLT wheelrl          // Right wheel tip l coord
+  FLT skidt            // Tail skid t coord
+  FLT skidw            // Tail skid w coord
+  FLT skidl            // Tail skid l coord
+
 
   eyedirection     // =0 to =7
-  eyerelh          // height of the eye relative to cgh
+  FLT eyerelh      // height of the eye relative to cgh
 
-  eyen; eyew; eyeh // Coordinates of a point on the line of sight
-                   // from to eye to the origin (0.0,0.0,0.0).
-  eyedistance      // The distance between the eye and the CG of
+  FLT eyen; FLT eyew; FLT eyeh // Coordinates of a point on the line of sight
+                   // from to eye to the centre of the aircraft.
+  FLT eyedistance      // The distance between the eye and the centre of
                    // the aircraft.
 
-  // The next four variables must be in consecutive locations
-  // since @VertexData is passed to loadmodel.
-  VertexData       // Vector of 32-bit floating point numbers
-  VertexDataSize   // = number of numbers in VertexData
-  IndexData        // Vector of 16-bit unsigned integers
-  IndexDataSize    // = number of 16-bit integers in IndexData
-
-  useObjects       //= TRUE if using OpenGL Objects
   VertexBuffer
   IndexBuffer
 
@@ -182,25 +207,20 @@ GLOBAL {
 }
 
 LET start() = VALOF
-{ LET m1 = VEC 15
-  LET m2 = VEC 15
-  LET m3 = VEC 15
+{ LET m1   = VEC 15     // For the ModelMatrix
+  LET m2   = VEC 15     // For the LandMatrix
+  LET m3   = VEC 15     // For the WorkMatrix
   LET argv = VEC 50
-  LET modelfile = "tigermothmodel.mdl"
-  LET aircraft = 0
+  LET modelfile = "gltiger.mdl"
 
   ModelMatrix, LandMatrix, WorkMatrix := m1, m2, m3
 
-  UNLESS rdargs("-a/n,obj/s,-d/s", argv, 50) DO
-  { writef("Bad arguments for gltst*n")
+  UNLESS rdargs("-d/s", argv, 50) DO
+  { writef("Bad arguments for gltiger*n")
     RETURN
   }
 
-  IF argv!0 DO aircraft := !argv!0 // -a/n
-  useObjects := argv!1             // obj/s
-  debug := argv!2                  // -d/s
-
-  IF aircraft=1 DO modelfile := "gltst.mdl"
+  debug := argv!0                  // -d/s
 
   writef("start: calling glInit*n")
   UNLESS glInit() DO
@@ -208,10 +228,11 @@ LET start() = VALOF
     RESULTIS 0
   }
 
-  writef("start: calling glMkScreen*n")
+  //writef("start: Calling glMkScreen*n")
   // Create an OpenGL window
   screenxsize := glMkScreen("Tigermoth flight simulator", 800, 680)
   screenysize := result2
+
   UNLESS screenxsize DO
   { writef("*nUnable to create an OpenGL window*n")
     RESULTIS 0
@@ -219,8 +240,8 @@ LET start() = VALOF
   writef("Screen Size is %n x %n*n", screenxsize, screenysize)
 
   writef("start: calling glMkProg  ")
-  glprog := glMkProg()
-writef("=> glprog=%n*n", glprog);
+  glprog := sys(Sys_gl, gl_MkProg)
+  writef("=> glprog=%n*n", glprog);
 
   IF glprog<0 DO
   { writef("*nUnable to create a GL program*n")
@@ -233,33 +254,33 @@ writef("=> glprog=%n*n", glprog);
   writef("=> Vshader=%n*n", Vshader)
 
   // Read and Compile the fragment shader
-  writef("start: calling CompileF(%n,gltigerFshader.sdr) ",glprog)
+  writef("start: calling CompileF(%n,gltstFshader.sdr) ",glprog)
   Fshader := Compileshader(glprog, FALSE, "gltigerFshader.sdr")
   writef("=> Fshader=%n*n", Fshader)
 
   // Link the program
   writef("start: calling glLinkProg(%n)*n", glprog)
-  UNLESS glLinkProg(glprog) DO
+  UNLESS sys(Sys_gl, gl_LinkProgram, glprog) DO
   { writef("*nUnable to link a GL program*n")
     RESULTIS 0
   }
 
-  writef("start: calling glUseProgram(%n)*n", glprog)
-  glUseProgram(glprog)
+  //writef("start: calling glUseProgram(%n)*n", glprog)
+  sys(Sys_gl, gl_UseProgram, glprog)
 
   // Get attribute locations after linking
-  VertexLoc := glGetAttribLocation(glprog, "g_vVertex")
-  ColorLoc  := glGetAttribLocation(glprog, "g_vColor")
-  DataLoc   := glGetAttribLocation(glprog, "g_vData")
+  VertexLoc := sys(Sys_gl, gl_GetAttribLocation, glprog, "g_vVertex")
+  ColorLoc  := sys(Sys_gl, gl_GetAttribLocation, glprog, "g_vColor")
+  DataLoc   := sys(Sys_gl, gl_GetAttribLocation, glprog, "g_vData")
 
   writef("VertexLoc=%n*n", VertexLoc)
   writef("ColorLoc=%n*n",  ColorLoc)
   writef("DataLoc=%n*n",   DataLoc)
 
   // Get uniform locations after linking
-  LandMatrixLoc  := glGetUniformLocation(glprog, "landmatrix")
-  ModelMatrixLoc := glGetUniformLocation(glprog, "modelmatrix")
-  ControlLoc     := glGetUniformLocation(glprog, "control")
+  LandMatrixLoc  := sys(Sys_gl, gl_GetUniformLocation, glprog, "landmatrix")
+  ModelMatrixLoc := sys(Sys_gl, gl_GetUniformLocation, glprog, "modelmatrix")
+  ControlLoc     := sys(Sys_gl, gl_GetUniformLocation, glprog, "control")
 
   writef("LandMatrixLoc=%n*n",  LandMatrixLoc)
   writef("ModelMatrixLoc=%n*n", ModelMatrixLoc)
@@ -272,7 +293,9 @@ writef("=> glprog=%n*n", glprog);
 
   // Load model
 
-  UNLESS loadmodel(modelfile, @VertexData) DO
+  writef("Calling loadmodel file=%s*n", modelfile)
+  model := loadmodel(modelfile, @vvec)
+  UNLESS model DO
   { writef("*nUnable to load model: %s*n", modelfile)
     RESULTIS 0
   }
@@ -280,112 +303,140 @@ writef("=> glprog=%n*n", glprog);
   IF debug DO
   { // Output the vertex and index data
     // as a debugging aid
-    FOR i = 0 TO VertexDataSize-1 DO
-    { IF i MOD 8 = 0 DO newline()
-      writef(" %8.3d", sc3(VertexData!i))
+    writef("*nVertex data, vvupb=%n*n", vvecupb)
+    FOR i = 0 TO vvecupb DO
+    { IF i MOD 128 = 0 DO
+      { newline()
+        //abort(1998)
+      }
+      IF i MOD 8 = 0 DO writef("*n%i3: ", i/8)
+      writef(" %8.3f", vvec!i)
     }
-    newline()
-    FOR i = 0 TO (IndexDataSize-1)/2 DO
-    { LET w = IndexData!i
-      IF i MOD 6 = 0 DO writef("*n%i6: ", 2*i)
-      writef(" %i5 %i5", w & #xFFFF, w>>16)
+    writef("*n*nIndex data, ivecupb=%n*n", ivecupb)
+    FOR i = 0 TO ivecupb DO
+    { IF i MOD 10 = 0 DO writef("*n%i6: ", i)
+      writef(" %i5", ivec!i)
     }
+    writef("*n*nDisplay data, dvecupb=%n*n", dvecupb)
+    FOR i = 0 TO dvecupb BY 3 DO
+      writef(" %i5  %i5  %i5*n", dvec!i, dvec!(i+1), dvec!(i+2))
     newline()
   }
 
-  sys(Sys_gl, GL_Enable, GL_DEPTH_TEST) // This call is neccessary
-  sys(Sys_gl, GL_DepthFunc, GL_LESS)    // This the default
+  mass := 1800.0    // Aircraft mass in pound
+  moit :=  200.0    // Moment of inertia about t axis in ft-pounds
+  moiw :=  400.0    // Moment of inertia about w axis in ft-pounds
+  moil :=  500.0    // Moment of inertia about l axis in ft-pounds
+
+  // The following are relative to the aircraft origin.
+
+  wingtiplt :=  -1.880        // Left lower wing tip t coord
+  wingtiplw :=  14.166        // Left lower wing tip w coord
+  wingtipll :=  -0.961        // Left lower wing tip l coord
+
+  wingtiprt :=  -1.880        // Right lower wing tip t coord
+  wingtiprw := -14.166        // Right lower wing tip w coord
+  wingtiprl :=  -0.961        // Right lower wing tip l coord
+
+  wheellt := -0.268           // Left wheel tip t coord
+  wheellw :=  2.100           // left wheel tip w coord
+  wheelll := -3.800-0.700     // Left wheel tip l coord
+
+  wheelrt := -0.268           // Right wheel tip t coord
+  wheelrw := -2.100           // Right wheel tip w coord
+  wheelrl := -3.800-0.700     // Right wheel tip l coord
+
+  skidt := -16.500            // Tail skid t coord
+  skidw :=     0.0            // Tail skid w coord
+  skidl :=  -3.800-0.700      // Tail skid l coord
+
+
+
+  IF debug DO
+  { // Output the vertex and index data
+    // as a debugging aid
+    writef("*nVertex data*n")
+    FOR i = 0 TO vvecupb DO
+    { IF i MOD 8 = 0 DO writef("*n%i3: ", i)
+      writef(" %8.3f", vvec!i)
+    }
+    writef("*n*nIndex data*n")
+    FOR i = 0 TO ivecupb DO
+    { IF i MOD 10 = 0 DO writef("*n%i6: ", i)
+      writef(" %i5", ivec!i)
+    }
+    writef("*n*nDisplay data item*n")
+    FOR i = 0 TO dvecupb BY 3 DO
+      writef(" %i5  %i5  %i5*n", dvec!i, dvec!(i+1), dvec!(i+2))
+    newline()
+  }
+
+  sys(Sys_gl, gl_Enable, GL_DEPTH_TEST) // This call is neccessary
+  sys(Sys_gl, gl_DepthFunc, GL_LESS)    // This the default
 
   // Pixel written if incoming depth < buffer depth
   // This assumes positive Z is into the screen, but
   // remember the depth test is performed after all other
   // transformations have been done.
 
-  TEST useObjects
-  THEN {
-    // Setup the model using OpenGL objects
-    writef("start: VertexDataSize=%n*n", VertexDataSize)
-    VertexBuffer := sys(Sys_gl, GL_GenVertexBuffer, VertexDataSize, VertexData)
+  // Setup the model using OpenGL objects in the graphics server's
+  // memory.
+  writef("start: vvecupb=%n*n", vvecupb)
+  VertexBuffer := sys(Sys_gl, gl_GenVertexBuffer, vvecupb+1, vvec)
+  // VertexBuffer is the 'name' (a positive integer) of the vertex buffer.
 
-    // Tell GL the positions in VertexData of the xyz fields,
-    // ie the first 3 words of each 8 word item in VertexData
-    sys(Sys_gl, GL_EnableVertexAttribArray, VertexLoc);
-    sys(Sys_gl, GL_VertexData,
-                VertexLoc,     // Attribute number for xyz data
-                3,             // 3 floats for xyz
-                8,             // 8 floats per vertex item in vertexData
-                0)             // Offset in words of the xyz data
+  // Tell GL the positions in vvec of the xyz fields,
+  // ie the first 3 words of each 8 word item in vvec
+  writef("start: gl_EnableVertexAttribArray  VertexLoc==%n*n", VertexLoc)
+  // VertexLoc is the location of the variable g_vVertex used
+  // by the vertex shader.
+  sys(Sys_gl, gl_EnableVertexAttribArray, VertexLoc);
+  sys(Sys_gl, gl_VertexData,
+              VertexLoc,     // Attribute number for xyz data
+              3,             // 3 floats for xyz
+              8,             // 8 floats per vertex item in vertexData
+              0)             // Offset in words of the xyz data
 
-    writef("start: VertexData xyz data copied to graphics object %n*n", VertexBuffer)
+  writef("start: VertexData xyz data copied to graphics object %n*n",
+          VertexBuffer)
 
-    // Tell GL the positions in VertexData of the rgb fields,
-    // ie the second 3 words of each 8 word item in VertexData
-    sys(Sys_gl, GL_EnableVertexAttribArray, ColorLoc);
-    sys(Sys_gl, GL_VertexData,
-                ColorLoc,      // Attribute number rgb data
-                3,             // 3 floats for rgb data
-                8,             // 8 floats per vertex item in vertexData
-                3)             // Offset in words of the rgb data
+  // Tell GL the positions in vvec of the rgb fields,
+  // ie the second 3 words of each 8 word item in VertexData
+  sys(Sys_gl, gl_EnableVertexAttribArray, ColorLoc);
+  sys(Sys_gl, gl_VertexData,
+              ColorLoc,      // Attribute number rgb data
+              3,             // 3 floats for rgb data
+              8,             // 8 floats per vertex item in vertexData
+              3)             // Offset in words of the rgb data
 
-    writef("start: ColourData rgb data copied to graphics object %n*n", VertexBuffer)
+  writef("start: ColourData rgb data copied to graphics object %n*n",
+          VertexBuffer)
 
-    // Tell GL the positions in VertexData of the kd fields,
-    // ie word 6 of each 8 word item in VertexData
-    sys(Sys_gl, GL_EnableVertexAttribArray, DataLoc);
-    sys(Sys_gl, GL_VertexData,
-                DataLoc,       // Attribute number rgb data
-                2,             // 2 floats for kd data
-                8,             // 8 floats per vertex item in vertexData
-                6)             // Offset in words of the kd data
+  // Tell GL the positions in vvec of the kd fields,
+  // ie word 6 of each 8 word item in vvec
+  sys(Sys_gl, gl_EnableVertexAttribArray, DataLoc);
+  sys(Sys_gl, gl_VertexData,
+              DataLoc,       // Attribute number kd data
+              2,             // 2 floats for kd data
+              8,             // 8 floats per vertex item in vertexData
+              6)             // Offset in words of the kd data
 
-    writef("start: VertexData kd data copied to graphics object %n*n", VertexBuffer)
+  writef("start: VertexData kd data copied to graphics object %n*n",
+          VertexBuffer)
 
-    // VertexData can now be freed
-    //freevec(VertexData)
+  freevec(vvec) // Free vvec since all its elements have now
+                // been sent to the graphics server.
+  vvec := 0
 
-    writef("start: IndexDataSize=%n*n", IndexDataSize)
-    IndexBuffer  := sys(Sys_gl, GL_GenIndexBuffer, IndexData, IndexDataSize)
+  writef("start: ivecupb=%n*n", ivecupb)
+  writef("start: GenIndexBuffer    ivecupb=%n ivec=%n*n", ivec, ivecupb, ivec)
+  IndexBuffer  := sys(Sys_gl, gl_GenIndexBuffer, ivecupb, ivec)
 
-    writef("start: IndexData copied to graphics memory object %n*n", IndexBuffer)
+  writef("start: ivec copied to graphics memory object %n*n", IndexBuffer)
 
-    // IndexData can now be freed
-    //freevec(IndexData)
-  } ELSE {
-    // Setup the model not using objects
-    sys(Sys_gl, GL_EnableVertexAttribArray, VertexLoc);
-    sys(Sys_gl, GL_EnableVertexAttribArray, ColorLoc);
-    sys(Sys_gl, GL_EnableVertexAttribArray, DataLoc);
-
-    // The next call tells GL where the xyz fields of 
-    // attribute VertexLoc appear in VertexData. It says
-    // that each vertex is specified by items consisting
-    // 8 words. The first 3 words of each item contains
-    // the xyz values.
-    glVertexData(VertexLoc,
-                 3,            // 3 Values x, y, z
-                 8,            // Stride of 8 words (=32 bytes)
-                               // ie 8 values in VertexData per vertex
-                 VertexData)   // Position of xyz value of vertex 0
-
-    // The next call tells GL where the rgb fields of 
-    // attribute ColorLoc appear in VertexData. It says
-    // they are in 3 words at position 3 of each 8 word item.
-    glVertexData(ColorLoc,
-                 3,            // 3 Values r, g, b
-                 8,            // Stride in words (=32 bytes)
-                               // ie 8 values in VertexData per vertex
-                 VertexData+3) // Position of rgb values of vertex 0
-
-    // The next call tells GL where the kd fields of 
-    // attribute ColorLoc appear in VertexData. It says
-    // they are in the last 2 words of each 8 word item.
-    glVertexData(DataLoc,
-                 2,            // 2 Values k, d
-                 8,            // Stride in words (=32 bytes)
-                               // ie 8 values in VertexData per vertex
-                 VertexData+6) // Position of kd values of vertex 0
-  }
-
+  freevec(ivec) // Free ivec since all its elements have
+                // been sent to the graphics server.
+  ivec := 0
 
   // Initialise the state
 
@@ -399,28 +450,30 @@ writef("=> glprog=%n*n", glprog);
   // Set the initial direction cosines to orient t, w and l in
   // directions -z, -x and y, ie viewing the aircraft from behind.
 
-  ctn, ctw, cth :=   1.0,  0.0,   0.0
-  cwn, cww, cwh :=   0.0,  1.0,   0.0
-  cln, clw, clh :=   0.0,  0.0,   1.0
+  ctn, ctw, cth :=   1.0, 0.0, 0.0
+  cwn, cww, cwh :=   0.0, 1.0, 0.0
+  cln, clw, clh :=   0.0, 0.0, 1.0
 
-  rtdot, rwdot, rldot := 0.0,   0.0, 0.0
-  //rtdot, rwdot, rldot := 0.002, 0.003, 0.001 // Rotate the model slowly
+  rtdot, rwdot, rldot := 0.0, 0.0, 0.0
+  //rtdot := 0.002 // Rotate the model slowly
+  //rwdot := 0.003 // Rotate the model slowly
+  rldot := -0.002 // Rotate the model slowly
 
   eyedirection :=  0         // Direction of thrust
   eyerelh      :=  0.0       // Relative to cgh
-  eyedistance  := 50.000
+  eyedistance  := 40.000
 
   eyen, eyew, eyeh := 1.0, 0.0, 0.0
 
 
   IF debug DO
-  { glSetvec( WorkMatrix, 16,
+  { setvec( WorkMatrix, 16,
                    2.0,  0.0,  0.0,  0.0,
                    0.0,  1.0,  0.0,  0.0,
                    0.0,  0.0,  1.0,  0.0,
                    0.0,  0.0,  0.0, 10.0
                  )
-    glSetvec( LandMatrix, 16,
+    setvec( LandMatrix, 16,
                    1.0,  2.0,  3.0,  4.0,
                    5.0,  6.0,  7.0,  8.0,
                    9.0, 10.0, 11.0, 12.0,
@@ -430,7 +483,7 @@ writef("=> glprog=%n*n", glprog);
     prmat(WorkMatrix)
     writef("times*n")
     prmat(LandMatrix)
-    glMat4mul(WorkMatrix, LandMatrix, LandMatrix)
+    sys(Sys_gl, gl_M4mulM4, WorkMatrix, LandMatrix, LandMatrix)
     writef("gives*n")
     prmat(LandMatrix)
     abort(1000)
@@ -440,23 +493,23 @@ writef("=> glprog=%n*n", glprog);
 
   UNTIL done DO
   { processevents()
-
+//writef("returned from processevents()*n")
     // Only rotate the object if not stepping
     UNLESS stepping DO
     { // If not stepping adjust the orientation of the model.
       rotate(rtdot, rwdot, rldot)
 
       // Move the centre of the model
-      cgn := cgn #+ cgndot
-      cgw := cgw #+ cgwdot
-      cgh := cgh #+ cghdot
+      cgn := cgn + cgndot
+      cgw := cgw + cgwdot
+      cgh := cgh + cghdot
     }
 
-    // We now construct the matrix LandMatrix to transform
-    // points in real world coordinated to screen coordinates
+    // We now construct LandMatrix to transform points in real world
+    // coordinates to screen coordinates.
 
-    // We assume the eye is looking directly towards the centre
-    // of gravity of the model.
+    // We assume the eye is looking towards the centre of gravity
+    // of the model.
 
     // First rotate world coordinate (n,w,u) to
     // screen coodinates (x,y,z)
@@ -468,14 +521,14 @@ writef("=> glprog=%n*n", glprog);
 
     SWITCHON eyedirection INTO
     { DEFAULT:
-      CASE 0: eyen, eyew := #-1.000,   0.000; ENDCASE
-      CASE 1: eyen, eyew := #-0.707, #-0.707; ENDCASE
-      CASE 2: eyen, eyew :=   0.0,   #-1.000; ENDCASE
-      CASE 3: eyen, eyew :=   0.707, #-0.707; ENDCASE
-      CASE 4: eyen, eyew :=   1.0,     0.000; ENDCASE
-      CASE 5: eyen, eyew :=   0.707,   0.707; ENDCASE
-      CASE 6: eyen, eyew :=   0.0,     1.000; ENDCASE
-      CASE 7: eyen, eyew := #-0.707,   0.707; ENDCASE
+      CASE 0: eyen, eyew := -1.000,  0.000; ENDCASE
+      CASE 1: eyen, eyew := -0.707, -0.707; ENDCASE
+      CASE 2: eyen, eyew :=  0.0,   -1.000; ENDCASE
+      CASE 3: eyen, eyew :=  0.707, -0.707; ENDCASE
+      CASE 4: eyen, eyew :=  1.0,    0.000; ENDCASE
+      CASE 5: eyen, eyew :=  0.707,  0.707; ENDCASE
+      CASE 6: eyen, eyew :=  0.0,    1.000; ENDCASE
+      CASE 7: eyen, eyew := -0.707,  0.707; ENDCASE
     }
 
     eyeh := eyerelh
@@ -483,35 +536,35 @@ writef("=> glprog=%n*n", glprog);
     // Matrix to move aircraft and land so that the CG of
     // the aircraft is at the origin
 
-    glSetvec( LandMatrix, 16,
-                      1.0,  0.0,   0.0, 0.0,   // column 1
-                      0.0,  1.0,   0.0, 0.0,   // column 2
-                      0.0,  0.0,   1.0, 0.0,   // column 3
-                    #-cgn,#-cgw, #-cgh, 1.0    // column 4
+    setvec( LandMatrix, 16,
+                      1.0,  0.0,  0.0, 0.0,   // column 1
+                      0.0,  1.0,  0.0, 0.0,   // column 2
+                      0.0,  0.0,  1.0, 0.0,   // column 3
+                     -cgn, -cgw, -cgh, 1.0    // column 4
              )
 
     // Rotate the model and eye until the eye is on the z axis
     
-    { LET en, ew, eh = eyen, eyew, eyeh
-      LET oq = glRadius2(en, ew) 
-      LET op = glRadius3(en, ew, eh)
-      LET cos_theta = #- en #/ oq 
-      LET sin_theta = #- ew #/ oq 
-      LET cos_phi   =    oq #/ op 
-      LET sin_phi   =    eh #/ op 
+    { LET FLT en, FLT ew, FLT eh = eyen, eyew, eyeh
+      LET FLT oq = glRadius2(en, ew) 
+      LET FLT op = glRadius3(en, ew, eh)
+      LET FLT cos_theta = -en / oq 
+      LET FLT sin_theta = -ew / oq 
+      LET FLT cos_phi   =  oq / op 
+      LET FLT sin_phi   =  eh / op 
 
       // Rotate anti-clockwise about h axis by angle theta
       // to move the eye onto the nh plane.
-      glSetvec( WorkMatrix, 16,
-                  cos_theta, #-sin_theta, 0.0, 0.0,   // column 1
-                  sin_theta,   cos_theta, 0.0, 0.0,   // column 2
-                        0.0,         0.0, 1.0, 0.0,   // column 3
-                        0.0,         0.0, 0.0, 1.0    // column 4
+      setvec( WorkMatrix, 16,
+                  cos_theta, -sin_theta, 0.0, 0.0,   // column 1
+                  sin_theta,  cos_theta, 0.0, 0.0,   // column 2
+                        0.0,        0.0, 1.0, 0.0,   // column 3
+                        0.0,        0.0, 0.0, 1.0    // column 4
                )
 //sawritef("Rotation matrix R1*n")
 //prmat(LandMatrix)
 //abort(1000)
-      glMat4mul(WorkMatrix, LandMatrix, LandMatrix)
+      sys(Sys_gl, gl_M4mulM4, WorkMatrix, LandMatrix, LandMatrix)
 
       //newline()
       //writef("eyen=%6.3d eyew=%6.3d eyeh=%6.3d*n", eyen, eyew, eyeh)
@@ -521,19 +574,18 @@ writef("=> glprog=%n*n", glprog);
       //writef("and move the eye into the yz plane*n")
       //dbmatrix(LandMatrix)
 
-      
       // Rotate clockwise about w axis by angle phi
       // to move the eye onto the n axis. 
-      glSetvec( WorkMatrix, 16,
-            cos_phi, 0.0, #-sin_phi, 0.0,    // column 1
-                0.0, 1.0,       0.0, 0.0,    // column 2
-            sin_phi, 0.0,   cos_phi, 0.0,    // column 3
-                0.0, 0.0,       0.0, 1.0     // column 4
+      setvec( WorkMatrix, 16,
+            cos_phi, 0.0, -sin_phi, 0.0,    // column 1
+                0.0, 1.0,      0.0, 0.0,    // column 2
+            sin_phi, 0.0,  cos_phi, 0.0,    // column 3
+                0.0, 0.0,      0.0, 1.0     // column 4
                )
 //sawritef("Rotation matrix R2*n")
 //prmat(WorkMatrix)
 //abort(1000)
-      glMat4mul(WorkMatrix, LandMatrix, LandMatrix)
+      sys(Sys_gl, gl_M4mulM4, WorkMatrix, LandMatrix, LandMatrix)
 
       //newline()
       //writef("Matrix to rotate and translate the model*n")
@@ -547,127 +599,82 @@ writef("=> glprog=%n*n", glprog);
 //    y =  h
 //    z = -n
 
-    glSetvec(WorkMatrix, 16,
-                    0.0,  0.0, #-1.0, 0.0,   // column 1
-                  #-1.0,  0.0,   0.0, 0.0,   // column 2
-                    0.0,  1.0,   0.0, 0.0,   // column 3
-                    0.0,  0.0,   0.0, 1.0    // column 4
-            )
+    setvec(WorkMatrix, 16,
+                    0.0,  0.0, -1.0, 0.0,   // column 1
+                   -1.0,  0.0,  0.0, 0.0,   // column 2
+                    0.0,  1.0,  0.0, 0.0,   // column 3
+                    0.0,  0.0,  0.0, 1.0)   // column 4
 
-    glMat4mul(WorkMatrix, LandMatrix, LandMatrix)
+    sys(Sys_gl, gl_M4mulM4, WorkMatrix, LandMatrix, LandMatrix)
 
 
-//IF FALSE DO
-    { // Change the origin to the eye position on the z axis by
-      // moving the model eyedistance in the negative z direction.
-      glSetvec( WorkMatrix, 16,
-                1.0, 0.0,           0.0, 0.0, // column 1
-                0.0, 1.0,           0.0, 0.0, // column 2
-                0.0, 0.0,           1.0, 0.0, // column 3
-                0.0, 0.0, #-eyedistance, 1.0  // column 4
-              )
+    // Change the origin to the eye position on the z axis by
+    // moving the model eyedistance in the negative z direction.
+    setvec( WorkMatrix, 16,
+              1.0, 0.0,          0.0, 0.0, // column 1
+              0.0, 1.0,          0.0, 0.0, // column 2
+              0.0, 0.0,          1.0, 0.0, // column 3
+              0.0, 0.0, -eyedistance, 1.0) // column 4
 
 //sawritef("Change to eye origin matrix*n")
 //prmat(WorkMatrix)
 //abort(1000)
-      glMat4mul(WorkMatrix, LandMatrix, LandMatrix)
+    sys(Sys_gl, gl_M4mulM4, WorkMatrix, LandMatrix, LandMatrix)
 
-      //newline()
-      //writef("Matrix to rotate and translate the model*n")
-      //writef("and move the eye onto the z axis*n")
-      //writef("and move the eye a distance in the z direction*n")
-      //dbmatrix(LandMatrix)
-    }
+    //newline()
+    //writef("Matrix to rotate and translate the model*n")
+    //writef("and move the eye onto the z axis*n")
+    //writef("and move the eye a distance in the z direction*n")
+    //dbmatrix(LandMatrix)
 
-//IF FALSE DO
-    { // Define the truncated pyramid for the view projection
-      // using the frustrum transformation.
-      LET n, f = 0.1, 5000.0
-      LET fan, fsn = f#+n, f#-n
-      LET n2 = 2.0#*n
-      LET l, r = #-0.5, 0.5
-      LET ral, rsl = r#+l, r#-l
-      LET b, t = #-0.5, 0.5 
-      LET tab, tsb = t#+b, t#-b
+    // The perspective matrix can be set using the glSetPerspective library
+    // function defined in g/gl.b
 
-      //glSetvec( WorkMatrix, 16,
-      //          n2#/rsl,      0.0,            0.0,   0.0, // column 1
-      //              0.0,  n2#/tsb,            0.0,   0.0, // column 2
-      //         ral#/rsl, tab#/tsb,     #-fan#/fsn, #-1.0, // column 3
-      //              0.0,      0.0, #-(n2#*f)#/fsn,   0.0  // column 4
-      //        )
-
-      // Alternatively use the perspective transformation explicitly.
-      { LET aspect =  FLOAT screenxsize #/ FLOAT screenysize
-        LET fv = 2.0              // Half field of view at unit distance
-        glSetvec( WorkMatrix, 16,
-           fv #/ aspect, 0.0,                         0.0,   0.0, // column 1
-                    0.0,  fv,                         0.0,   0.0, // column 2
-                    0.0, 0.0,        (f #+ n) #/ (n #- f), #-1.0, // column 3
-                    0.0, 0.0, (2.0 #* f #* n) #/ (n #- f),   0.0  // column 4
-                )
-
-        // The perspective matrix could be set more conveniently using
-        // glSetPerspective library function defined in g/gl.b
-        //glSetPerspective(WorkMatrix,
-        //                     aspect, // Aspect ratio
-        //                        1.0, // Field of view at unit distance
-        //                        0.1, // Distance to near limit
-        //                     5000.0) // Distance to far limit
-      }
-
+    glSetPerspective(WorkMatrix,
+                        1.0, // Field of view at unit distance
+                     FLOAT screenxsize / FLOAT screenysize, // Aspect ratio
+                        0.1, // Distance to near limit
+                     5000.0) // Distance to far limit
 
 //sawritef("work matrix*n")
 //prmat(WorkMatrix)
 //sawritef("Projection matrix*n")
 //prmat(LandMatrix)
-      glMat4mul(WorkMatrix, LandMatrix, LandMatrix)
+    sys(Sys_gl, gl_M4mulM4, WorkMatrix, LandMatrix, LandMatrix)
 //sawritef("final Projection matrix*n")
 //dbmatrix(LandMatrix)
 
-/*
-      newline()
-      writef(" n="); prf8_3(n)
-      writef(" f=%8.3d", sc3(f))
-      writef(" l=%8.3d", sc3(l))
-      writef(" r=%8.3d", sc3(r))
-      writef(" b=%8.3d", sc3(b))
-      writef(" t=%8.3d", sc3(t))
-      newline()
-*/
-
-//abort(1000)
-    }
+//  writef("*nn=%8.3f f=%8.3f l=%8.3f r=%8.3f b=%8.3f t=%8.3f*n",
+//            n,f,l,r,b,t)
 
     // Send the LandMatrix to uniform variable "landmatrix" for
     // use by the vertex shader transform land points.
-    glUniformMatrix4fv(LandMatrixLoc, glprog, LandMatrix)
+    sys(Sys_gl, gl_UniformMatrix4fv, LandMatrixLoc, glprog, LandMatrix)
 
     // Set the model rotation matrix from model
     // coordinates (t,w,l) to world coordinates (x,y,z)
-    glSetvec( ModelMatrix, 16,
+    setvec( ModelMatrix, 16,
                     ctn,  ctw, cth, 0.0,  // column 1
                     cwn,  cww, cwh, 0.0,  // column 2
                     cln,  clw, clh, 0.0,  // column 3
-                    0.0,  0.0, 0.0, 1.0   // column 4
-            )
+                    0.0,  0.0, 0.0, 1.0)  // column 4
+
     ///newline()
     ///writef("Matrix to rotate the model*n")
     ///dbmatrix(LandMatrix)
 
-    // Set the model's centre of gravity to (cgn,cgw,cgh)
-    glSetvec( WorkMatrix, 16,
+    // Set the model's centre to (cgn,cgw,cgh)
+    setvec( WorkMatrix, 16,
                   1.0, 0.0, 0.0, 0.0,    // column 1
                   0.0, 1.0, 0.0, 0.0,    // column 2
                   0.0, 0.0, 1.0, 0.0,    // column 3
-                  cgn, cgw, cgh, 1.0     // column 4
-               )
+                  cgn, cgw, cgh, 1.0)    // column 4
 
 //sawritef("Translation matrix*n")
 //prmat(WorkMatrix)
 //abort(1000)
 
-    glMat4mul(WorkMatrix, ModelMatrix, ModelMatrix)
+    sys(Sys_gl, gl_M4mulM4, WorkMatrix, ModelMatrix, ModelMatrix)
 
     //newline()
     //writef("Matrix to rotate and translate the model*n")
@@ -675,34 +682,36 @@ writef("=> glprog=%n*n", glprog);
     //abort(1000)
 
     // Now apply the projection transformation to the model matrix
-    glMat4mul(LandMatrix, ModelMatrix, ModelMatrix)
+    sys(Sys_gl, gl_M4mulM4, LandMatrix, ModelMatrix, ModelMatrix)
 
     // Send the ModelMatrix to uniform variable "modelmatrix" for
-    // use by the vertex shader transform points on the model.
-    glUniformMatrix4fv(ModelMatrixLoc, glprog, ModelMatrix)
+    // use by the vertex shader to transform points of the model.
+    sys(Sys_gl, gl_UniformMatrix4fv, ModelMatrixLoc, glprog, ModelMatrix)
 
     // Calculate the cosines and sines of the control surfaces.
-    { LET RudderAngle = #- rldot #* 100.0
+    { LET RudderAngle = -rldot * 100.0
       CosRudder := sys(Sys_flt, fl_cos, RudderAngle)
       SinRudder := sys(Sys_flt, fl_sin, RudderAngle)
-//writef("RudderAngle = %9.3d  cos=%5.3d   sin=%5.3d*n",
-//        sc3(RudderAngle), sc3(CosRudder), sc3(SinRudder))
+//writef("RudderAngle = %9.3f  cos=%5.3f   sin=%5.3f*n",
+//        RudderAngle, CosRudder, SinRudder)
     }
 
-    { LET ElevatorAngle = rwdot  #* 100.0
+    { LET ElevatorAngle = rwdot * 100.0
       CosElevator := sys(Sys_flt, fl_cos, ElevatorAngle)
       SinElevator := sys(Sys_flt, fl_sin, ElevatorAngle)
-//writef("ElevatorAngle = %9.3d  cos=%5.3d   sin=%5.3d*n",
-//        sc3(ElevatorAngle), sc3(CosElevator), sc3(SinElevator))
+//writef("ElevatorAngle = %9.3f  cos=%5.3f   sin=%5.3f*n",
+//        ElevatorAngle, CosElevator, SinElevator)
     }
 
-    { LET AileronAngle = rtdot #* 100.0
+    { LET AileronAngle = rtdot * 100.0
       CosAileron := sys(Sys_flt, fl_cos, AileronAngle)
       SinAileron := sys(Sys_flt, fl_sin, AileronAngle)
+//writef("AileronAngle = %9.3f  cos=%5.3f   sin=%5.3f*n",
+//        AileronAngle, CosAileron, SinAileron)
     }
 
     // Send them to the graphics hardware as elements of the
-    // uniform matrix "control" for use by the vertex shader.
+    // uniform 4x4 matrix "control" for use by the vertex shader.
     { LET control = VEC 15
       FOR i = 0 TO 15 DO control!i := 0.0
 
@@ -712,55 +721,50 @@ writef("=> glprog=%n*n", glprog);
       control!03 :=  SinElevator  // 0 3
       control!04 :=  CosAileron   // 1 0
       control!05 :=  SinAileron   // 1 1
+      FOR i = 6 TO 15 DO control!i := 0.0
 
       // Send the control values to the graphics hardware
-      glUniformMatrix4fv(ControlLoc, glprog, control)
+      sys(Sys_gl, gl_UniformMatrix4fv, ControlLoc, glprog, control)
     }
 
-//writef(" %5.3d %5.3d %5.3d %5.3d %5.3d %5.3d*n",
-//        sc3(CosRudder), sc3(CosElevator), sc3(CosAileron),
-//        sc3(SinRudder), sc3(SinElevator), sc3(SinAileron))
-
     // Draw a new image
-    glClearColour(130, 130, 250, 255)
-    glClearBuffer() // Clear colour and depth buffers
+    sys(Sys_gl, gl_ClearBuffer) // Clear colour and depth buffers
+    sys(Sys_gl, gl_ClearColour,
+        FLOAT 160/255, FLOAT 160/255, FLOAT 250/255, 1.0)
 
     drawmodel()
 
 IF FALSE DO
     FOR i = -1 TO 1 BY 2 DO
-    { // Draw half size images either side
-      glSetvec( LandMatrix, 16,
-                   ctn#/100.0,  ctw#/100.0, cth#/100.0, 0.0, // column 1
-                   cwn#/100.0,  cww#/100.0, cwh#/100.0, 0.0, // column 2
-                   cln#/100.0,  clw#/100.0, clh#/100.0, 0.0, // column 3
-      cgn#+0.450#*(FLOAT i),       cgw,        cgh,     1.0  // column 4
-              )
+    { // Draw half size images either side -- Does not work yet
+      setvec( LandMatrix, 16,
+                   ctn/10.0,  ctw/10.0, cth/10.0, 0.0, // column 1
+                   cwn/10.0,  cww/10.0, cwh/10.0, 0.0, // column 2
+                   cln/10.0,  clw/10.0, clh/10.0, 0.0, // column 3
+         cgn+0.450*(FLOAT i),      cgw,      cgh, 1.0) // column 4
 
-      glSetPerspective(WorkMatrix, 1.0, 0.5, 0.1, 5000.0)
-      glMat4mul(WorkMatrix, LandMatrix, LandMatrix)
+      glSetPerspective(WorkMatrix, 0.5, 1.0, 0.1, 5000.0)
+      sys(Sys_gl, gl_M4mulM4, WorkMatrix, LandMatrix, LandMatrix)
 
       // Send the matrix to uniform variable "matrix" for use
       // by the vertex shader.
-      glUniformMatrix4fv(ModelMatrixLoc, glprog, LandMatrix)
+      sys(Sys_gl, gl_UniformMatrix4fv, ModelMatrixLoc, glprog, LandMatrix)
 
       drawmodel()
     }
 
-  //  plotf(250, 30, "First Demo")
+    sys(Sys_gl, gl_SwapBuffers)
 
-    glSwapBuffers()
-
-    delay(0_020) // Delay for 1/50 sec
+    delay(0_010) // Delay for 1/50 sec
 //abort(1000)
   }
 
-  sys(Sys_gl, GL_DisableVertexAttribArray, VertexLoc)
-  sys(Sys_gl, GL_DisableVertexAttribArray, ColorLoc)
-  sys(Sys_gl, GL_DisableVertexAttribArray, DataLoc)
+  sys(Sys_gl, gl_DisableVertexAttribArray, VertexLoc)
+  sys(Sys_gl, gl_DisableVertexAttribArray, ColorLoc)
+  sys(Sys_gl, gl_DisableVertexAttribArray, DataLoc)
 
   delay(0_050)
-  glClose()
+  sys(Sys_gl, gl_Quit)
 
   RESULTIS 0
 }
@@ -800,7 +804,7 @@ AND Compileshader(prog, isVshader, filename) = VALOF
   buf := ramstream!scb_buf
 
   shader := sys(Sys_gl,
-                (isVshader -> GL_CompileVshader, GL_CompileFshader),
+                (isVshader -> gl_CompileVshader, gl_CompileFshader),
                 prog,
                 buf)
 
@@ -810,15 +814,26 @@ AND Compileshader(prog, isVshader, filename) = VALOF
 }
 
 AND drawmodel() BE
-  TEST useObjects
-  THEN { // Draw triangles using vertex and index data
-         // held in graphics objects
-         glDrawTriangles(IndexDataSize, 0)
-       }
-  ELSE { // Draw triangles using vertex and index data
-         // held in main memory
-         glDrawTriangles(IndexDataSize, IndexData)
-       }
+{ // Draw the primitives using vertex and index data held in
+  // graphics objects as specified by the display items in dvec.
+  // dvecupb is the upperbound of dvec and each display item
+  // has three element [mode, n, offset]
+  FOR p = 0 TO dvecupb BY 3 DO
+  { LET d = @dvec!p
+    LET mode   = d!0  // GL_POINTS, GL_LINES, GL_LINESTRIP etc.
+    LET n      = d!1  // Number of index elements.
+    LET offset = d!2  // Offset in the index vector.
+
+//writef("drawmodel: mode=%n size=%n offset=%n*n",
+//        mode, n, offset)
+
+    sys(Sys_gl, gl_DrawElements,
+                   mode,     // eg GL_TRIANGLES
+                   n   ,     // Number of index elements to use.
+                   offset)   // Index of the first index vector position
+		             // to use.
+  }
+}
 
 AND processevents() BE WHILE getevent() SWITCHON eventtype INTO
 { DEFAULT:
@@ -837,46 +852,46 @@ AND processevents() BE WHILE getevent() SWITCHON eventtype INTO
 
       CASE 'P': // Print direction cosines and other data
                 newline()
-                writef("xyz=   %9.3d %9.3d %9.3d*n",
-                       sc3(cgn),sc3(cgw),sc3(cgh))
-                writef("ct     %9.6d %9.6d %9.6d rtdot=%9.6d*n",
-                       sc6(ctn),sc6(ctw),sc6(cth), sc6(rtdot))
-                writef("cw     %9.6d %9.6d %9.6d rwdot=%9.6d*n",
-                       sc6(cwn),sc6(cww),sc6(cwh), sc6(rwdot))
-                writef("cl     %9.6d %9.6d %9.6d rldot=%9.6d*n",
-                       sc6(cln),sc6(clw),sc6(clh), sc6(rldot))
+                writef("xyz=   %9.3f %9.3f %9.3f*n",
+                       cgn,cgw,cgh)
+                writef("ct     %9.6f %9.6f %9.6f rtdot=%9.6f*n",
+                       ctn,ctw,cth, rtdot)
+                writef("cw     %9.6f %9.6f %9.6f rwdot=%9.6f*n",
+                       cwn,cww,cwh, rwdot)
+                writef("cl     %9.6f %9.6f %9.6f rldot=%9.6f*n",
+                       cln,clw,clh, rldot)
                 newline()
                 writef("eyedirection %n*n", eyedirection)
-                writef("eyepos %9.3d %9.3d %9.3d*n",
-                        sc3(eyen), sc3(eyew), sc3(eyeh))
-                writef("eyedistance = %9.3d*n", sc3(eyedistance))
+                writef("eyepos %9.3f %9.3f %9.3f*n",
+                        eyen, eyew, eyeh)
+                writef("eyedistance = %9.3f*n", eyedistance)
                 LOOP
 
       CASE 'S': stepping := ~stepping
                 LOOP
 
       CASE 'L': // Increase cgwdot
-                cgwdot := cgwdot #+ 0.05
+                cgwdot := cgwdot + 0.05
                 LOOP
 
       CASE 'R': // Decrease cgwdot
-                cgwdot := cgwdot #- 0.05
+                cgwdot := cgwdot - 0.05
                 LOOP
 
       CASE 'U': // Increase cghdot
-                cghdot := cghdot #+ 0.05
+                cghdot := cghdot + 0.05
                 LOOP
 
       CASE 'D': // Decrease cghdot
-                cghdot := cghdot #- 0.05
+                cghdot := cghdot - 0.05
                 LOOP
 
       CASE 'F': // Increase cgndot
-                cgndot := cgndot #+ 0.05
+                cgndot := cgndot + 0.05
                 LOOP
 
       CASE 'B': // Decrease cgndot
-                cgndot := cgndot #- 0.05
+                cgndot := cgndot - 0.05
                 LOOP
 
       CASE '0':
@@ -889,31 +904,31 @@ AND processevents() BE WHILE getevent() SWITCHON eventtype INTO
       CASE '7': eyedirection := eventa2 - '0'
                 LOOP
 
-      CASE '8': eyerelh := eyerelh #+ 0.1; LOOP
-      CASE '9': eyerelh := eyerelh #+ #- 0.1; LOOP
+      CASE '8': eyerelh := eyerelh +  0.1; LOOP
+      CASE '9': eyerelh := eyerelh + -0.1; LOOP
 
       CASE '=':
-      CASE '+': eyedistance := eyedistance #* 1.1; LOOP
+      CASE '+': eyedistance := eyedistance * 1.1; LOOP
 
       CASE '_':
       CASE '-': IF eyedistance#>=1.0 DO
-                   eyedistance := eyedistance #/ 1.1
+                   eyedistance := eyedistance / 1.1
                 LOOP
 
-      CASE '>':CASE '.':    rldot := rldot #+ 0.0005; LOOP
-      CASE '<':CASE ',':    rldot := rldot #- 0.0005; LOOP
+      CASE '>':CASE '.':    rldot := rldot + 0.0005; LOOP
+      CASE '<':CASE ',':    rldot := rldot - 0.0005; LOOP
 
-      CASE sdle_arrowdown:  rwdot := rwdot #+ 0.0005; LOOP
-      CASE sdle_arrowup:    rwdot := rwdot #- 0.0005; LOOP
+      CASE sdle_arrowdown:  rwdot := rwdot + 0.0005; LOOP
+      CASE sdle_arrowup:    rwdot := rwdot - 0.0005; LOOP
 
-      CASE sdle_arrowleft:  rtdot := rtdot #+ 0.0005; LOOP
-      CASE sdle_arrowright: rtdot := rtdot #- 0.0005; LOOP
+      CASE sdle_arrowleft:  rtdot := rtdot + 0.0005; LOOP
+      CASE sdle_arrowright: rtdot := rtdot - 0.0005; LOOP
     }
     LOOP
 
   CASE sdle_quit:             // 12
     writef("QUIT*n");
-    sys(Sys_gl, GL_Quit)
+    sys(Sys_gl, gl_Quit)
     LOOP
 
   CASE sdle_videoresize:      // 14
@@ -921,30 +936,26 @@ AND processevents() BE WHILE getevent() SWITCHON eventtype INTO
     LOOP
 }
 
-// Convertion functions between floating point and scaled values.
-AND sc3(x) = glF2N(    1_000, x)
-AND sc6(x) = glF2N(1_000_000, x)
-
 AND inprod(a,b,c, x,y,z) =
   // Return the cosine of the angle between two unit vectors.
   a #* x #+ b #* y #+ c #* z
 
-AND rotate(t, w, l) BE
+AND rotate(FLT t, FLT w, FLT l) BE
 { // Rotate the orientation of the aircraft
   // t, w and l are assumed to be small and cause
   // rotation about axis t, w, l. Positive values cause
   // anti-clockwise rotations about their axes.
 
-  LET tx = inprod(1.0, #-l,   w,  ctn,cwn,cln)
-  LET wx = inprod(  l, 1.0, #-t,  ctn,cwn,cln)
-  LET lx = inprod(#-w,   t, 1.0,  ctn,cwn,cln)
+  LET tx = inprod(1.0, -l,   w,  ctn,cwn,cln)
+  LET wx = inprod(  l, 1.0, -t,  ctn,cwn,cln)
+  LET lx = inprod(#-w,  t, 1.0,  ctn,cwn,cln)
 
-  LET ty = inprod(1.0, #-l,   w,  ctw,cww,clw)
-  LET wy = inprod(  l, 1.0, #-t,  ctw,cww,clw)
+  LET ty = inprod(1.0,  -l,   w,  ctw,cww,clw)
+  LET wy = inprod(  l, 1.0,  -t,  ctw,cww,clw)
   LET ly = inprod(#-w,   t, 1.0,  ctw,cww,clw)
 
-  LET tz = inprod(1.0, #-l,   w,  cth,cwh,clh)
-  LET wz = inprod(  l, 1.0, #-t,  cth,cwh,clh)
+  LET tz = inprod(1.0,  -l,   w,  cth,cwh,clh)
+  LET wz = inprod(  l, 1.0,  -t,  cth,cwh,clh)
   LET lz = inprod(#-w,   t, 1.0,  cth,cwh,clh)
 
   ctn, ctw, cth := tx, ty, tz
@@ -956,21 +967,21 @@ AND rotate(t, w, l) BE
 }
 
 AND adjustlength(v) BE
-{ // This helps to keep vector v of unit length
-  LET r = glRadius3(v!0, v!1, v!2)
-  v!0 := v!0 #/ r
-  v!1 := v!1 #/ r
-  v!2 := v!2 #/ r
+{ // Make v a vector of unit length
+  LET FLT r = glRadius3(v!0, v!1, v!2)
+  v!0 := v!0 / r
+  v!1 := v!1 / r
+  v!2 := v!2 / r
 }
 
 AND adjustortho(a, b) BE
-{ // This helps to keep the unit vector b orthogonal to a
-  LET a0, a1, a2 = a!0, a!1, a!2
-  LET b0, b1, b2 = b!0, b!1, b!2
-  LET corr = inprod(a0,a1,a2, b0,b1,b2)
-  b!0 := b0 #- a0 #* corr
-  b!1 := b1 #- a1 #* corr
-  b!2 := b2 #- a2 #* corr
+{ // Attempt to keep the unit vector b orthogonal to a
+  LET FLT a0, FLT a1, FLT a2 = a!0, a!1, a!2
+  LET FLT b0, FLT b1, FLT b2 = b!0, b!1, b!2
+  LET FLT corr = a0*b0 + a1*b1 + a2*b2
+  b!0 := b0 - a0 * corr
+  b!1 := b1 - a1 * corr
+  b!2 := b2 - a2 * corr
 }
 
 AND prmat(m) BE
@@ -1003,7 +1014,7 @@ AND prv(v) BE
   prf8_3(v!3)
 }
 
-AND prf8_3(x) BE writef(" %8.3d", sc3(x))
+AND prf8_3(x) BE writef(" %8.3f", x)
 
 AND dbmatrix(m) BE //IF FALSE DO
 { LET x,y,z,w = ?,?,?,?
@@ -1011,28 +1022,28 @@ AND dbmatrix(m) BE //IF FALSE DO
   LET n, p, one = #-0.5, #+0.5, 1.0
   prmat(m); newline()
   x,y,z,w := 1.0,0.0,0.0,1.0
-  prv(v); glMat4mulV(m, v, v); writef(" => "); prv(v); newline()
+  prv(v); sys(Sys_gl, gl_M4mulV, m, v, v); writef(" => "); prv(v); newline()
   x,y,z,w := 0.0,1.0,0.0,1.0
-  prv(v); glMat4mulV(m, v, v); writef(" => "); prv(v); newline()
+  prv(v); sys(Sys_gl, gl_M4mulV, m, v, v); writef(" => "); prv(v); newline()
   x,y,z,w := 0.0,0.0,1.0,1.0
-  prv(v); glMat4mulV(m, v, v); writef(" => "); prv(v); newline()
+  prv(v); sys(Sys_gl, gl_M4mulV, m, v, v); writef(" => "); prv(v); newline()
 
   x,y,z,w := n,n,p,one
-  prv(v); glMat4mulV(m, v, v); writef(" => "); prv(v); newline()
+  prv(v); sys(Sys_gl, gl_M4mulV, m, v, v); writef(" => "); prv(v); newline()
   x,y,z,w := p,n,p,one
-  prv(v); glMat4mulV(m, v, v); writef(" => "); prv(v); newline()
+  prv(v); sys(Sys_gl, gl_M4mulV, m, v, v); writef(" => "); prv(v); newline()
   x,y,z,w := p,n,n,one
-  prv(v); glMat4mulV(m, v, v); writef(" => "); prv(v); newline()
+  prv(v); sys(Sys_gl, gl_M4mulV, m, v, v); writef(" => "); prv(v); newline()
   x,y,z,w := n,n,n,one
-  prv(v); glMat4mulV(m, v, v); writef(" => "); prv(v); newline()
+  prv(v); sys(Sys_gl, gl_M4mulV, m, v, v); writef(" => "); prv(v); newline()
 
   x,y,z,w := n,p,p,one
-  prv(v); glMat4mulV(m, v, v); writef(" => "); prv(v); newline()
+  prv(v); sys(Sys_gl, gl_M4mulV, m, v, v); writef(" => "); prv(v); newline()
   x,y,z,w := p,p,p,one
-  prv(v); glMat4mulV(m, v, v); writef(" => "); prv(v); newline()
+  prv(v); sys(Sys_gl, gl_M4mulV, m, v, v); writef(" => "); prv(v); newline()
   x,y,z,w := p,p,n,one
-  prv(v); glMat4mulV(m, v, v); writef(" => "); prv(v); newline()
+  prv(v); sys(Sys_gl, gl_M4mulV, m, v, v); writef(" => "); prv(v); newline()
   x,y,z,w := n,p,n,one
-  prv(v); glMat4mulV(m, v, v); writef(" => "); prv(v); newline()
+  prv(v); sys(Sys_gl, gl_M4mulV, m, v, v); writef(" => "); prv(v); newline()
   newline()
 }

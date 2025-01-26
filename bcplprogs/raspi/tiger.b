@@ -13,8 +13,18 @@ It has been extended to use 32 rather than 16 bit arithmetic.
 It is planned that this will simulate the flying characterists of
 a De Havilland D.H.82A Tiger Moth which I learnt to fly as a teenager.
 
+This version uses the SDL Graphics Library. The version of this
+program that uses the OpenGL graphics library is called gltiger.b.
 
 Change history
+
+08/08/2020
+This progran need revision since the recent changes to sdl.b have stopped
+it from working. Corrections will be made in due course.
+
+22/03/2018
+Made extensive modifications based on the recent changes to draw3d.b.
+It now makes use of floating point and the new FLT feature.
 
 25/01/2013
 Name changed to tiger.b
@@ -24,40 +34,39 @@ Controls
 Either use a USB Joystick for elevator, ailerons and throttle, or
 use the keyboard as follows:
 
-Up arrow      Trim joystick forward
-Down arrow    Trim joystick backward
-Left arrow    Trim joystick left
-Right arrow   Trim joystick right
+Up arrow      Trim joystick forward a bit
+Down arrow    Trim joystick backward a bit
+Left arrow    Trim joystick left a bit
+Right arrow   Trim joystick right a bit
 
 , or <        Trim rudder left
 . or >        Trim rudder right
-x/z           More/Less throttle
+x             More throttle
+z             Less throttle
 
 0             Display the pilot's view
 1,2,3,4,5,6,7,8 Display the aircraft viewed from various angles
 
 f             View aircraft from a greater distance
-n             View aircraft from a closer distance
+n             View aircraft from a closer position
 
 p             pause/unpause the simulation
 
 g             Reset the aircraft on the glide path
+
 t             Reset the aircraft ready for take off -- default
               ie stationary on the ground at the end of the runway
 
-a             Select aircraft
+u             Plot usage
 
-s             Start/Stop engine
-b             Brake on/off -- not available
-u             Toggle CPU usage
+a, b, c       Rotate the aircraft anti-clockwise about axes t, w, l
+A, B, C       Rotate the aircraft clockwise about axes t, w, l
 
-t             testing mode
 q             Quit
 
 There are joystick buttons equivalent to Up arrow, Down arrow, Left
 Arrow and Right arrow. There are also joystick buttons to trim the
-rudder left and right, useful for streering on the runway. There are
-also joystick buttons to toggle gear up/down and brakes on/off.
+rudder left and right, useful for steering on the runway.
 
 The display shows various beacons on the ground including the lights
 on the sides and the ends of the runway.
@@ -66,44 +75,48 @@ The display also shows various flight instruments including the
 artificial horizon, the height and speed and various navigational aids
 to help the pilot find the runway.
 
+Note that a real tigermoth does not actually have an artificial horizon
+so cannot be flown in cloud or at night.
 */
 
-SECTION "sdllib"
 GET "libhdr"
 GET "sdl.h"
 GET "sdl.b"
 .
-SECTION "tiger"
 GET "libhdr"
 GET "sdl.h"
 
 MANIFEST {
-  One = 1_000000     // Direction cosines scaling factor
-                     // ie 6 decimal digits after the decimal point.
-  D45 = 0_707107     // cosine of pi/4
-  Sps = 10           // Steps per second
-  Sps2 = 2*Sps
+  FLT D45 = 0.707107  // cosine of pi/4
+  FLT Sps = 20.0      // Steps per second
 
-  // Most measurements are in feet scaled with 3 digits after the decimal point
-  k_g = 32_000       // Acceleration due to gravity, 32 ft per sec per sec
-                     // Scaled with 3 digits after the decimal point.
-  k_drag = 30000    // Acceleration due to drag as 100 ft per sec
-                     // The drag is proportional to the square of the speed.
+  // Most measurements are in feet held as floating point numbers.
+
+  FLT k_g = 32.0      // Acceleration due to gravity, 32 ft per sec per sec
+                      // Scaled with 3 digits after the decimal point.
+  FLT k_drag = k_g/15 // Acceleration due to drag as 100 ft per sec
+                      // The drag is proportional to the square of the speed.
 
   // Conversion factors
-  mph2fps   = 5280_000/(60*60)
-  mph2knots = 128_000/147
+  FLT mph2fps   = 5280.0/(60*60)
+  FLT mph2knots = 128.0/147
 }
 
 GLOBAL {
-  aircraft:ug  // Select which aircraft to simulate
+  done:ug
+
+  FLT One      // Set to 1.0  Loading globals are cheaper than
+  FLT Zro      // Set to 0.0  loading 32-bit constants.
 
   stepping     // =FALSE if not stepping the simulation
+  stepcount
+  msecs1
+  FLT steprate
+
   crashed      // =TRUE if crashed
-  debugging
-  testing      // Toggle testing mode
-  plotusage
-  done
+  debugging    // Toggled by the D command.
+  plotusage    // Toggled by the U command.
+  
 
   col_black
   col_blue
@@ -129,38 +142,48 @@ GLOBAL {
   col_lightmajenta
   col_lightcyan
 
-  c_throttle; c_trimthrottle //      0 .. 65535
-  c_aileron;  c_trimaileron  // -32768 .. 32767
-  c_elevator; c_trimelevator // -32768 .. 32767
-  c_rudder;   c_trimrudder   // -32768 .. 32767
+  FLT c_throttle; FLT c_trimthrottle; FLT throttle  //   0.0 to +1.0
+  FLT c_aileron;  FLT c_trimaileron;  FLT aileron   //  -1.0 to +1.0
+  FLT c_elevator; FLT c_trimelevator; FLT elevator  //  -1.0 to +1.0
+  FLT c_rudder;   FLT c_trimrudder;   FLT rudder    //  -1.0 to +1.0
 
-  enginestarted
-  rpm; targetrpm
-  thrust
+  enginestarted     // = TRUE or FALSE
+  FLT rpm; FLT targetrpm
+  FLT thrust
 
-  rateofclimb  // In ft/min
+  FLT rateofclimb  // In ft/min
 
-  c_geardown // TRUE or FALSE
-  c_brakeson // TRUE or FALSE
+  FLT ctn; FLT ctw; FLT cth    // Direction cosines of direction t (forward)
+  FLT cwn; FLT cww; FLT cwh    // Direction cosines of direction w (left)
+  FLT cln; FLT clw; FLT clh    // Direction cosines of direction l (lift)
 
-  ctx; cty; ctz   // Direction cosines of direction t
-  cwx; cwy; cwz   // Direction cosines of direction w
-  clx; cly; clz   // Direction cosines of direction l
+  FLT cetn; FLT cetw; FLT ceth // Eye direction cosines of direction t (forward)
+  FLT cewn; FLT ceww; FLT cewh // Eye direction cosines of direction w (left)
+  FLT celn; FLT celw; FLT celh // Eye direction cosines of direction l (lift)
 
-  cetx; cety; cetz // Eye direction cosines of direction t
-  cewx; cewy; cewz // Eye direction cosines of direction w
-  celx; cely; celz // Eye direction cosines of direction l
+  FLT eyen; FLT eyew; FLT eyeh // Position of the eye relative to the aircraft.
+  FLT eyedist                  // Eye distance from aircraft
 
-  cockpitz        // Height of the pilots eye
+  FLT rtdot; FLT rwdot; FLT rldot // Anti-clockwise rotation rates about the
+                                  // t, w and l axes in radian per second.
 
-  cgx; cgy; cgz   // Coordinates of the CG of the aircraft
-                  // in feet with 3 digits after the decimal point
-                  // eg cgz=1000_000 represents a height of 1000 ft
+  // Rotational forces about the aircraft axes.
+  FLT rft; FLT rft1     // Rotational force about t axis in ft poundals
+  FLT rfw; FLT rfw1     // Rotational force about w axis
+  FLT rfl; FLT rfl1     // Rotational force about l axis
 
-  cgxdot; cgydot; cgzdot // These are set by step()
+  cdrawquad3d       // (x1,y1,z1, x2,y2,z2, x3,y3,z3, x4,y4,z4)
+  cdrawtriangle3d   // (x1,y1,z1, x2,y2,z2, x3,y3,z3)
+                    // All floating point values.
 
-  eyex; eyey; eyez // Relative position of the eye
-  eyedist          // Eye x or y distance from aircraft
+  FLT cockpitl      // Height of the pilots eye in ft.
+
+  FLT posn; FLT posw; FLT posh // World coordinates of the aircraft origin.
+  FLT cgn;  FLT cgw;  FLT cgh  // World coordinates of the aircraft CG.
+                               // about 0.6 ft in negative t direction
+                               // from the origin.
+
+  FLT cgndot; FLT cgwdot; FLT cghdot // Speeds in ft/s
 
   hatdir           // Hat direction
   hatmsecs         // msecs of last hat change
@@ -168,610 +191,768 @@ GLOBAL {
                    // 0 = cockpit view
                    // 1,...,8 view from behind, behind-left, etc
 
-  cdrawtriangle3d
-  cdrawquad3d
+  // Speed in various directions is measured in ft/s.
+  FLT tdot; FLT wdot; FLT ldot // Speed in t, w and l directions
+  FLT tdotsq; FLT wdotsq; FLT ldotsq // Speed squared in t, w and l directions
 
-  // Speed in various directions is measured in ft/s scaled
-  // with 3 digits after the decimal point
-  // eg 146_666 represents 146.666 ft/s = 100 mph
-  tdot;   wdot;   ldot   // Speed in t, w and l directions
-  tdotsq; wdotsq; ldotsq // Speed squared in t, w and l directions
+  FLT mass                  // Mass of the aircraft, typically 2000 lbs
 
-  mass                   // Mass of the aircraft
+  FLT mit; FLT miw; FLT mil // Moment of inertia about t, w and l axes
+                            // 1 corresponds to a mass of 1 lb 1 ft from the axis.
 
-  mit; miw; mil // Moment of inertia about t, w and l axes
+  FLT rtdot; FLT rwdot; FLT rldot // Rotation rates about t, w and l axes
+                                  // in radians per second.
+  FLT rdt;   FLT rdw;   FLT rdl   // Rotational damping moment about
+                                  // the t, w and l axes
 
-  rtdot; rwdot; rldot // Rotation rates about t, w and l axes
-  rdt;   rdw;   rdl   // Rotational damping about t, w and l axes
+  // Linear forces in the three directions
+  // These are in poundals. 1 poundal will accelerate a mass of 1 lb
+  // at a rate of 1 ft/s/s. The force of gravity on a mass of 1 lb is
+  // g poundals, giving an acceleration of g ft/s/s.
+  FLT ft; FLT ft1       // Force and previous force in t direction
+  FLT fw; FLT fw1       // Force and previous force in w direction
+  FLT fl; FLT fl1       // Force and previous force in l direction
 
-  //Linear forces are scaled with 3 digits after the decimal point
-  ft; ft1       // Force and previous force in t direction
-  fw; fw1       // Force and previous force in w direction
-  fl; fl1       // Force and previous force in l direction
+  // Rotational forces about the three axes.
+  FLT rft; FLT rft1     // Current and previous moments about t axis
+  FLT rfw; FLT rfw1     // Current and previous moments about w axis
+  FLT rfl; FLT rfl1     // Current and previous moments about l axis
 
-  // Rotational forces are scaled with 6 digits after the decimal point
-  // as are direction cosines.
-  rft; rft1     // Current and previous moment about t axis
-  rfw; rfw1     // Current and previous moment about w axis
-  rfl; rfl1     // Current and previous moment about l axis
+  FLT atl // Angle of attack
 
-  atl; atw; awl // Angle of air flow in planes tl, tw and wl
+  // Tables interpolated by rdtab(a, tab) giving the  lift
+  // and drag coefficients for a given angle a in degrees.
+  lifttab   // Tables giving the lift coefficient.
+  dragtab   // Tables giving the drag coefficient.
 
-  // Table interpolated by rdtab(angle, tab)
-  rtltab; rtwtab; rwltab  // Rotational tables
-  tltab;  twtab;  wltab   // Linear tables
+  // For instance the table lifttab give the lift coeffient causes by air
+  // coming towards the aircraft at an a is the angle between O and (ldot,tdot)
+  // and the direction t. If a>=0 the airflow is coming towards the upper
+  // of the wing. If a<0 the airflow is coming from the more more normal
+  // direction toward the underside of the wing. If a=170 the air flow is
+  // from behind and 10 degrees above. If a=-170 the air flow is from behind
+  // and 10 degrees below.
 
-  usage         // 0 to 100 percentage cpu usage
+  //                      l   *(l,t)
+  //         _            ^  / \        Positive angle airflow
+  //        /  \          | / a )       toward upper surface of
+  //       | -------------*-------> t   the wing.
+  //        \|            
+  //
+
+  // The lift coefficient is greatest when a is abort -15 degrees and
+  // falls of rapidly as a becomes more negative. The wings have a
+  // built-in angle of attack so even when a=0 the lift coefficient
+  // is positive.
+
+  // dragtab give the drag coefficient based on the airflow angle
+  // in the tl plane.
+
+  FLT usage         // 0 to 100 percentage cpu usage
 }
 
 // Insert the definition of drawtigermoth()
 GET "drawtigermoth.b"
 
-LET inprod(a,b,c, x,y,z) =
+LET inprod(FLT a, FLT b, FLT c,
+           FLT x, FLT y, FLT z) =
   // Return the cosine of the angle between two unit vectors.
-  muldiv(a, x, One) + muldiv(b, y, One) + muldiv(c, z, One)
+  a*x + b*y + c*z
 
-AND rotate(t, w, l) BE
-{ // Rotate the orientation of the aircraft
-  // t, w and l are assumed to be small and cause
-  // rotation about axis t, w, l. Positive values cause
+AND rotate(FLT rt, FLT rw, FLT rl) BE
+{ // Rotate the aircraft about axes t, w and l.
+  // rt, rw and rl are assumed to be small rotational angles
+  // causing rotation about axes t, w, l. Positive values cause
   // anti-clockwise rotations about their axes.
 
-  LET tx = inprod(One, -l,  w, ctx,cwx,clx)
-  LET wx = inprod(  l,One, -t, ctx,cwx,clx)
-  LET lx = inprod( -w,  t,One, ctx,cwx,clx)
+  LET FLT tx =       ctn - rl * cwn + rw * cln
+  LET FLT wx =  rl * ctn +      cwn - rt * cln
+  LET FLT lx = -rw * ctn + rt * cwn +      cln
 
-  LET ty = inprod(One, -l,  w, cty,cwy,cly)
-  LET wy = inprod(  l,One, -t, cty,cwy,cly)
-  LET ly = inprod( -w,  t,One, cty,cwy,cly)
+  LET FLT ty =       ctw - rl * cww + rw * clw
+  LET FLT wy =  rl * ctw +      cww - rt * clw
+  LET FLT ly = -rw * ctw + rt * cww +      clw
 
-  LET tz = inprod(One, -l,  w, ctz,cwz,clz)
-  LET wz = inprod(  l,One, -t, ctz,cwz,clz)
-  LET lz = inprod( -w,  t,One, ctz,cwz,clz)
+  LET FLT tz =       cth - rl * cwh + rw * clh
+  LET FLT wz =  rl * cth +      cwh - rt * clh
+  LET FLT lz = -rw * cth + rt * cwh +      clh
 
-  ctx, cty, ctz := tx, ty, tz
-  cwx, cwy, cwz := wx, wy, wz
-  clx, cly, clz := lx, ly, lz
+  ctn, ctw, cth := tx, ty, tz
+  cwn, cww, cwh := wx, wy, wz
+  cln, clw, clh := lx, ly, lz
 
-  adjustlength(@ctx);      adjustlength(@cwx);      adjustlength(@clx) 
-  adjustortho(@ctx, @cwx); adjustortho(@ctx, @clx); adjustortho(@cwx, @clx)
+  adjustlength(@ctn);      adjustlength(@cwn);      adjustlength(@cln) 
+  adjustortho(@ctn, @cwn); adjustortho(@ctn, @cln); adjustortho(@cwn, @cln)
+}
+
+AND radius2(FLT x, FLT y) = VALOF
+{ LET FLT rsq = x*x + y*y
+  RESULTIS sys(Sys_flt, fl_sqrt, rsq)
+}
+
+AND radius3(FLT x, FLT y, FLT z) = VALOF
+{ LET FLT rsq = x*x + y*y + z*z
+  RESULTIS sys(Sys_flt, fl_sqrt, rsq)
 }
 
 AND adjustlength(v) BE
 { // This helps to keep vector v of unit length
-  LET x, y, z = v!0, v!1, v!2
-  LET corr = One + (inprod(x,y,z, x,y,z) - One)/2
-  v!0 := muldiv(x, One, corr)
-  v!1 := muldiv(y, One, corr)
-  v!2 := muldiv(z, One, corr)
+  LET FLT x, FLT y, FLT z = v!0, v!1, v!2
+  LET FLT r = radius3(x,y,z)
+  v!0 := x / r
+  v!1 := y / r
+  v!2 := z / r
 }
 
 AND adjustortho(a, b) BE
 { // This helps to keep the unit vector b orthogonal to a
-  LET a0, a1, a2 = a!0, a!1, a!2
-  LET b0, b1, b2 = b!0, b!1, b!2
-  LET corr = inprod(a0,a1,a2, b0,b1,b2)
-  b!0 := b0 - muldiv(a0, corr, One)
-  b!1 := b1 - muldiv(a1, corr, One)
-  b!2 := b2 - muldiv(a2, corr, One)
+  LET FLT a0, FLT a1, FLT a2 = a!0, a!1, a!2
+  LET FLT b0, FLT b1, FLT b2 = b!0, b!1, b!2
+  LET FLT corr = inprod(a0,a1,a2, b0,b1,b2)
+  b!0 := b0 - a0 * corr
+  b!1 := b1 - a1 * corr
+  b!2 := b2 - a2 * corr
 }
 
-AND rdtab(x, tab) = VALOF
-{ // Perform linear interpolation between appropriate entries
-  // in the given table which must have at least two entries
-  // and their x positions must be different.
-  // It returns the first value is x is too small
-  // It returns the last value is x is too big
-  // otherwise it interpolates between the nearest two entries.
-  LET upb = tab!0 // = subscript of last pos value pair
-                  // eg tab -> [7,  800,   0_000,
-                  //               1200,  10_000,
-                  //               1700,  50_000,
-                  //               2000,   0_000]
-  LET p = tab+1
-  LET x0, r0, x1, r1 = ?, ?, ?, ?
-  IF x<=tab!1   RESULTIS tab!2
-  IF x>=tab!upb RESULTIS tab!(upb+1)
-  WHILE x>!p DO p := p+2
-  IF x=!p RESULTIS p!1
-  x0, r0 := p!-2, p!-1
-  x1, r1 := p! 0, p! 1
-  RESULTIS r0 + muldiv(r1-r0, x-x0, x1-x0)
+AND rdtab(FLT a, tab) = VALOF
+{ // A "curve" is represented by a sequence line segments. The vertices
+  // have floating point coordinates (a,r) stored in tab. The number of
+  // vertices n is held in tab!0. This function computes the value of the
+  // curve at any given point a. This is done using linear interpolation
+  // on the two points enclosing a. If a is less than the a value of the
+  // first coordinate its r value is returned. Similarly, if a is greater
+  // than the a value of the last point, the r value of the last point is
+  // returned.
+  
+  // tab -> [n, a0,r0, ..., a(n-1), r(n-1)]
+
+  LET n  = tab!0              // The number of points
+  LET p  = @tab!1             // Pointer to first entry
+  LET q  = p + 2*(n-1)        // Pointer to the last entry
+  
+  IF n=0      RESULTIS 0.0    // No entries, return zero
+  IF a <= p!0 RESULTIS p!1    // a is too small, take the first value
+  IF a >= q!0 RESULTIS q!1    // a is too large, take the last  value
+
+  // p!0 < a and a < q!0,  so there is a pair of points enclosing a.
+  
+  UNTIL p!0 <= a <= p!2 DO p := p+2  // Find the enclosing line segment
+  
+  { LET FLT x0, FLT r0 = p!0, p!1  // x0 <= a <= x1
+    LET FLT x1, FLT r1 = p!2, p!3
+    LET FLT dx = x1-x0
+    IF dx=0 RESULTIS r0
+    // Use linear interpolation between these two entries.
+    RESULTIS r0 + (r1-r0) * (a-x0) / dx
+  }
 }
 
-AND angle(x, y) = x=0 & y=0 -> 0, VALOF
-{ // Calculate an approximation to the angle in degrees between
-  // point (x,y) and the x axis. The result is a scaled number with
-  // three digits after the decimal point.
-  // Points above the x axis have positive angles and
-  // points below the x axis have negative angles.
-  LET px, py = ABS x, ABS y
-  LET t = muldiv(90_000, y, px+py)
-  IF x>=0 RESULTIS t
-  IF y>=0 RESULTIS 180_000 - t
-  RESULTIS -(180_000 + t)
+AND angle(FLT x, FLT y) = x=0 & y=0 -> 0.0, VALOF
+{ // Calculate the angle in degrees between point (x,y) and the
+  // x axis using atan2.
+  // If (x,y) is above the x-axis the result is betweem 0 and +180
+  // If (x,y) is below the x-axis the result is betweem 0 and -180
+  LET FLT a = sys(Sys_flt, fl_atan2, y, x) * 180.0 / 3.14159
+//drawf(20,  30, "angle: x=%13.3f y=%13.3f => angle = %8.3f*n",
+//        x, y, a)
+  RESULTIS a
 }
 
 LET step() BE
 { // Update the aircraft position, orientation and motion.
 
-  LET lwheelz = inprod( -1_000, +2_100, -4_500, ctz,cwz,clz)+cgz
-  // lwheelz is height of left wheel above/below the ground
-  LET rwheelz = inprod( -1_000, -2_100, -4_500, ctz,cwz,clz)+cgz
-  // rwheelz is height of right wheel above/below the ground
-  LET skidz   = inprod(-16_000,      0, -0_667-0_400, ctz,cwz,clz)+cgz
-  // skidz is height of tail skid above/below the ground
+  // On entry,
+  // the position of the aircraft is at cgn, cgw and cgh in
+  // real word coordinates.
+  // Its speed in directions n, w and h are cgndot, cgwdot and cghdot.
+  // The orientation of the aircraft is given by the direction
+  // cosines ctn, ctw, cth   direction of thrust
+  //         cwn, cww, cwh   direction of the left wing
+  //         cln, clw, clh   direction of lift
+  // These three directions are orthogonal.
 
-  // Calculate the linear and rotational forces on the aircraft
-  // In directions t, w and l
-  ft,  fw,  fl  := 0, 0, 0 // Initialise all to zero
-  rft, rfw, rfl := 0, 0, 0
+  // The rate of rotation of the aircraft in direction t, w and l
+  // are rtdot, rwdot and rldot.
 
-  // Air flow angles
-  atl := angle(tdot, ldot)
-  atw := angle(tdot, wdot)
-  awl := angle(wdot, ldot)
+  // Compute the speeds in directions t, w and l from
+  // cgndot, cgwdot and cghdot using the direction cosines.
 
-  // Calculate speed squared in the three direction
-  // scaled so that 100 ft/s squared gives 1.000 scaled
-  // with 3 digits after the decimal point.
-  tdotsq := muldiv(tdot, tdot, 10_000_000)
-  wdotsq := muldiv(wdot, wdot, 10_000_000)
-  ldotsq := muldiv(ldot, ldot, 10_000_000)
+  { 
+    stepcount := stepcount + 1
+    IF stepcount MOD 20 = 0 DO
+    { LET prevmsecs = msecs1
+      LET v = VEC 2
+      LET s = VEC 15
+      datstamp(v)
+      msecs1 := v!1
+      datstring(s)
+      steprate := 20 * 1000 / FLOAT(msecs1 - prevmsecs)
+      //sawritef("stepcount=%n msecs diff=%i5 steprate = %6.3f %s*n",
+      //          stepcount, msecs1-prevmsecs, steprate, s+5)
+    }
+  }
 
-  // Calculate the engine RPM and thrust
-  targetrpm := 0
+  tdot := cgndot*ctn + cgwdot*ctw + cghdot*cth
+  wdot := cgndot*cwn + cgwdot*cww + cghdot*cwh
+  ldot := cgndot*cln + cgwdot*clw + cghdot*clh
+
+  // Calculate the square of the speed in each direction.
+  tdotsq := tdot * tdot
+  wdotsq := wdot * wdot
+  ldotsq := ldot * ldot
+
+//sawritef("tdotsq=%13.1f wdotsq=%13.1f ldotsq=%13.1f*n", tdotsq, wdotsq, ldotsq)
+
+  // Calculate the angle of attack in degrees.
+  // If tdot = 100.0 and ldot =  100.0, atl will be  45.0
+  // If tdot = 100.0 and ldot = -100.0, atl will be -45.0
+//sawritef("angle(100.0,  100.0) = %8.2f*n", angle(100.0,  100.0))
+//sawritef("angle(100.0, -100.0) = %8.2f*n", angle(100.0, -100.0))
+  atl := angle(tdot, ldot) // Positive is airflow is from below in t-l plane
+
+//sawritef("angle(%13.2f, %13.2f) = %8.2f*n", tdot, ldot, angle(tdot, ldot))
+//abort(1000)
+
+  // Now deal with the aerodynamic and gravity forces on the aircraft.
+
+  // The linear forces on the CG of the aircraft in directions
+  // t, w and l initialised as follows.
+  ft,  fw,  fl  := Zro, Zro, Zro
+
+  // These are in poundals.
+  // 1 poundal will accelerate a mass of 1 lb at a rate
+  // of 1 ft/s/s. A force of mass x g will just hold the aircraft 
+  // up against gravity.
+
+  // The rotational forces about axes t, w and l initialised as follows.
+  rft, rfw, rfl := Zro, Zro, Zro
+
+  // These are in ft-poundals.
+  // 1 ft-poundal will give a body with moment of inertia equivalent 
+  // to a mass of 1 lb at a distance of 1 ft a rotational acceleration
+  // of 1 radian per second.
+
+  // First calculate the engine RPM.
+  targetrpm := 0.0    // If engine is not started
   IF enginestarted DO
-  { targetrpm := 600 + muldiv(1500, c_throttle, 65536) +
-                 muldiv(500, tdot, 208_000) // + air speed effect
+  { // The throttle is in the range 0.0 to 1.0
+    targetrpm := 600.0 + 1700.0 * throttle +
+                 0.7 * tdot        // + air speed effect
   }
 
-  rpm := rpm + (targetrpm-rpm)/Sps - 1
-  IF rpm < 0 DO rpm := 0
+  // The rpm take time to change.
+  rpm := rpm + (targetrpm - rpm) / 4.0 - 1.0
+  IF rpm < 0.0 DO rpm := 0.0
+//rpm :=1800.0 // For debugging.
 
+  // Now calculate the thrust.
   thrust := VALOF
-  { LET vmax = muldiv(200_000, rpm, 2500) // Speed at which thrust=0
-    LET vmaxby2 = vmax/2 // use linear interpolation between vmax and vmaxby2
-    LET tmax = k_g/8
-    LET t = ?
-    IF rpm<600 | tdot>vmax RESULTIS 0
-    t := muldiv(tmax, (rpm-600)*(rpm-600), (2500-600)*(2500-600))
+  { // At rpm=2200 the aircraft should read a take off speed of 65mph after
+    // travelling about 1700 ft along the runway.
+    // Assume the angle of attack of the propeller is such that
+    // when rpm=2500 the speed at which the thrust is zero is about 200mph
+    // or 200*5280 / (60*60) = about 293.0 ft/s.
+
+    // At a speed of tdot ft/s the rpm giving zero thrust is
+    // (2500/293) * tdot. Ie linear between 0 and 293.
+    // At a speed of 65mph = 95ft/s the rpm = (2500/293)*95 = 810 (rpm0)
+    // Assume the the thrust at this speed is Kt * (rpm-rpm0)^2
+    // and that the drag is Kd * tdot^2 = Kd * 95^2 = 9025*Kd
+    // Assume that at this speed with rpm=2000 the thrust-drag
+    // is sufficient to give the aircraft an accelleration of g/8.
+    // Thus mass*g/8 = Kt * (2000-810)^2 - 9025 * Kd
+    // Assume mass=2000 and g=32, this gives
+    // 2000*32/8 = Kt * (2000-810)^2 - 9025 * Kd
+    // or 8000 = Kt * 134300 = 9025 * Kd
+    LET FLT vmax = 293.0 * rpm / 2500 // Speed in ft/s at which thrust=0
+    LET FLT vmaxby2 = vmax/2  // use linear interpolation between vmax and vmaxby2
+    LET FLT tmax = 1.7 * mass // Thrust to give acceleration of 1.7 * g
+                              // ignoring drag.
+    LET FLT t = ?
+    IF rpm<600 | tdot>vmax RESULTIS 0.0
+    // When rpm>=600 the thrust is proportional to the square of (rpm-600)
+    // When rpm=2200 the thrust is sufficient to accelerate the aircraft at g/8
+    t := tmax * (rpm-600)*(rpm-600) / ((2200-600) * (2200-600))
     IF tdot<vmaxby2 RESULTIS t
-    RESULTIS muldiv(t, vmax-tdot, vmaxby2)
+    RESULTIS t * (vmax-tdot) / vmaxby2
   }
 
-  writef("rpm=%4i tdot=%9.3d thrust=%9.3d*n",
-          rpm, tdot, thrust)
-
-//writef("tdotsq=%8.3d wdotsq=%8.3d ldotsq=%8.3d*n", tdotsq, wdotsq, ldotsq)
-
-  // Rotational damping
-  // rtdot, rwdot and rldot are in radians per second.
-  rtdot := muldiv(rtdot, rdt, 1_000*Sps)
-  rwdot := muldiv(rwdot, rdw, 1_000*Sps)
-  rldot := muldiv(rldot, rdl, 1_000*Sps)
-
-  // Rotational aerodynamic forces on fixed surfaces
-
-  // Dihedral effect
-  rft := rft + muldiv(-50_000, wdot, 10000)
-
-  // Stabiliser effect 
-  rfw := rfw + muldiv(28000, ldot, 100)
-
-  // Fin effect
-  rfl := rfl + muldiv(-10_000, wdot, 1000)
-  
-  // Aileron effect
-  rft :=  rft + muldiv(-c_aileron, tdot, 2000)
-
-  // Elevator effect
-  rfw :=  rfw - muldiv(c_elevator-15000, tdot+thrust, 2000)
-
-  // Rudder effect
-  rfl :=  rfl + muldiv(c_rudder, tdot+thrust, 2000)
-
-  // Ground effects, wheels and skid  
-  IF cgz < 10_000 DO
-  { // The aircraft is near the ground
-
-    IF lwheelz<0 DO
-    { LET lwforce = -lwheelz*60
-      fl := fl + muldiv(lwforce, clz, One)
-      ft := ft + muldiv(lwforce, ctz, One)
-      fw := fw + muldiv(lwforce, cwz, One)
-      IF skidz>0 DO rfw := rfw - lwheelz*3000
-      rft := rft + lwheelz*5000
-    }
-    IF rwheelz<0 DO
-    { LET rwforce = -rwheelz*60
-      fl := fl + muldiv(rwforce, clz, One)
-      ft := ft + muldiv(rwforce, ctz, One)
-      fw := fw + muldiv(rwforce, cwz, One)
-      IF skidz>0 DO rfw := rfw - rwheelz*3000
-      rft := rft - rwheelz*5000
-    }
-
-    //writef("lwheelz=%9.3d rwheelz=%9.3d  skidz=%9.3d rft=%9.3d*n",
-    //        lwheelz, rwheelz, skidz, rft)
-
-    IF skidz<-0_500 skidz := -0_500
-    IF skidz<0 DO
-    { //rfw := skidz*10000
-      rfw1 := 0
-      rwdot := skidz*10000
-      IF skidz>-0_200 DO rwdot := 0
-      IF rwdot<0 DO rwdot := rwdot/Sps2
-      tdot := muldiv(tdot, 95, 100)/Sps2
-    }
-
-    IF cgz<4_000 DO cgz := 4_000
-
-  }
-
-
-//writef("rft=%9.6d rft1=%9.6d*n", rft, rft1)  
-//writef("rfw=%9.6d rfw1=%9.6d*n", rft, rft1)  
-//writef("rfl=%9.6d rfl1=%9.6d*n", rft, rft1)  
-
-  // Linear forces
+  // Next calculate the linear forces on the aircraft.
 
   // Gravity effect
-  ft := ft + muldiv(-k_g, ctz, One) // Gravity in direction t
-  fw := fw + muldiv(-k_g, cwz, One) // Gravity in direction w
-  fl := fl + muldiv(-k_g, clz, One) // Gravity in direction l
+  ft := ft - mass * k_g * cth  // Gravity in direction t
+  fw := fw - mass * k_g * cwh  // Gravity in direction w
+  fl := fl - mass * k_g * clh  // Gravity in direction l
 
-  // Drag effect
-  ft := ft - muldiv(k_drag, tdot, 500_000)
-
-  // Side effect
-  fw := fw - muldiv(wdot, 100, 1000)
-
-  // Lift effect
-  { // Lift is proportions to speed squared (= tdot**2 + ldot**2)
-    // multiplied by rdtab(angle, tltab)
-    // When angle=0 and speed=100 ft/sec lift is k_g
-    // angle(0, tltab) = 267
-    // so lift = k_g * (rdtab(angle, tltab)/267) * (speed*speed/(100*100)
-    LET tab = TABLE       19,
-                    -180_000,    0,
-                     -90_000,  500,
-                     -15_000,  200,
-                     -11_000,  800,
-                           0,  267, // Lift factor when ldot=0
-                       4_000,    0,
-                      19_000, -500,
-                      24_000, -100,
-                      90_000, -500,
-                     180_000,    0
-    LET a = muldiv(k_g, rdtab(atl, tab), 267)
-    LET lift = muldiv(a, tdot, 200_000) //*2
-    fl := fl + lift
-    rfw := rfw - lift*20
+  // Lift and drag force of the main wings.
+  { //LET atl = angle(tdot, ldot)
+    // Lift is proportions to speed squared (= tdot**2 + ldot**2)
+    // multiplied by the lift coefficient rdtab(angle, lifttab)
+    // When angle=0 and speed=100 ft/sec lift is mass * k_g which
+    // just counteracts gravity.
+    // rdtab(0, lifttab) = 1.0
+    // so lift = mass * k_g * rdtab(angle, lifttab) * speed/100
+    LET FLT a = mass * k_g * rdtab(atl, lifttab)
+    LET airspeed = radius2(tdot, ldot)
+    // Main wing lift force due to air at speed airspeed coming
+    // towards the aircraft at angle atl in the tl plane.
+    fl := fl + 1.4 * a * airspeed / 100.0
+    // Main wing drag force.
+    //ft := ft + 0.1 * b * (tdot*tdot+ldot*ldot)
   }
 
-  // Thrust effect
-  ft := ft + thrust*10
+  // Airframe drag force -- using quartic to increase the
+  // drag effect at high speed.
+  ft := ft - 0.020 * mass * (tdot * tdot * tdot * tdot) / 100000000.0
 
-  //writef("ft=%9.3d fw=%9.3d fl=%9.3d*n", ft, fw, fl)
+  // Side effect
+  fw  := fw  - 0.5  * mass * wdot  // Sideways force
 
-  UNLESS testing DO
-  { // Do not apply the forces in testing mode
+  // Thust force
+  ft := ft + thrust
+  
+  // Apply linear forces ft, fw and fl using the trapizoidal rule
+  // for integration.
+  tdot := tdot + (ft+ft1)/(mass*steprate)
+  wdot := wdot + (fw+fw1)/(mass*steprate)
+  ldot := ldot + (fl+fl1)/(mass*steprate)
 
-    // Apply rotational effects using the trapizoidal rule
-    // for integration.
-    rtdot := rtdot + (rft+rft1)/Sps2
-    rwdot := rwdot + (rfw+rfw1)/Sps2
-    rldot := rldot + (rfl+rfl1)/Sps2
+  ft1, fw1, fl1 := ft, fw, fl  // Save the previous values
 
-    rft1, rfw1, rfl1 := rft, rfw, rfl // Save previous values
+  // Calculate the real world velocity
+  cgndot := tdot*ctn + wdot*cwn + ldot*cln
+  cgwdot := tdot*ctw + wdot*cww + ldot*clw
+  cghdot := tdot*cth + wdot*cwh + ldot*clh
 
-    // Apply linear effects using the trapizoidal rule
-    // for integration.
-    tdot := tdot + (ft+ft1)/Sps2
-    wdot := wdot + (fw+fw1)/Sps2
-    ldot := ldot + (fl+fl1)/Sps2
+  // Calculate new n, w and h positions.
+  cgn := cgn + cgndot / steprate
+  cgw := cgw + cgwdot / steprate
+  cgh := cgh + cghdot / steprate
 
-    IF lwheelz<0_100 | rwheelz<0_100 DO
-    { // Limit ldot
-      IF ldot> 0_100 DO ldot :=  0_100
-      IF ldot<-0_100 DO ldot := -0_100
+//writef("cgn=%13.3f  cgw=%13.3f  cgh=%13.3f*n", cgn, cgw, cgw)
+//abort(1003)
 
-      // Damp out speed in the w direction
-      TEST wdot>=0
-      THEN { wdot := wdot - wdot/Sps2 - 0_100 
-             IF wdot<0 DO wdot, fw := 0, 0
-           }
-      ELSE { wdot := wdot - wdot/Sps2 + 0_100 
-             IF wdot>0 DO wdot, fw := 0, 0
-           }
-      // Damp out speed in the l direction
-      TEST ldot>=0
-      THEN { ldot := ldot - ldot/Sps2 - 0_100 
-             IF ldot<0 DO ldot, fw := 0, 0
-           }
-      ELSE { ldot := ldot - ldot/Sps2 + 0_100 
-             IF ldot>0 DO ldot, fw := 0, 0
-           }
+
+  // Calculate the rotational forces rft, rfw and rfl
+
+  // Dihedral effect
+  // If wdot>0 there is a clockwise force about the t axis
+  rft := rft - 0.005 * mit * wdot
+
+  // Fixed stabiliser effect 
+  // If ldot>0 there is an anti-clockwise force about the w axis
+  rfw := rfw + 4500*(ldot - 15.0 * rwdot) / mil
+
+  // Fixed fin effect
+  // If wdot>0 there is an clockwise force about the l axis.
+  rfl := rfl - 950*(wdot + 15.0 * rldot) / mil
+  
+  // Aileron effect
+  rft :=  rft - 0.001 * aileron * mit * tdot
+
+  // Elevator effect
+  rfw :=  rfw - 0.002 * elevator * miw * (tdot+rpm/50)
+
+  // Rudder effect
+  rfl :=  rfl + 0.001 * rudder * mil * (tdot+rpm/10)
+
+  // Apply rotational damping.
+  // rtdot, rwdot and rldot are in radians per second.
+  rft := rft - 0.8 * mit * rtdot
+  rfw := rfw - 3.0 * miw * rwdot
+  rfl := rfl - 0.8 * mil * rldot
+
+//writef("rft=%9.6f rft1=%9.6f*n", rft, rft1)  
+//writef("rfw=%9.6f rfw1=%9.6f*n", rft, rft1)  
+//writef("rfl=%9.6f rfl1=%9.6f*n", rft, rft1)  
+
+  // Apply rotational effects using the trapizoidal rule.
+  rtdot := rtdot + (rft+rft1)/(mit * steprate * 2)
+  rwdot := rwdot + (rfw+rfw1)/(miw * steprate * 2)
+  rldot := rldot + (rfl+rfl1)/(mil * steprate * 2)
+
+  rft1, rfw1, rfl1 := rft, rfw, rfl // Save previous values
+
+  // Limit rotational rates to no more than 1 radian per second
+  //IF rtdot >  1.0 DO rtdot :=  1.0
+  //IF rtdot < -1.0 DO rtdot := -1.0
+  //IF rwdot >  1.0 DO rwdot :=  1.0
+  //IF rwdot < -1.0 DO rwdot := -1.0
+  //IF rldot >  1.0 DO rldot :=  1.0
+  //IF rldot < -1.0 DO rldot := -1.0
+
+  // Rotate the aircraft.
+  // Anti-clockwise rotation rates in radians per second
+  // about axes t, w and l.
+  rotate(rtdot/steprate, rwdot/steprate, rldot/steprate)
+
+  // Test for contact with the ground.
+  IF cgh < 10.0 DO
+  { // The aircraft is near the ground
+
+    IF cgh < 2.0 | clh<0.8 DO
+    { crashed := TRUE
+      stepping := FALSE
+      RETURN
     }
-
-    ft1, fw1, fl1 := ft, fw, fl  // Save the previous values
-
-    // Calculate x, y and z speeds
-    cgxdot := inprod(ctx,cwx,clx, tdot,wdot,ldot)
-    cgydot := inprod(cty,cwy,cly, tdot,wdot,ldot)
-    cgzdot := inprod(ctz,cwz,clz, tdot,wdot,ldot)
-
-    // Calculate new x, y and z positions.
-    cgx := cgx + cgxdot/Sps
-    cgy := cgy + cgydot/Sps
-    cgz := cgz + cgzdot/Sps
-
-    IF cgz < 0 DO cgz := 0
-
-    rotate(rtdot/Sps, rwdot/Sps, rldot/Sps)
-
-    // Compute the new values of tdot, wdot and ldot
-    // from cgxdot, cgydot and cgzdot using the new orientation
-
-    tdot := inprod(cgxdot,cgydot,cgzdot, ctx,cty,ctz)
-    wdot := inprod(cgxdot,cgydot,cgzdot, cwx,cwy,cwz)
-    ldot := inprod(cgxdot,cgydot,cgzdot, clx,cly,clz)
-    //writef("cgx=%9.3d  cgy=%9.3d  cgz=%9.3d*n", cgx, cgy, cgy)
-    //abort(1003)
   }
 }
 
 AND plotcraft() BE
-{ IF depthscreen FOR i = 0 TO screenxsize*screenysize-1 DO
-    depthscreen!i := maxint
-
-  //seteyeposition()
-  tarmac()
-
-  IF aircraft=0 DO
-  { // Simple aircraft
-    setcolour(maprgb(64,128,64))  // Fuselage
-    cdrawtriangle3d(6_000,0,0,  2_000,0,-1_000, -2_000,0,2_000)
-    setcolour(maprgb(40,100,40))
-    cdrawtriangle3d(2_000,0,-1_000, -2_000,0,2_000, -12_000,0,0)
-    setcolour(maprgb(255,255,255))
-    cdrawtriangle3d(2_000,0, 1_000, -2_000,0,2_000, 0_800,0,2_000)
-
-    setcolour(maprgb(255,0,0))  // Port wing -- Red
-    cdrawtriangle3d(2_500,0,0, -2_500,0,0,  -2_000, 18_000,2_000)
-    setcolour(maprgb(0,255,0))  // Starboard wing -- Green
-    cdrawtriangle3d(2_500,0,0, -2_500,0,0,  -2_000,-18_000,2_000)
-
-    setcolour(maprgb(255,0,255))  // Stabliser
-    cdrawtriangle3d(-9_000,0,0, -12_000,0,0,  -13_000,-4_000,0)
-    setcolour(maprgb(255,255,0))
-    cdrawtriangle3d(-9_000,0,0, -12_000,0,0,  -13_000, 4_000,0)
-
-    setcolour(maprgb(0,255,255))  // Fin
-    cdrawtriangle3d(-9_000,0,0, -12_000,0,0,  -13_000,0,4_000)
-  }
-
-  IF aircraft=1 DO
-  { // Draw a Tigermoth
-    drawtigermoth()
-  }
+{ IF depthv FOR i = 0 TO screenxsize*screenysize-1 DO
+    depthv!i := FLOAT maxint
+  // Draw a Tigermoth
+  drawtigermoth(elevator, aileron, rudder)
 }
 
-AND gdrawquad3d(x1,y1,z1, x2,y2,z2, x3,y3,z3, x4,y4,z4) BE
+AND gdrawquad3d(FLT x1, FLT y1, FLT z1,
+                FLT x2, FLT y2, FLT z2,
+                FLT x3, FLT y3, FLT z3,
+                FLT x4, FLT y4, FLT z4) BE
 { // Draw a 3D quad (not rotated)
-  LET sx1,sy1,sz1 = ?,?,?
-  LET sx2,sy2,sz2 = ?,?,?
-  LET sx3,sy3,sz3 = ?,?,?
-  LET sx4,sy4,sz4 = ?,?,?
-  LET abseyex = cgx+eyex
-  LET abseyey = cgy+eyey
-  LET abseyez = cgz+eyez
+  LET FLT sx1, FLT sy1, FLT sz1 = ?,?,?
+  LET FLT sx2, FLT sy2, FLT sz2 = ?,?,?
+  LET FLT sx3, FLT sy3, FLT sz3 = ?,?,?
+  LET FLT sx4, FLT sy4, FLT sz4 = ?,?,?
 
-//writef("abseyex=%9.3d abseyey=%9.3d abseyez=%9.3d*n", abseyex,abseyey,abseyez)
-  UNLESS screencoords(x1-abseyex, y1-abseyey, z1-abseyez, @sx1) RETURN
-  UNLESS screencoords(x2-abseyex, y2-abseyey, z2-abseyez, @sx2) RETURN
-  UNLESS screencoords(x3-abseyex, y3-abseyey, z3-abseyez, @sx3) RETURN
-  UNLESS screencoords(x4-abseyex, y4-abseyey, z4-abseyez, @sx4) RETURN
+  UNLESS screencoords(x1-eyen-cgn, y1-eyew-cgw, z1-eyeh-cgh, @sx1) RETURN
+  UNLESS screencoords(x2-eyen-cgn, y2-eyew-cgw, z2-eyeh-cgh, @sx2) RETURN
+  UNLESS screencoords(x3-eyen-cgn, y3-eyew-cgw, z3-eyeh-cgh, @sx3) RETURN
+  UNLESS screencoords(x4-eyen-cgn, y4-eyew-cgw, z4-eyeh-cgh, @sx4) RETURN
 
-  drawquad3d(sx1,sy1,sz1, sx2,sy2,sz2, sx3,sy3,sz3, sx4,sy4,sz4)
+  drawquad3d(FIX sx1, FIX sy1, FIX sz1,
+             FIX sx2, FIX sy2, FIX sz2,
+             FIX sx3, FIX sy3, FIX sz3,
+             FIX sx4, FIX sy4, FIX sz4)
 }
 
-AND cdrawquad3d(x1,y1,z1, x2,y2,z2, x3,y3,z3, x4,y4,z4) BE
-{ // Draw a quad of the aircraft viewed from a relative eye position
-  // First rotate the aircraft
-  LET rx1 = inprod(x1,y1,z1, ctx,cwx,clx)
-  LET ry1 = inprod(x1,y1,z1, cty,cwy,cly)
-  LET rz1 = inprod(x1,y1,z1, ctz,cwz,clz)
+AND cdrawquad3d(FLT x1, FLT y1, FLT z1,
+                FLT x2, FLT y2, FLT z2,
+                FLT x3, FLT y3, FLT z3,
+                FLT x4, FLT y4, FLT z4) BE
+{ LET FLT rx1 = x1*ctn + y1*cwn + z1*cln
+  LET FLT ry1 = x1*ctw + y1*cww + z1*clw
+  LET FLT rz1 = x1*cth + y1*cwh + z1*clh
 
-  LET rx2 = inprod(x2,y2,z2, ctx,cwx,clx)
-  LET ry2 = inprod(x2,y2,z2, cty,cwy,cly)
-  LET rz2 = inprod(x2,y2,z2, ctz,cwz,clz)
+  LET FLT rx2 = x2*ctn + y2*cwn + z2*cln
+  LET FLT ry2 = x2*ctw + y2*cww + z2*clw
+  LET FLT rz2 = x2*cth + y2*cwh + z2*clh
 
-  LET rx3 = inprod(x3,y3,z3, ctx,cwx,clx)
-  LET ry3 = inprod(x3,y3,z3, cty,cwy,cly)
-  LET rz3 = inprod(x3,y3,z3, ctz,cwz,clz)
+  LET FLT rx3 = x3*ctn + y3*cwn + z3*cln
+  LET FLT ry3 = x3*ctw + y3*cww + z3*clw
+  LET FLT rz3 = x3*cth + y3*cwh + z3*clh
 
-  LET rx4 = inprod(x4,y4,z4, ctx,cwx,clx)
-  LET ry4 = inprod(x4,y4,z4, cty,cwy,cly)
-  LET rz4 = inprod(x4,y4,z4, ctz,cwz,clz)
+  LET FLT rx4 = x4*ctn + y4*cwn + z4*cln
+  LET FLT ry4 = x4*ctw + y4*cww + z4*clw
+  LET FLT rz4 = x4*cth + y4*cwh + z4*clh
 
-  // Then calculate the screen coordinates of the vertices as
-  // viewed from the relative eye position.
-  LET sx1,sy1,sz1 = ?,?,?
-  LET sx2,sy2,sz2 = ?,?,?
-  LET sx3,sy3,sz3 = ?,?,?
-  LET sx4,sy4,sz4 = ?,?,?
-//writef("cdrawquad3d called*n")
-  UNLESS screencoords(rx1-eyex, ry1-eyey, rz1-eyez, @sx1) RETURN
-  UNLESS screencoords(rx2-eyex, ry2-eyey, rz2-eyez, @sx2) RETURN
-  UNLESS screencoords(rx3-eyex, ry3-eyey, rz3-eyez, @sx3) RETURN
-  UNLESS screencoords(rx4-eyex, ry4-eyey, rz4-eyez, @sx4) RETURN
-//writef("calling drawquad3d*n")
-//writef("sx1=%i5  sy1=%i5 sz1=%i5*n", sx1,sy1,sz1)
-//writef("sx2=%i5  sy2=%i5 sz2=%i5*n", sx2,sy2,sz2)
-//writef("sx3=%i5  sy3=%i5 sz3=%i5*n", sx3,sy3,sz3)
-//writef("sx4=%i5  sy4=%i5 sz4=%i5*n", sx4,sy4,sz4)
+  LET FLT sx1, FLT sy1, FLT sz1 = ?,?,?
+  LET FLT sx2, FLT sy2, FLT sz2 = ?,?,?
+  LET FLT sx3, FLT sy3, FLT sz3 = ?,?,?
+  LET FLT sx4, FLT sy4, FLT sz4 = ?,?,?
 
-  // Finally plot the quad on the screen.
-  drawquad3d(sx1,sy1,sz1, sx2,sy2,sz2, sx3,sy3,sz3, sx4,sy4,sz4)
-//writef("returned from drawquad3d*n")
+  UNLESS screencoords(rx1-eyen, ry1-eyew, rz1-eyeh, @sx1) RETURN
+  UNLESS screencoords(rx2-eyen, ry2-eyew, rz2-eyeh, @sx2) RETURN
+  UNLESS screencoords(rx3-eyen, ry3-eyew, rz3-eyeh, @sx3) RETURN
+  UNLESS screencoords(rx4-eyen, ry4-eyew, rz4-eyeh, @sx4) RETURN
+
+  drawquad3d(FIX sx1, FIX sy1, sz1,
+             FIX sx2, FIX sy2, sz2,
+             FIX sx3, FIX sy3, sz3,
+             FIX sx4, FIX sy4, sz4)
 }
 
-AND cdrawtriangle3d(x1,y1,z1, x2,y2,z2, x3,y3,z3) BE
-{ LET rx1 = inprod(x1,y1,z1, ctx,cwx,clx)
-  LET ry1 = inprod(x1,y1,z1, cty,cwy,cly)
-  LET rz1 = inprod(x1,y1,z1, ctz,cwz,clz)
+AND cdrawtriangle3d(FLT x1, FLT y1, FLT z1,
+                    FLT x2, FLT y2, FLT z2,
+                    FLT x3, FLT y3, FLT z3) BE
+{ LET FLT rx1 = x1*ctn + y1*cwn + z1*cln
+  LET FLT ry1 = x1*ctw + y1*cww + z1*clw
+  LET FLT rz1 = x1*cth + y1*cwh + z1*clh
 
-  LET rx2 = inprod(x2,y2,z2, ctx,cwx,clx)
-  LET ry2 = inprod(x2,y2,z2, cty,cwy,cly)
-  LET rz2 = inprod(x2,y2,z2, ctz,cwz,clz)
+  LET FLT rx2 = x2*ctn + y2*cwn + z2*cln
+  LET FLT ry2 = x2*ctw + y2*cww + z2*clw
+  LET FLT rz2 = x2*cth + y2*cwh + z2*clh
 
-  LET rx3 = inprod(x3,y3,z3, ctx,cwx,clx)
-  LET ry3 = inprod(x3,y3,z3, cty,cwy,cly)
-  LET rz3 = inprod(x3,y3,z3, ctz,cwz,clz)
+  LET FLT rx3 = x3*ctn + y3*cwn + z3*cln
+  LET FLT ry3 = x3*ctw + y3*cww + z3*clw
+  LET FLT rz3 = x3*cth + y3*cwh + z3*clh
 
-  LET sx1,sy1,sz1 = ?,?,?
-  LET sx2,sy2,sz2 = ?,?,?
-  LET sx3,sy3,sz3 = ?,?,?
+  LET FLT sx1, FLT sy1, FLT sz1 = ?,?,?
+  LET FLT sx2, FLT sy2, FLT sz2 = ?,?,?
+  LET FLT sx3, FLT sy3, FLT sz3 = ?,?,?
 
-  UNLESS screencoords(rx1-eyex, ry1-eyey, rz1-eyez, @sx1) RETURN
-  UNLESS screencoords(rx2-eyex, ry2-eyey, rz2-eyez, @sx2) RETURN
-  UNLESS screencoords(rx3-eyex, ry3-eyey, rz3-eyez, @sx3) RETURN
+  UNLESS screencoords(rx1-eyen, ry1-eyew, rz1-eyeh, @sx1) RETURN
+  UNLESS screencoords(rx2-eyen, ry2-eyew, rz2-eyeh, @sx2) RETURN
+  UNLESS screencoords(rx3-eyen, ry3-eyew, rz3-eyeh, @sx3) RETURN
 
-  drawtriangle3d(sx1,sy1,sz1, sx2,sy2,sz2, sx3,sy3,sz3)
+//newline()
+//writef("x1=%13.3f y1=%13.3f z1=%13.3f*n", x1, y1, z1)
+//writef("x2=%13.3f y2=%13.3f z2=%13.3f*n", x2, y2, z2)
+//writef("x3=%13.3f y3=%13.3f z3=%13.3f*n", x3, y3, z3)
+
+//writef("ctn=%6.3f cwn=%6.3f cln=%6.3f radius3=%8.3f*n", ctn, cwn, cln, radius3(ctn,cwn,cln))
+//writef("ctw=%6.3f cww=%6.3f clw=%6.3f radius3=%8.3f*n", ctw, cww, clw, radius3(ctw,cww,clw))
+//writef("cth=%6.3f cwh=%6.3f clh=%6.3f radius3=%8.3f*n", cth, cwh, clh, radius3(cth,cwh,clh))
+
+//writef("sx1=%13.3f sy1=%13.3f sz1=%13.3f*n", sx1, sy1, sz1)
+//writef("sx2=%13.3f sy2=%13.3f sz2=%13.3f*n", sx2, sy2, sz2)
+//writef("sx3=%13.3f sy3=%13.3f sz3=%13.3f*n", sx3, sy3, sz3)
+
+  drawtriangle3d(FIX sx1, FIX sy1, sz1,
+                 FIX sx2, FIX sy2, sz2,
+                 FIX sx3, FIX sy3, sz3)
+  //writef("sx1=%5i sy1=%5i sz1=%13.1f*n", FIX sx1, FIX sy1, sz1)
+  //writef("sx2=%5i sy2=%5i sz2=%13.1f*n", FIX sx2, FIX sy2, sz2)
+  //writef("sx3=%5i sy3=%5i sz2=%13.1f*n", FIX sx3, FIX sy3, sz3)
+
+  //updatescreen()
+//delay(1000)
+//abort(1000)
 }
 
-AND screencoords(x,y,z, v) = VALOF
+AND screencoords(FLT x, FLT y, FLT z, v) = VALOF
 { // If the point (x,y,z) is in view, set v!0, v!1 and v!2 to
-  // the screen coordinates and depth and return TRUE
+  // the integer screen coordinates and depth and return TRUE
   // otherwise return FALSE
-  LET sx = inprod(x,y,z, cewx,cewy,cewz) // Horizontal
-  LET sy = inprod(x,y,z, celx,cely,celz) // Vertical
-  LET sz = inprod(x,y,z, cetx,cety,cetz) // Depth
-  LET screensize = screenxsize>=screenysize -> screenxsize, screenysize
-//writef("screencoords: x=%9.3d  y=%9.3d  z=%9.3d*n",  x, y, z)
-//writef("screencoords:sx=%9.3d sy=%9.3d sz=%9.3d*n", sx,sy,sz)
-//writef("cetx=%9.6d  cety=%9.6d  cetz=%9.6d*n", cetx,cety,cetz)
-//writef("cewx=%9.6d  cewy=%9.6d  cewz=%9.6d*n", cewx,cewy,cewz)
-//writef("celx=%9.6d  cely=%9.6d  celz=%9.6d*n", celx,cely,celz)
-//writef("eyex=%9.3d  eyey=%9.3d  eyez=%9.3d*n", eyex,eyey,eyez)
+  LET FLT sx = x*cewn + y*ceww + z*cewh // Horizontal
+  LET FLT sy = x*celn + y*celw + z*celh // Vertical
+  LET FLT sz = x*cetn + y*cetw + z*ceth // Depth
+  LET FLT fscreensize = fscreenxsize<=fscreenysize -> fscreenxsize, fscreenysize
 
-  // Test that the point is in view, ie at least 1.000ft in front
+//writef("screencoords: x=%13.3f  y=%13.3f  z=%13.3f*n", x,y,z)
+//writef("cetn=%6.3f  cetw=%6.3f  ceth=%6.3f*n", cetn,cetw,ceth)
+//writef("cewn=%6.3f  ceww=%6.3f  cewh=%6.3f*n", cewn,ceww,cewh)
+//writef("celn=%6.3f  celw=%6.3f  celh=%6.3f*n", celn,celw,celh)
+//writef("eyen=%13.3f  eyew=%13.3f  eyeh=%13.3f*n", eyen,eyew,eyeh)
+//writef("  sx=%13.3f    sy=%13.3f    sz=%13.3f*n", sx,sy,sz)
+
+  // Test that the point is in view, ie at least 1.0ft in front
   // and no more than about 27 degrees (inverse tan 1/2) from the
   // direction of view.
-  IF sz < ABS x | sz < ABS sy DO
-  { 
-//writef("screencoords: x=%9.3d  y=%9.3d  z=%9.3d*n",  x, y, z)
-//writef("screencoords:sx=%9.3d sy=%9.3d sz=%9.3d*n", sx,sy,sz)
+  IF sz<1 &  sz*sz / 2 >= sx*sx + sy*sy
     RESULTIS FALSE
-  }
+
   // A point screensize pixels away from the centre of the screen is
   // 45 degrees from the direction of view.
   // Note that many pixels in this range are off the screen.
-  v!0 := -muldiv(sx, screensize, sz)  + screenxsize/2
-  v!1 := +muldiv(sy, screensize, sz)  + screenysize/2
+  v!0 := fscreenxsize * 0.5 - fscreensize * (sx / sz) * 2
+  v!1 := fscreenysize * 0.5 + fscreensize * (sy / sz) * 2   + 200.0
   v!2 := sz // This distance into the screen in arbitrary units, used
             // for hidden surface removal.
-
-//writef("in view  position=(x=%i4  y=%i4  depth=%n)*n", v!0, v!1, sz)
+//writef("screencoords:  v!0=%13.3f  v!1=%13.3f  v!2=%13.3f)*n", v!0, v!1, v!2)
 //abort(1119)
   RESULTIS TRUE
 }
 
-AND screencoords2(px, py, pz, v) = VALOF
-{ // If the point (px,py,pz) is in the pilot's field of view
-  // set v!0 and v!1 to the screen coordinates and return TRUE
-  // otherwise return FALSE
-//writef("px=%9.3d  py=%9.3d  pz=%9.3d*n", px, py, pz)
-//writef("v_t!0=%9.6d v_t!1=%9.6d v_t!2=%9.6d*n", v_t!0, v_t!1, v_t!2)
-//writef("v_w!0=%9.6d v_w!1=%9.6d v_w!2=%9.6d*n", v_w!0, v_w!1, v_w!2)
-//writef("v_l!0=%9.6d v_l!1=%9.6d v_l!2=%9.6d*n", v_l!0, v_l!1, v_l!2)
+AND orthocoords(FLT n, FLT w, FLT h, v) = VALOF
+{ // (n,w,h) is a point relative to (cgn,cgw,cgh).
+  // It is viewed with orientation (t,w,l) using an orthogonal projection.
+  // The screen (x,y) coordinates are placed in v!0 and v!1.
+  // The result is TRUE if (n,w,h) is in front.
+  LET sx, sy = 0.0, 0.0
+  LET res = FALSE
 
-  LET x = inprod(px,py,pz, cewx,cewy,cewz)
-  LET y = inprod(px,py,pz, celx,cely,celz)
-  LET z = inprod(px,py,pz, cetx,cety,cetz)
-  //writef("x=%9.3d y=%9.3d z=%9.3d*n", x, y, z)
-  // Test that the point is in front of the aircraft
-  // and no more than 45 degrees from the direction of thrust.
-  UNLESS z>20 &
-    muldiv(z, z, 2000) > muldiv(x, x, 1000) + muldiv(y, y, 1000) DO
-  { //abort(1001)
-    RESULTIS FALSE
+  // Screen z is the inner product of (n,w,h) and (ctn,ctw,cth)
+  IF n*ctn + w*ctw + h*cth > 0.0 DO
+  { // The direction of motion circle is in front
+    // Screen x is the inner product of (n,w,h) and (cwn,cww,cwh)
+    sx := n*cwn + w*cww + h*cwh
+    // Screen y is the inner product of (n,w,h) and (cln,clw,clh)
+    sy := n*cln + w*clw + h*clh
+    res := TRUE
+
+    //writef("orthocoords:*n")
+    //writef("  ctn=%6.3f  ctw=%6.3f  cth=%6.3f*n", ctn,ctw,cth)
+    //writef("  cwn=%6.3f  cww=%6.3f  cwh=%6.3f*n", cwn,cww,cwh)
+    //writef("  cln=%6.3f  clw=%6.3f  clh=%6.3f*n", cln,clw,clh)
+    //writef(" n=%13.3f  w=%13.3f  h=%13.3f*n", n,w,h)
+    //writef("sx=%13.3f sy=%13.3f*n", sx,sy)
+    v!0 := FIX(fscreenxsize - 100 - sx)
+    v!1 := FIX(fscreenysize * 0.5 + sy)
+    //writef("v!0=%6i v!1=%6i*n", v!0,v!1)
+    RESULTIS TRUE
   }
-  v!0 := -muldiv(x, screenxsize, z) / 1  + screenxsize/2
-  v!1 := +muldiv(y, screenxsize, z) / 1  + screenysize/2
-//writef("v!0=%4i v!1=%4i*n", v!0, v!1)
 
-  RESULTIS TRUE
+  v!0 := -1
+  v!1 := -1
+  //writef("v!0=%6i v!1=%6i*n", v!0,v!1)
+  RESULTIS FALSE
 }
 
 AND draw_artificial_horizon() BE
-{ LET lx, ly, lz = ?, ?, ?
-  LET rx, ry, rz = ?, ?, ?
-  LET x, y, z = ctx, cty, ctz
+{ // This function draws the artificial horizon and a small circle
+  // representing the direction of travel.
+  // The n and w components of the direction of thrust t are used
+  // to make a horizontal vector (n,w,0) which is above or below
+  // the direction of thrust. This is then scaled to make it of
+  // unit length. Suppose the resulting vector is d = (dn,dw,0).
+  // Let P be a point in direction d 100 ft from the aircraft's CG,
+  // ie (100dn, 100dw,0).  This point will be above or below the
+  // line in direction t from the CG.
+  // P (cgn+100dn,cgw+100dw,cgh) is in world coordinates.
+  // The artificial horizon is made up of four line segments
+  // A-B, B-C, C-D and D-E where A, B, D and E are on
+  // the horizontal line passing through P at right angles to d.
+  // A is 30ft to the left of P and E is 30ft to the right of P.
+  // On the screen, B, C and D form an equilateral triangle half
+  // way between A and E.
 
-  // Draw flight direction circle
-  setcolour(col_cyan)
-  screencoords(cgxdot, cgydot, cgzdot, @lx)
-  drawcircle(lx, ly, 15)
+  // The direction of motion is represented by a small circle at
+  // point X which has coordinates (cgn+100xn,cgw+100xw,cgh+100xh)
+  // where (xn,xw,xh) is a unit vector in direction
+  // (cgndot,cgwdot,cghdot). The screen position of X is calculated
+  // using the same orthogonal projection as the points A, B, C, D
+  // and E.
 
-  // Draw artificial horizon
-  IF screencoords(x-y/4, y+x/4, z, @lx) &
-     screencoords(x+y/4, y-x/4, z, @rx) DO
-  { moveto(lx, ly)
-    drawto(rx, ry)
+
+  LET px, py = ?, ?  // For screen coordinates
+  LET ax, ay = ?, ?  // For screen coordinates
+  LET bx, by = ?, ?  // For screen coordinates
+  LET cx, cy = ?, ?  // For screen coordinates
+  LET dx, dy = ?, ?  // For screen coordinates
+  LET ex, ey = ?, ?  // For screen coordinates
+  LET FLT n,  FLT w,  FLT h  =  ctn, ctw, 0.0  // A horizontal vector
+  LET FLT a,  FLT b,  FLT c  =    ?,   ?,   ?  // Unit vector orthogonal to (n,w,h)
+  LET FLT Pn, FLT Pw, FLT Ph =    ?,   ?,   ?
+  LET FLT An, FLT Aw, FLT Ah =    ?,   ?,   ?
+  LET FLT En, FLT Ew, FLT Eh =    ?,   ?,   ?
+  LET FLT Xn, FLT Xw, FLT Xh =    ?,   ?,   ?  // A point in direction
+                                               // (cgndot,cgwdot,cghdot).
+
+  setcolour(col_white)
+
+  //{ moveto(100,200)
+  //  drawto(110,210)
+  //}
+//updatescreen()
+//abort(1002)
+
+
+  adjustlength(@n)  // Make (n,w,0) a unit vector, direction d.
+
+  // Make a unit vector in direction A->E (orthogonal to d).
+  a, b, c := w, -n, 0.0
+
+  // Set P to be 100ft from CG in direction d
+  Pn, Pw, Ph := cgn+100*n,  cgw+100*w,  cgh // A point on the horizon
+                                            // 100ft from CG.
+  // Set A 30ft left of from P.
+  An, Aw, Ah := Pn-30*a, Pw-30*b, Ph
+  // Set A 30ft left of from P.
+  En, Ew, Eh := Pn+30*a, Pw+30*b, Ph
+
+  //    A-----------B  P  D----------E
+  //                 \   /
+  //                   C
+  //
+  // AE is othogonal to the line from CG to P.
+  // 
+
+  orthocoords(An-cgn, Aw-cgw, Ah-cgh, @ax)
+  orthocoords(En-cgn, Ew-cgw, Eh-cgh, @ex)
+  px, py := (ax+ex)/2, (ay+ey)/2
+  bx, by := px + (ax-ex)*5/60, py + (ay-ey)*5/60
+  dx, dy := px - (ax-ex)*5/60, py - (ay-ey)*5/60
+  // BCD is an equilateral triangle with sides of length 10,
+  // CP has length appoximately 8.66.
+  // (ey-ay, ax-ay) is a vector of length 60 in direction PC
+  // so the screen coordinates of C can be calculated as follows.
+  cx, cy := px+(ey-ay)*8_66/60_00, py+(ax-ex)*8_66/60_00
+  // We can now draw the artificial horizon
+  moveto(ax,ay)
+  drawto(bx,by)
+  drawto(cx,cy)
+  drawto(dx,dy)
+  drawto(ex,ey)
+
+  // Set (n,w,h) to be a point in direction (cgndot,cgwdot,cghdot).
+  n, w, h :=  cgndot, cgwdot, cghdot
+  // Make (n,w,h) a unit vector
+  adjustlength(@n)
+  // X is the centre of the direction of motion circle.
+  Xn, Xw, Xh := cgn+100*n, cgw+100*w, cgh+100*h
+
+//drawf(20, 85, "Xn=%i6 Xn=%i6 Dn=%i6", FIX (Xn-cgn), FIX (Xw-cgw), FIX (Xh-cgh))
+  IF orthocoords(Xn-cgn, Xw-cgw, Xh-cgh, @px) DO
+  { drawcircle(px, py, 5)
+//writef("Draw circle at %n %n*n", px,py)
   }
+//updatescreen()
+//abort(1001)
 }
 
-AND draw_ground_point(x, y) BE
-{ LET gx, gy, gz = ?, ?, ?
+AND draw_ground_point(FLT x, FLT y) BE
+{ LET FLT gx, FLT gy, FLT gz = Zro, Zro, Zro
 //newline()
-//writef("draw_ground_point: x=%n y=%n*n", x, y)
-//writef("draw_ground_point: cgx=%n cgy=%n cgz=%n*n", cgx, cgy, cgz)
-  IF screencoords(x-cgx-eyex, y-cgy-eyey, -cgz-eyez, @gx) DO
-  { drawrect(gx, gy, gx+1, gy+1)
-    //updatescreen()
-  }
-}
-
-AND tarmac() BE
-{ LET cx, cy = (cgx/5_000) * 5_000, ((cgy-2_500)/5_000) * 5_000
-//writef("tarmac: cx=%9.3d  cy=%9.3d*n", cx, cy)
-  FOR x = cx-20_000 TO cx+150_000 BY 10_000 DO
-  { FOR y = cy-10_000 TO cy+5_000 BY 5_000 DO
-    { LET r = ABS(3*x + 5*y) MOD 67
-      TEST 0<=x<3000_000 & -50_000 <= y < 50_000
-      THEN setcolour(maprgb(180+r,180+r,180+r))
-      ELSE setcolour(maprgb( 80+r,180+r, 40+r))
-      gdrawquad3d(x,        y,       0,
-                  x+10_000, y,       0,
-                  x+10_000, y+5_000, 0,
-                  x,        y+5_000, 0)
-    }
+//writef("draw_ground_point: x=%13.2f y=%13.2f*n", x, y)
+//writef("draw_ground_point: cgn=%13.2f cgw=%13.2f cgh=%13.2f*n", cgn, cgw, cgh)
+//abort(1001)
+  IF screencoords(x-cgn, y-cgw, -cgh-cockpitl, @gx) DO
+  { 
+//writef("gx=%13.3f  gy=%13.3f gz=%13.3f*n", gx, gy, gz)
+    drawrect(FIX gx, FIX gy, FIX gx+2, FIX gy+2)
+    updatescreen()
+//abort(1000)
   }
 }
 
 AND drawgroundpoints() BE
-{ 
-  setcolour(col_white)
-  draw_ground_point(       0, 0)  // Start of runway
-  FOR x = 0 TO 3000_000 BY 100_000 DO
-  { draw_ground_point(x, -50_000) // Runway side lights
-    draw_ground_point(x, +50_000)
-  }
-  draw_ground_point(3000_000, 0)  // End of runway
+{
+  setcolour(col_red)
+  gdrawquad3d( 0.0,   -5.0, 1.0,
+              20.0,   -5.0, 1.0,
+              20.0,    5.0, 1.0,
+               0.0,    5.0, 1.0)
+  setcolour(col_green)
+  gdrawquad3d(20.0,   -5.0, 1.0,
+              40.0,   -5.0, 1.0,
+              40.0,    5.0, 1.0,
+              20.0,    5.0, 1.0)
+//  updatescreen()
 
-  FOR k = 1000_000 TO 10000_000 BY 1000_000 DO
-  { // Draw beacon lights
+//IF FALSE DO
+  FOR x = 0 TO 200-150 BY 20 DO
+  { LET FLT fx = FLOAT x
+    FOR y = -50 TO 45 BY 5 DO
+    { LET FLT fy = FLOAT y
+      LET r = ABS(3*x + 5*y) MOD 73
+      LET g = ABS(53*x + 25*y) MOD 73
+      LET b = ABS(103*x + 125*y) MOD 73
+//sawritef("fx=%13.3f fy=%13.3f*n", fx, fy)      
+      setcolour(maprgb(30+r,30+g,30+b))
+//writef("Calling gdrawquad3d*n")
+      gdrawquad3d(fx,    fy,   Zro,
+                  fx+20, fy,   Zro,
+                  fx+20, fy+5, Zro,
+                  fx,    fy+5, Zro)
+      //updatescreen()
+    }
+  }
+
+RETURN
+    
+
+  setcolour(col_white)
+  ///draw_ground_point(      Zro,       Zro)
+IF FALSE DO
+  FOR x = 0 TO 3000 BY 100 DO
+  { LET FLT fx = FLOAT x
+    draw_ground_point(fx, -50.0)
+    draw_ground_point(fx, +50.0)
+  }
+//  draw_ground_point(3000.0, Zro)
+
+IF FALSE DO
+  FOR k = 1000 TO 10000 BY 1000 DO
+  { LET FLT fk = FLOAT k
     setcolour(col_lightmajenta)
-    IF k>3000_000 DO draw_ground_point( k,  0)
+    IF fk > 3000.0 DO draw_ground_point( k,  Zro)
     setcolour(col_white)
-    draw_ground_point(-k,  0)
+    draw_ground_point(-fk,  Zro)
     setcolour(col_red)
-    draw_ground_point( 0,  k)
+    draw_ground_point( Zro,  fk)
     setcolour(col_green)
-    draw_ground_point( 0, -k)
+    draw_ground_point( Zro, -fk)
   }
 }
 
@@ -779,77 +960,215 @@ AND initposition(n) BE SWITCHON n INTO
 { DEFAULT:
 
   CASE 1: // Take off position
-    cgx, cgy, cgz    := 30_000,  0,  5_000
+    cgn,    cgw,    cgh    := 100.0,  0,  100.0
+    cgndot, cgwdot, cghdot := Zro,  Zro,  Zro
 
-    tdot, wdot, ldot    := 0, 0, 0      // Stationary
-    rtdot, rwdot, rldot := 0, 0, 0
+    tdot,   wdot,   ldot   := Zro, Zro, Zro  // Not needed
 
-    ctx, cty, ctz := One,      0,      0  // Direction cosines with
-    cwx, cwy, cwz :=   0,    One, 100000  // six decimal digits
-    clx, cly, clz :=   0,-100000,    One  // after to decimal point.
+    // The aircraft orientation
+    ctn, ctw, cth := One, Zro, Zro  // Direction cosines of aircraft
+    cwn, cww, cwh := Zro, One, Zro
+    cln, clw, clh := Zro, Zro, One
 
-    ft1,  fw1,  fl1  := 0, 0, 0 // Previous linear forces
-    rft1, rfw1, rfl1 := 0, 0, 0 // Previous rotational forces
+    rtdot,  rwdot,  rldot  := Zro, Zro, Zro  // Rate of rotation
+
+    // Linear forces
+    ft,   fw,   fl   := Zro, Zro, Zro
+    ft1,  fw1,  fl1  := Zro, Zro, Zro // Previous linear forces
+
+    // Rotational forces
+    rft,  rfw,  rfl  := Zro, Zro, Zro
+    rft1, rfw1, rfl1 := Zro, Zro, Zro // Previous rotational forces
 
     stepping := TRUE
     crashed := FALSE
-    enginestarted, rpm := FALSE, 0
+    enginestarted, rpm := FALSE, 0.0
     targetrpm := rpm
     RETURN
 
   CASE 2: // Position on the glide slope
-    cgx, cgy, cgz    := -10_000_000,  0,  1000_000  // height of 1000 ft
+    cgn,    cgw,    cgh    := -4000.0, Zro,  1000.0      // Height of 1000 ft
+    cgndot, cgwdot, cghdot :=   100.0, Zro,   Zro
 
-    tdot, wdot, ldot :=   100_000,  0,     0      // 100 ft/s in direction t
-    rtdot, rwdot, rldot := 0, 0, 0
+    tdot,   wdot,   ldot   :=   100.0, Zro,   Zro  // Not needed
 
-    ctx, cty, ctz := One,   0,   0  // Direction cosines with
-    cwx, cwy, cwz :=   0, One,   0  // six decimal digits
-    clx, cly, clz :=   0,   0, One  // after to decimal point.
+    // The aircraft orientation
+    ctn, ctw, cth := One, Zro, Zro  // Direction cosines with
+    cwn, cww, cwh := Zro, One, Zro  // six decimal digits
+    cln, clw, clh := Zro, Zro, One  // after to decimal point.
 
-    ft1,  fw1,  fl1  := 0, 0, 0 // Previous linear forces
-    rft1, rfw1, rfl1 := 0, 0, 0 // Previous rotational forces
+    rtdot, rwdot, rldot :=  Zro, Zro, Zro
+
+    // Linear forces
+    ft,   fw,   fl   := Zro, Zro, Zro
+    ft1,  fw1,  fl1  := Zro, Zro, Zro // Previous linear forces
+
+    // Rotational forces
+    rft,  rfw,  rfl  := Zro, Zro, Zro
+    rft1, rfw1, rfl1 := Zro, Zro, Zro // Previous rotational forces
 
     stepping := TRUE
     crashed := FALSE
-    enginestarted, rpm := TRUE, 1600
+    enginestarted, rpm := TRUE, 1600.0
+    targetrpm := rpm
+    RETURN
+
+  CASE 3: // Set flying level at 10000 ft at 65mph
+    cgn,    cgw,    cgh    := -10_000.0, Zro, 10000.0    // Height of 10000 ft
+    cgndot, cgwdot, cghdot :=      95.0, Zro,   Zro      // 65mph = 95 ft/s
+//cgwdot := 15.0
+    tdot,   wdot,   ldot   :=  cgndot, cgwdot, cghdot
+
+    // The aircraft orientation
+    ctn, ctw, cth := One, Zro, Zro  // Direction cosines of aircraft.
+    cwn, cww, cwh := Zro, One, Zro
+    cln, clw, clh := Zro, Zro, One
+
+    rtdot,  rwdot,  rldot  := Zro, Zro, Zro  // Rate of rotation
+
+    // Linear forces
+    ft,   fw,   fl   := Zro, Zro, Zro
+    ft1,  fw1,  fl1  := Zro, Zro, Zro // Previous linear forces
+
+    // Rotational forces
+    rft,  rfw,  rfl  := Zro, Zro, Zro
+    rft1, rfw1, rfl1 := Zro, Zro, Zro // Previous rotational forces
+
+    ft1,  fw1,  fl1  := Zro, Zro, Zro // Previous linear forces
+    rft1, rfw1, rfl1 := Zro, Zro, Zro // Previous rotational forces
+
+    stepping := TRUE
+    crashed := FALSE
+    enginestarted, rpm := TRUE, 1900.0
     targetrpm := rpm
     RETURN
 }
 
 LET start() = VALOF
-{ done := FALSE
+{ LET v = VEC 2
+  datstamp(v)
+  msecs1 := v!1 
+  One := 1.0
+  Zro := 0.0
+  stepcount := 0
+  steprate := 5.0
 
-  cetx, cety, cetz := ctx, cty, ctz
-  cewx, cewy, cewz := cwx, cwy, cwz
-  celx, cely, celz := clx, cly, clz
+/*
+  FOR i = 1 TO 10 DO
+  { LET t0 = sys(Sys_cputime)
+    LET v = VEC 3
+    LET s = VEC 16
+    datstamp(v)
+    datstring(s)
+    sawritef("%i4: msecs1=%i8  %s*n", i, v!1, s+5)
+    delay(1000)
+  }
+*/
 
-  eyex, eyey, eyez := 0, 0, 0   // Relative eye position
+//writef("%8x %-%32b*n%-%20.6f*n%-%20.3e*n", 123.456789)
+//writef("%8x %-%32b*n%-%20.6f*n%-%20.3e*n", 123.456789e20)
+//writef("%8x %-%32b*n%-%20.6f*n%-%20.3e*n", 123.456789e-20)
+//RESULTIS 0 
+
+//writef("radius3(0.0, 0.0,  0.0) = %13.3f*n", radius3(0.0, 0.0,  0.0))
+//writef("radius3(1.0, 1.0,  0.0) = %13.3f*n", radius3(1.0, 1.0,  0.0))
+//writef("radius3(3.0, 0.0,  4.0) = %13.3f*n", radius3(3.0, 0.0,  4.0))
+//writef("radius3(0.0, 3.0, -4.0) = %13.3f*n", radius3(0.0, 3.0, -4.0))
+//abort(1000)
+
+//  writef("3.1               =%20.9e %-%13.9f*n", 3.1)
+//  writef("3.14              =%20.9e %-%13.9f*n", 3.14)
+//  writef("3.141             =%20.9e %-%13.9f*n", 3.141)
+//  writef("3.1415            =%20.9e %-%13.9f*n", 3.1415)
+//  writef("3.14159           =%20.9e %-%13.9f*n", 3.14159)
+//  writef("3.141592          =%20.9e %-%13.9f*n", 3.141592)
+//  writef("3.1415926         =%20.9e %-%13.9f*n", 3.1415926)
+//  writef("3.14159265        =%20.9e %-%13.9f*n", 3.14159265)
+//  writef("3.141592653       =%20.9e %-%13.9f*n", 3.141592653)
+//  writef("3.1415926535      =%20.9e %-%13.9f*n", 3.1415926535)
+//  writef("3.14159265358     =%20.9e %-%13.9f*n", 3.14159265358)
+//  writef("3.141592653589    =%20.9e %-%13.9f*n", 3.141592653589)
+//  writef("3.1415926535897   =%20.9e %-%13.9f*n", 3.1415926535897)
+//  writef("3.14159265358979  =%20.9e %-%13.9f*n", 3.14159265358979)
+//  writef("3.141592653589793 =%20.9e %-%13.9f*n", 3.141592653589793)
+//RESULTIS 0
+//  angle( 1.0,  0.0)
+//  angle( 0.0,  1.0)
+//  angle(-1.0,  0.0)
+//  angle( 0.0, -1.0)
+//  angle( 1.0,  1.0)
+//  angle(-1.0,  1.0)
+//  angle(-1.0, -1.0)
+//  angle( 1.0, -1.0)
+//RESULTIS 0
+
+  IF FALSE DO
+  { // Test rdtab
+    writef("Testing rdtab*n")
+    FOR a = -200 TO 200 BY 10 DO
+    { LET fa = FLOAT a
+      LET val = Zro
+      LET tab = TABLE    4,             // Number of points in the curve
+                    -150.0, 100.000,
+                       0.0, -50.000,
+                     100.0,   0.000,
+                     150.0, 100.000
+      val := rdtab(fa, tab)
+      IF a MOD 25 = 0 DO writef("*n%9.1f:", fa)
+      writef(" %8.3f", rdtab(fa, tab))
+    }
+    newline()
+    RESULTIS 0
+  }
+
+  IF FALSE DO
+  { // The the angle function
+    writef("x=%8.3f  y=%8.3f    angle=%9.3f*n", 1.000, 1.000, angle( 1.000, 1.000))
+    writef("x=%8.3f  y=%8.3f    angle=%9.3f*n", 0.000, 1.000, angle( 0.000, 1.000))
+    writef("x=%8.3f  y=%8.3f    angle=%9.3f*n",-1.000, 1.000, angle(-1.000, 1.000))
+    writef("x=%8.3f  y=%8.3f    angle=%9.3f*n",-1.000,-1.000, angle(-1.000,-1.000))
+    writef("x=%8.3f  y=%8.3f    angle=%9.3f*n", 1.000,-1.000, angle( 1.000,-1.000))
+    writef("x=%8.3f  y=%8.3f    angle=%9.3f*n",-1.000, 0.000, angle(-1.000, 0.000))
+    writef("x=%8.3f  y=%8.3f    angle=%9.3f*n", 0.060, 0.001, angle( 0.060, 0.001))
+    writef("x=%8.3f  y=%8.3f    angle=%9.3f*n", 0.060,-0.001, angle( 0.060,-0.001))
+
+    writef("x=%8.3f  y=%8.3f    angle=%9.3f*n",-1.000, 0.001, angle(-1.000, 0.001))
+    writef("x=%8.3f  y=%8.3f    angle=%9.3f*n",-1.000,-1.000, angle(-1.000,-1.000))
+    RESULTIS 0
+  }
+
+  initposition(1) // Get ready for take off
+
+  cetn, cetw, ceth := ctn, ctw, cth
+  cewn, ceww, cewh := cwn, cww, cwh
+  celn, celw, celh := cln, clw, clh
+
+  eyen, eyew, eyeh := Zro, Zro, Zro   // Relative eye position
   //hatdir, hatmsecs, eyedir := 0, 0, 0
   hatdir, hatmsecs := #b0001, 0 // From behind
   eyedir := 1
-  eyedist := 60_000  // Eye x or y distance from aircraft
+  eyedist := 100.0  // Eye x or y distance from aircraft
 
-  cockpitz := 6_000   // Cockpit 8 feet above the ground
+  cockpitl := 6.0   // Cockpit 8 feet above the ground
 
-  c_throttle, c_elevator, c_aileron, c_rudder := 0, 0, 0, 0
-  c_trimthrottle, c_trimelevator, c_trimaileron, c_trimrudder := 0, 0, 0, 0
+  c_throttle, c_elevator, c_aileron, c_rudder := Zro, Zro, Zro, Zro
+  c_trimthrottle, c_trimelevator, c_trimaileron, c_trimrudder := Zro, Zro, Zro, Zro
+  throttle, elevator, aileron, rudder := Zro, Zro, Zro, Zro
 
   // Set rotational damping parameters 
-  rdt,   rdw,  rdl := 500, 500, 950
+  rdt,   rdw,  rdl := 1.800, 1.800, 1.800
 
-  ft,      fw,    fl  := 0, 0, 0
-  ft1,    fw1,   fl1  := 0, 0, 0
-  rft,    rfw,   rfl  := 0, 0, 0
-  rft1,  rfw1,  rfl1  := 0, 0, 0
-  rtdot, rwdot, rldot := 0, 0, 0
-  //writef("%i7 %i7 %i7*n", cgx/1000,   cgy/1000, cgz/1000)
+  ft,     fw,    fl   := Zro, Zro, Zro
+  ft1,    fw1,   fl1  := Zro, Zro, Zro
+  rft,    rfw,   rfl  := Zro, Zro, Zro
+  rft1,  rfw1,  rfl1  := Zro, Zro, Zro
+  rtdot, rwdot, rldot := Zro, Zro, Zro
+  //writef("%13.1f %13.1f %13.1f*n", cgn,   cgw, cgh)
 
   usage := 0
-  testing := FALSE
 
   initsdl()
-  mkscreen("Tiger Moth", 800, 600)
+  mkscreen("Tiger Moth", 800, 500)
 
   // Declare a few colours in the pixel format of the screen
   col_black       := maprgb(  0,   0,   0)
@@ -875,74 +1194,48 @@ LET start() = VALOF
   col_lightmajenta:= maprgb(255, 128, 255)
   col_lightcyan   := maprgb(255, 255, 128)
 
-  initposition(1) // Ready for takeoff
-  //initposition(2) // On glide slope
-
-  plotscreen()
-
-  done := FALSE
-  debugging := FALSE
+  done      := FALSE
+  debugging := TRUE//FALSE
   plotusage := FALSE
 
-  IF FALSE DO
-  { // Test rdtab
-    FOR a = -180_000 TO 180_000 BY 1000 DO
-    { LET t = TABLE 5, -180_000,0, 0,360, 180_000,0
-      IF a MOD 6_000 = 0 DO writef("*n%i4:", a/1000)
-      writef(" %8.3d", rdtab(a, tltab))
-    }
-    newline()
-    abort(1009)
-  }
+  mass := 2000.0    // Aircraft mass is 2000 lbs
+  mit :=   200.0    // Moment of inertial about t
+  miw :=   400.0    // Moment of inertial about w
+  mil :=   400.0    // Moment of inertial about l
 
-  IF FALSE DO
-  { // The the angle function
-    writef("x=%i5  y=%i5    angle=%9.3d*n", 1000, 1000, angle(1000, 1000))
-    writef("x=%i5  y=%i5    angle=%9.3d*n",    0, 1000, angle(   0, 1000))
-    writef("x=%i5  y=%i5    angle=%9.3d*n",-1000, 1000, angle(-1000, 1000))
-    writef("x=%i5  y=%i5    angle=%9.3d*n",-1000,-1000, angle(-1000,-1000))
-    writef("x=%i5  y=%i5    angle=%9.3d*n", 1000,-1000, angle( 1000,-1000))
-    writef("x=%i5  y=%i5    angle=%9.3d*n",-1000,    0, angle(-1000,    0))
-    writef("x=%i5  y=%i5    angle=%9.3d*n",   60,    1, angle(   60,    1))
-    writef("x=%i5  y=%i5    angle=%9.3d*n",   60,   -1, angle(   60,   -1))
+  lifttab := TABLE       10,         // 10 entries
+                   -180.000, -0.100, // The angle is relative to direction t
+                    -90.000,  0.400,
+                    -15.000,  0.100, // Stalled
+                    -11.000,  2.000,
+                      0.000,  1.000, // Lift coefficient when ldot=0
+                      4.000,  0.000,
+                     19.000, -0.600,
+                     24.000, -0.100, // Inverted stall
+                     90.000, -0.400,
+                    180.000, -0.100
 
-    writef("x=%i5  y=%i5    angle=%9.3d*n",-1000,    1, angle(-1000,    1))
-    writef("x=%i5  y=%i5    angle=%9.3d*n",-1000,   -1, angle(-1000,   -1))
-    abort(1009)
-  }
 
-  aircraft := 1 // The default aircraft -- the tiger moth
-  //aircraft := 0 // The default aircraft -- the dart
-  done := FALSE
+  //initposition(3)
+  currcolour := col_red
+  drawtriangle(100,200, 300,500, 500,200)
+  updatescreen()
+  plotscreen()
+//abort(1000)
 
   UNTIL done DO
   { // Read joystick and keyboard events
     LET t0 = sdlmsecs()
     LET t1 = ?
 
-//writef("Calling processevents*n")
     processevents()
-
-    IF c_elevator<-32767 DO c_elevator := -32767
-    IF c_elevator> 32767 DO c_elevator :=  32767
-    IF c_aileron <-32767 DO c_aileron  := -32767
-    IF c_aileron > 32767 DO c_aileron  :=  32767
-    IF c_rudder  <-32767 DO c_rudder   := -32767
-    IF c_rudder  > 32767 DO c_rudder   :=  32767
-    IF c_throttle  <     0 DO c_throttle :=     0
-    IF c_throttle  > 65535 DO c_throttle := 65535
 
     IF stepping DO step()
 
-    //writef("x=%9.3d y=%9.3d h=%9.3d tdot=%9.3d*n", cgx, cgy, cgz, tdot)
+    //writef("x=%9.2f y=%9.2f h=%9.2f %9.2f*n", cgn, cgw, cgh, tdot)
     plotscreen()
-//writef("Calling updatescreen*n")
-    updatescreen()
 
-    IF cgz<0 | (cgz < 2_000 & clz<0_850000) DO
-    { crashed := TRUE
-      stepping := FALSE
-    }
+    updatescreen()
 
     t1 := sdlmsecs()
 //writef("time %9.3d  %9.3d  %9.3d %9.3d*n", t0, t1, t1-t0, t0+100-t1)
@@ -956,14 +1249,14 @@ LET start() = VALOF
   }
 
   writef("*nQuitting*n")
-  sdldelay(1_000)
+  sdldelay(0_100)
   closesdl()
   RESULTIS 0
 }
 
-AND plotscreen() BE
+AND drawcontrols() BE
 { LET mx = screenxsize/2
-  LET my = screenysize - 70 - 100
+  LET my = screenysize - 70 //- 100
 
   seteyeposition()
 
@@ -971,130 +1264,163 @@ AND plotscreen() BE
 
   setcolour(col_lightcyan)
   
-  //writef("done=%n*n", done)
-  drawstring(240, 50, done -> "Quitting", "Tiger Moth Flight Simulator")
+  drawstr(240, 50, done -> "Quitting", "Tiger Moth Flight Simulator")
 
-
-  setcolour(col_white) // Draw runway line
+  setcolour(col_lightgray) // Draw runway line
   moveto(mx-1, my)
-  drawby(0, 3000_000/100_000)
+  drawby(0, FIX(3000.0/100.0))
   moveto(mx,   my)
-  drawby(0, 3000_000/100_000)
+  drawby(0, FIX(3000.0/100.0))
   moveto(mx+1, my)
-  drawby(0, 3000_000/100_000)
+  drawby(0, FIX(3000.0/100.0))
 
-  { LET dx, dy = ctx/50_000, cty/50_000
-    LET x, y = mx-cgy/100_000, my+cgx/100_000
-    setcolour(col_red) // Draw aircraft symbol
-    moveto(x-dy/4, y+dx/4) // Fuselage
+  { LET dx =    FIX(ctn*20)  // Orientation of the aircraft
+    LET dy =    FIX(ctw*20)
+    LET sdx =   dx / 10      // Ground speed of the aircraft
+    LET sdy =   dy / 10
+    LET x  = mx-FIX(cgw/100)
+    LET y  = my+FIX(cgn/100)
+    LET tx  = x+5*dy/8
+    LET ty  = y-5*dx/8
+    setcolour(col_red)       // Draw aircraft symbol
+    moveto(x-dy/4, y+dx/4)   // Fuselage
     drawby(+dy, -dx)
-    setcolour(col_green)
     moveto( x-dx/2,  y-dy/2) // Wings
     drawby(+dx, +dy)
+    moveto(tx, ty)           // Tail
+    moveby(dx/4, dy/4)
+    drawby(-dx/2, -dy/2)
   }
 
+  // Draw the controls
   setcolour(col_darkgray)
-  drawfillrect(screenxsize-20-100, screenysize-20-100,
+  drawfillrect(screenxsize-20-100, screenysize-20-100, // Joystick
                screenxsize-20,     screenysize-20)
-  drawfillrect(screenxsize-50-100, screenysize-20-100,
+  drawfillrect(screenxsize-50-100, screenysize-20-100, // Throttle
                screenxsize-30-100, screenysize-20)
-  drawfillrect(screenxsize-20-100, screenysize-50-100,
+  drawfillrect(screenxsize-20-100, screenysize-50-100, // Rudder
                screenxsize-20,     screenysize-30-100)
 
   IF crashed DO
   { setcolour(col_red)
-    plotf(mx-50, my+10, "CRASHED")
+    drawf(mx-50, my+50, "CRASHED")
   }
 
-  { LET pos = muldiv(40, c_throttle, 32768)
+  setcolour(col_green)     // Real world velocity
+  moveto(mx, my)
+  drawby(-FIX(cgwdot/10), FIX(cgndot/10))
+
+  { LET pos = FIX(80 * throttle)
     setcolour(col_red)
     drawfillrect(screenxsize-45-100, pos+screenysize-15-100,
                  screenxsize-35-100, pos+screenysize- 5-100)
   }
 
-  { LET pos = muldiv(45, c_rudder, 32768)
+  { LET pos = FIX(45 * rudder)
     setcolour(col_red)
     drawfillrect(pos+screenxsize-25-50, -5+screenysize-40-100,
                  pos+screenxsize-15-50, +5+screenysize-40-100)
   }
 
-  { LET posx = muldiv(45, c_aileron,  32768)
-    LET posy = muldiv(45, c_elevator, 32768)
+  { LET posx = FIX(45 * aileron)
+    LET posy = FIX(45 * elevator)
     setcolour(col_red)
     drawfillrect(posx+screenxsize-25-50, posy+screenysize-25-50,
                  posx+screenxsize-15-50, posy+screenysize-15-50)
   }
 
-  //setcolour(col_majenta)
-  //moveto(mx+200, my)
-  //drawby(ctx/20_000, cty/20_000)
-
-
   setcolour(col_white)
 
-  { LET heading = angle(cgxdot, -cgydot)/1000
-    IF heading<0 DO heading := heading +360
-    plotf(20, screenysize-20,
-          "%i5 MPH  %i6 ft rate %i4  Heading %i3",
-           muldiv(tdot, 60*60, 5280_000), cgz/1000, cgzdot/1000, heading)
-    plotf(20, screenysize-40, "%i5 RPM", rpm)
-  }
-
   IF debugging DO
-  { plotf(20, my,     "Throttle=%6i Elevator=%6i Aileron=%6i Rudder=%6i",
-                      c_throttle, c_elevator, c_aileron, c_rudder)
-    plotf(20, my- 15, "x=   %9.3d y=   %9.3d z=   %9.3d", cgx,  cgy,  cgz)
-    plotf(20, my- 30, "tdot=%9.3d wdot=%9.3d ldot=%9.3d", tdot, wdot, ldot)
-    plotf(20, my- 45, "atl= %9.3d atw= %9.3d awl= %9.3d", atl,  atw,  awl)
-    plotf(20, my- 60, "ct   %9.6d %9.6d %9.6d", ctx,cty,ctz)
-    plotf(20, my- 75, "cw   %9.6d %9.6d %9.6d", cwx,cwy,cwz)
-    plotf(20, my- 90, "cl   %9.6d %9.6d %9.6d", clx,cly,clz)
-    plotf(20, my-105, "ft  =%9.3d fw =%9.3d fl =%9.3d", ft, fw, fl)
-    plotf(20, my-120, "rft =%9.6d rfw=%9.6d rfl=%9.6d", rft,rfw,rfl)
+  { 
+    drawf(20, my+ 15, "rpm=%6.1f target rpm=%6.1f thrust=%8.3f",
+                       rpm, targetrpm, thrust)
+    drawf(20, my,     "Throttle=%6.3f Elevator=%6.3f Aileron=%6.3f Rudder=%6.3f",
+                       throttle,      elevator,      aileron,      rudder)
+    drawf(20, my- 15, "cgn=    %13.3f cgw=   %13.3f cgh=   %13.3f", cgn,   cgw,   cgh)
+    drawf(20, my- 30, "cgndot= %13.3f cgwdot=%13.3f cghdot=%13.3f", cgndot,cgwdot,cghdot)
+    drawf(20, my- 45, "tdot=   %13.3f wdot=  %13.3f ldot=  %13.3f", tdot,  wdot,  ldot)
+    drawf(20, my- 60, "ctn= %7.3f ctw= %7.3f cth= %7.3f", ctn,   ctw,   cth)
+    drawf(20, my- 75, "cwn= %7.3f cww= %7.3f cwh= %7.3f", cwn,   cww,   cwh)
+    drawf(20, my- 90, "cln= %7.3f clw= %7.3f clh= %7.3f", cln,   clw,   clh)
+    drawf(20, my-105, "ft=     %13.3f fw=    %13.3f fl=    %13.3f", ft,    fw,    fl)
+    drawf(20, my-120, "rft=    %13.3f rfw=   %13.3f rfl=   %13.3f", rft,   rfw,   rfl)
+    drawf(20, my-135, "rtdot=  %13.3f rwdot= %13.3f rldot= %13.3f", rtdot, rwdot, rldot)
+    drawf(20, my-150, "steprate=%8.3f", steprate)
+
+    drawf(20, 130, "tdot=%13.3f  ldot=%13.3f => angle=%6.1f airspeed=%13.3f",
+                    tdot, ldot, atl, radius2(tdot, ldot))
+    drawf(20, 115, "atl=%6.1f rdtab(atl,lifttab)=%9.3f", atl, rdtab(atl,lifttab))
+
   }
 
   IF plotusage DO
-  { plotf(20, my-135, "CPU usage = %3i%%", usage)
+  { drawf(20, 20, "CPU usage = %3i%%", usage)
   }
 
-  drawgroundpoints()
-  IF eyedir DO plotcraft()
-
-  // Set pilot's view
-  cetx, cety, cetz := ctx, cty, ctz
-  cewx, cewy, cewz := cwx, cwy, cwz
-  celx, cely, celz := clx, cly, clz
-  eyex, eyey, eyez := 0, 0, 0   // Relative eye position
-
-  draw_artificial_horizon()
-
-  updatescreen()
+  { LET heading = - FIX (angle(ctn,ctw))
+    IF heading < 0 DO heading := 360 + heading
+    drawf(20, 5, "      RPM %i4  Speed %3i mph  Altiude %i5 ft  Heading %i3",
+          FIX rpm, FIX (tdot/mph2fps), FIX cgh, heading)
+  }
+//updatescreen()
 }
 
-AND seteyeposition0() BE
-{ cetx, cety, cetz :=  One,   0,   0
-  cewx, cewy, cewz :=    0, One,   0
-  celx, cely, celz :=    0,   0, One
-  // Set eye position relative to CG of the aircraft
-  eyex, eyey, eyez :=  -eyedist,   0, 0
+AND plotscreen() BE
+{ LET mx = screenxsize /  2
+  LET my = screenysize - 70
+
+  fillsurf(col_lightblue)
+
+  setcolour(col_lightcyan)
+  setcolour(col_red)
+  //abort(1999)
+  drawstr(240, 50, done -> "Quitting", "Tiger Moth Flight Simulator")
+  updatescreen()
+//delay(1000)
+
+  drawcontrols()
+
+  setcolour(col_gray)
+  moveto(mx, my)
+  drawby(0, FIX(cgh/100))
+
+  setcolour(col_majenta)
+  moveto(mx+200, my)
+  drawby(FIX(ctn * 20.0), FIX(ctw * 20.0))
+
+  //draw_artificial_horizon()
+
+  //drawgroundpoints()
+
+  IF eyedir DO plotcraft()
+  updatescreen()
+//abort(1090)
+
+}
+
+AND seteyeposition1() BE
+{ cetn, cetw, ceth :=  One, Zro, Zro
+  cewn, ceww, cewh :=  Zro, One, Zro
+  celn, celw, celh :=  Zro, Zro, One
+  eyen, eyew, eyeh :=  -eyedist,   Zro, Zro   // Relative eye position
 }
 
 AND seteyeposition() BE
-{ LET d1 = eyedist
-  LET d2 = d1*707/1000
-  LET d3 = d2/9
+{ LET FLT d1 = eyedist
+  LET FLT d2 = d1 * 0.707
+  LET FLT d3 = d2 / 3
 
-  cetx, cety, cetz :=  One,   0,   0
-  cewx, cewy, cewz :=    0, One,   0
-  celx, cely, celz :=    0,   0, One
-  // Set eye position relative to CG of the aircraft
-  eyex, eyey, eyez :=  -eyedist,   0, 0   // Relative eye position
+  cetn, cetw, ceth :=  One, Zro, Zro
+  cewn, ceww, cewh :=  Zro, One, Zro
+  celn, celw, celh :=  Zro, Zro, One
+  eyen, eyew, eyeh :=  -eyedist,   Zro, Zro   // Relative eye position
 
 
 UNLESS 0<=eyedir<=8 DO eyedir := 1
 
   IF hatdir & sdlmsecs()>hatmsecs+100 DO
-  { eyedir := ((angle(ctx, cty)+360_000+22_500) / 45_000) & 7
+  { eyedir := FIX((angle(ctn, ctw)+360.0+22.5) / 45.0) & 7
     // dir = 0  heading N
     // dir = 1  heading NE
     // dir = 2  heading E
@@ -1117,7 +1443,7 @@ UNLESS 0<=eyedir<=8 DO eyedir := 1
     eyedir := (eyedir & 7) + 1
     hatdir := 0
 
-//writef("ctx=%9.6d cty=%9.6d eyedir=%n  eyedist=%9.3d*n", ctx, cty, eyedir, eyedist)
+//writef("ctn=%9.3f ctw=%9.3f eyedir=%9.1f*n", ctn, ctw, eyedir)
 //abort(1009) 
   }
 
@@ -1125,66 +1451,68 @@ UNLESS 0<=eyedir<=8 DO eyedir := 1
   { DEFAULT:
 
     CASE 0: // Pilot's view
-      cetx, cety, cetz := ctx, cty, ctz
-      cewx, cewy, cewz := cwx, cwy, cwz
-      celx, cely, celz := clx, cly, clz
-      eyex, eyey, eyez := 0, 0, 0   // Relative eye position
+      cetn, cetw, ceth := ctn, ctw, cth
+      cewn, ceww, cewh := cwn, cww, cwh
+      celn, celw, celh := cln, clw, clh
+
+      eyen, eyew, eyeh := Zro, Zro, Zro   // Relative eye position
       RETURN
 
      CASE 1: // North
-       cetx, cety, cetz :=  One,   0,   0
-       cewx, cewy, cewz :=    0, One,   0
-       celx, cely, celz :=    0,   0, One
-       eyex, eyey, eyez :=  -d1,   0,  d3   // Relative eye position
+       cetn, cetw, ceth :=  One, Zro, Zro
+       cewn, ceww, cewh :=  Zro, One, Zro
+       celn, celw, celh :=  Zro, Zro, One
+       eyen, eyew, eyeh :=  -d1, Zro,  d3   // Relative eye position
        RETURN
 
      CASE 2: // North east
-       cetx, cety, cetz :=  D45, D45,   0
-       cewx, cewy, cewz := -D45, D45,   0
-       celx, cely, celz :=    0,   0, One
-       eyex, eyey, eyez :=  -d2, -d2,  d3   // Relative eye position
+       cetn, cetw, ceth :=  D45, D45, Zro
+       cewn, ceww, cewh := -D45, D45, Zro
+       celn, celw, celh :=  Zro, Zro, One
+       eyen, eyew, eyeh :=  -d2, -d2,  d3   // Relative eye position
        RETURN
 
      CASE 3: // East
-       cetx, cety, cetz :=    0, One,   0
-       cewx, cewy, cewz := -One,   0,   0
-       celx, cely, celz :=    0,   0, One
-       eyex, eyey, eyez :=    0, -d1,  d3   // Relative eye position
+       cetn, cetw, ceth :=  Zro, One, Zro
+       cewn, ceww, cewh := -One, Zro, Zro
+       celn, celw, celh :=  Zro, Zro, One
+       eyen, eyew, eyeh :=  Zro, -d1,  d3   // Relative eye position
        RETURN
 
      CASE 4: // South east
-       cetx, cety, cetz := -D45, D45,   0
-       cewx, cewy, cewz := -D45,-D45,   0
-       celx, cely, celz :=    0,   0, One
-       eyex, eyey, eyez :=   d2, -d2,  d3   // Relative eye position
+       cetn, cetw, ceth := -D45, D45, Zro
+       cewn, ceww, cewh := -D45,-D45, Zro
+       celn, celw, celh :=  Zro, Zro, One
+       eyen, eyew, eyeh :=   d2, -d2,  d3   // Relative eye position
        RETURN
 
      CASE 5: // South
-       cetx, cety, cetz := -One,   0,   0
-       cewx, cewy, cewz :=   0, -One,   0
-       celx, cely, celz :=   0,    0, One
-       eyex, eyey, eyez :=  d1,    0,  d3   // Relative eye position
+       cetn, cetw, ceth := -One,  Zro, Zro
+       cewn, ceww, cewh :=  Zro, -One, Zro
+       celn, celw, celh :=  Zro,  Zro, One
+       eyen, eyew, eyeh :=   d1,  Zro,  d3   // Relative eye position
        RETURN
 
      CASE 6: // South west
-       cetx, cety, cetz :=-D45,-D45,   0
-       cewx, cewy, cewz := D45,-D45,   0
-       celx, cely, celz :=   0,   0, One
-       eyex, eyey, eyez :=  d2,  d2,  d3   // Relative eye position
+       cetn, cetw, ceth :=-D45,-D45, Zro
+       cewn, ceww, cewh := D45,-D45, Zro
+       celn, celw, celh := Zro, Zro, One
+       eyen, eyew, eyeh :=  d2,  d2,  d3   // Relative eye position
        RETURN
 
      CASE 7: // West
-       cetx, cety, cetz :=   0,-One,   0
-       cewx, cewy, cewz := One,   0,   0
-       celx, cely, celz :=   0,   0, One
-       eyex, eyey, eyez :=   0,  d1,  d3   // Relative eye position
+       cetn, cetw, ceth := Zro,-One, Zro
+       cewn, ceww, cewh := One, Zro, Zro
+       celn, celw, celh := Zro, Zro, One
+       eyen, eyew, eyeh := Zro,  d1,  d3   // Relative eye position
+
        RETURN
 
      CASE 8: // North west
-       cetx, cety, cetz := D45,-D45,   0
-       cewx, cewy, cewz := D45, D45,   0
-       celx, cely, celz :=   0,   0, One
-       eyex, eyey, eyez := -d2,  d2,  d3   // Relative eye position
+       cetn, cetw, ceth := D45,-D45, Zro
+       cewn, ceww, cewh := D45, D45, Zro
+       celn, celw, celh := Zro, Zro, One
+       eyen, eyew, eyeh := -d2,  d2,  d3   // Relative eye position
        RETURN
   }
 }
@@ -1198,53 +1526,77 @@ AND processevents() BE WHILE getevent() SWITCHON eventtype INTO
     SWITCHON capitalch(eventa2) INTO
     { DEFAULT:                                     LOOP
 
+      CASE 'A':  TEST eventa2='a'
+                 THEN rotate( 0.1, 0.0, 0.0)
+                 ELSE rotate(-0.1, 0.0, 0.0)
+                 plotscreen()
+                 LOOP
+
+      CASE 'B':  TEST eventa2='b'
+                 THEN rotate( 0.0,  0.1, 0.0)
+                 ELSE rotate( 0.0, -0.1, 0.0)
+                 plotscreen()
+                 LOOP
+
+      CASE 'C':  TEST eventa2='c'
+                 THEN rotate( 0.0, 0.0,  0.1)
+                 ELSE rotate( 0.0, 0.0, -0.1)
+                 plotscreen()
+                 LOOP
+
       CASE 'Q':  done := TRUE;                     LOOP
 
       CASE 'D':  debugging := ~debugging;          LOOP
 
-      CASE 'T':  testing := ~testing;              LOOP
+      CASE 'P':  stepping := ~stepping;            LOOP
 
       CASE 'U':  plotusage := ~plotusage;          LOOP
+
+      CASE 'S':  enginestarted := ~enginestarted;  LOOP
 
       CASE 'G': // Position aircraft on the glide path
                 initposition(2)
                 LOOP
 
-      CASE 'L': // Position the aircraft ready for take off
+      CASE 'L': // Set level flight at 3000 ft and speed 65 mph.
+                initposition(3)
+                LOOP
+
+      CASE 'T': // Position the aircraft ready for take off
                 initposition(1)
                 LOOP
 
       CASE 'N': // Reduce eye distance
                 eyedist := eyedist*5/6
-                IF eyedist<10_000 DO eyedist := 10_000
+                IF eyedist<60.0 DO eyedist := 60.0
                 LOOP
 
       CASE 'F': // Increase eye distance
                 eyedist := eyedist*6/5
+                IF eyedist > 1000.0 DO eyedist := 1000.0
                 LOOP
 
-      CASE 'A': aircraft := (aircraft+1) MOD 2;   LOOP
-
-      CASE 'S': enginestarted := ~enginestarted;  LOOP
-
-      CASE 'Z': IF c_throttle>=5000 DO
-                { c_trimthrottle := c_trimthrottle - 5000
-                  c_throttle := c_throttle-5000
-                }
+      CASE 'Z': c_trimthrottle := c_trimthrottle - 0.05
+                throttle := c_trimthrottle+c_throttle
+                IF throttle < 0.0 DO throttle, c_trimthrottle := 0.0, -c_throttle
                 LOOP
-      CASE 'X': IF c_throttle<65536-5000 DO
-                { c_trimthrottle := c_trimthrottle + 5000
-                  c_throttle := c_throttle+5000
-                }
+
+      CASE 'X': c_trimthrottle := c_trimthrottle + 0.050
+                throttle := c_trimthrottle+c_throttle
+                IF throttle > 1.0 DO throttle, c_trimthrottle := 1.0, 1.0-c_throttle
                 LOOP
 
       CASE ',':
-      CASE '<': c_trimrudder := c_trimrudder - 2000
-                c_rudder := c_rudder - 2000;       LOOP
+      CASE '<': c_trimrudder := c_trimrudder - 0.050
+                rudder := c_trimrudder+c_rudder
+                IF rudder < -1.0 DO rudder, c_trimrudder := -1.0, -1.0-c_rudder
+                LOOP
 
       CASE '.':
-      CASE '>': c_trimrudder := c_trimrudder + 2000
-                c_rudder := c_rudder + 2000;       LOOP
+      CASE '>': c_trimrudder := c_trimrudder + 0.050
+                rudder := c_trimrudder+c_rudder
+                IF rudder > 1.0 DO rudder, c_trimrudder := 1.0, 1.0-c_rudder
+                LOOP
 
       CASE '0': eyedir, hatdir := 0, 0;        LOOP // Pilot's view
       CASE '1': hatdir, hatmsecs := #b0001, 0; LOOP // From behind
@@ -1256,29 +1608,62 @@ AND processevents() BE WHILE getevent() SWITCHON eventtype INTO
       CASE '7': hatdir, hatmsecs := #b1000, 0; LOOP // From left
       CASE '8': hatdir, hatmsecs := #b1001, 0; LOOP // From behind left
 
-      CASE sdle_arrowup:    c_trimelevator := c_trimelevator+2000
-                            c_elevator := c_elevator+2000;         LOOP
-      CASE sdle_arrowdown:  c_trimelevator := c_trimelevator-2000
-                            c_elevator := c_elevator-2000;         LOOP
-      CASE sdle_arrowright: c_trimaileron  := c_trimaileron +2000
-                            c_aileron := c_aileron+2000;           LOOP
-      CASE sdle_arrowleft:  c_trimaileron  := c_trimaileron -2000
-                            c_aileron := c_aileron-2000;           LOOP
+      CASE sdle_arrowup:
+                c_trimelevator := c_trimelevator + 0.050
+                elevator := c_trimelevator+c_elevator
+                IF elevator > 1.0 DO elevator, c_trimelevator := 1.0, 1.0-c_elevator
+                LOOP
+
+      CASE sdle_arrowdown:
+                c_trimelevator := c_trimelevator - 0.050
+                elevator := c_trimelevator+c_elevator
+                IF elevator < -1.0 DO elevator, c_trimelevator := -1.0, -1.0-c_elevator
+                LOOP
+
+      CASE sdle_arrowright:
+                c_trimaileron := c_trimaileron + 0.050
+                aileron := c_trimaileron+c_aileron
+                IF aileron > 1.0 DO aileron, c_trimaileron := 1.0, 1.0-c_aileron
+                LOOP
+
+      CASE sdle_arrowleft:
+                c_trimaileron := c_trimaileron - 0.050
+                aileron := c_trimaileron+c_aileron
+                IF aileron < -1.0 DO aileron, c_trimaileron := -1.0, -1.0-c_aileron
+                LOOP
     }
     LOOP
 
   CASE sdle_joyaxismotion:    // 7
-  { LET which = eventa1
+  { // This currently assumes that the joystick
+    // is a CyborgX.
+    LET which = eventa1
     LET axis  = eventa2
-    LET value = eventa3
-//writef("axismotion: which=%n axis=%n value=%n*n", which, axis, value)
+    LET FLT value = (FLOAT eventa3) / 32768.0
+//writef("axismotion: which=%n axis=%n value=%8.6f*n", which, axis, value)
     SWITCHON axis INTO
-    { DEFAULT:                                           LOOP
-      CASE 0:   c_aileron  := c_trimaileron+value;       LOOP // Aileron
-      CASE 1:   c_elevator := c_trimaileron-value;       LOOP // Elevator
-      CASE 2:   c_throttle := c_trimthrottle-value+32768;LOOP // Throttle
-      CASE 3:   c_rudder   := c_trimrudder+value;        LOOP // Rudder
-      CASE 4:                                            LOOP // Right throttle
+    { DEFAULT:  LOOP
+      CASE 0:   c_aileron  :=  value;           // Aileron
+                aileron := c_trimaileron+c_aileron
+                IF aileron < -1.0 DO aileron, c_trimaileron := -1.0, -1.0-c_aileron
+                IF aileron >  1.0 DO aileron, c_trimaileron :=  1.0,  1.0-c_aileron
+                LOOP
+      CASE 1:   c_elevator := -value;           // Elevator
+                elevator := c_trimelevator+c_elevator
+                IF elevator < -1.0 DO elevator, c_trimelevator := -1.0, -1.0-c_elevator
+                IF elevator >  1.0 DO elevator, c_trimelevator :=  1.0,  1.0-c_elevator
+                LOOP
+      CASE 2:   c_throttle := (1.0-value)/2.0;  // Throttle
+                throttle := c_trimthrottle+c_throttle
+                IF throttle <  0.0 DO throttle, c_trimthrottle :=  0.0,    -c_throttle
+                IF throttle >  1.0 DO throttle, c_trimthrottle :=  1.0, 1.0-c_throttle
+                LOOP
+      CASE 3:   c_rudder   :=  value;           // Rudder
+                rudder := c_trimrudder+c_rudder
+                IF rudder < -1.0 DO rudder, c_trimrudder := -1.0, -1.0-c_rudder
+                IF rudder >  1.0 DO rudder, c_trimrudder :=  1.0,  1.0-c_rudder
+                LOOP
+      CASE 4:   LOOP                            // Right throttle
     }
   }
 
@@ -1286,6 +1671,8 @@ AND processevents() BE WHILE getevent() SWITCHON eventtype INTO
   { LET which = eventa1
     LET axis  = eventa2
     LET value = eventa3
+
+    //writef("joyhatmotion %n %n %n*n", eventa1, eventa2, eventa3)
 
     SWITCHON value INTO
     { DEFAULT:   
@@ -1307,22 +1694,30 @@ AND processevents() BE WHILE getevent() SWITCHON eventtype INTO
   }
 
   CASE sdle_joybuttondown:    // 10
+    //writef("joybuttondown %n %n %n*n", eventa1, eventa2, eventa3)
     SWITCHON eventa2 INTO
     { DEFAULT:   LOOP
       CASE  7:     // Left rudder trim
-              c_trimrudder := c_trimrudder - 1000
-              c_rudder := c_rudder - 1000;          LOOP
+                c_trimrudder := c_trimrudder - 0.050
+                rudder := c_trimrudder+c_rudder
+                IF rudder < -1.0 DO rudder, c_trimrudder := -1.0, -1.0-c_rudder
+                LOOP
+
       CASE  8:     // Right rudder trim
-              c_trimrudder := c_trimrudder + 1000
-              c_rudder := c_rudder + 1000;          LOOP
+                c_trimrudder := c_trimrudder + 0.050
+                rudder := c_trimrudder+c_rudder
+                IF rudder >  1.0 DO rudder, c_trimrudder :=  1.0, 1.0-c_rudder
+                LOOP
+
       CASE 11:     // Reduce eye distance
               eyedist := eyedist*5/6
-              IF eyedist<10_000 DO eyedist := 10_000
-//writef("eyedist=%9.3d*n", eyedist)
+              IF eyedist < 60.0 DO eyedist := 60.0
+//writef("eyedist=%9.3f*n", eyedist)
               LOOP
       CASE 12:     // Increase eye distance
               eyedist := eyedist*6/5
-//writef("eyedist=%9.3d*n", eyedist)
+              IF eyedist > 1000.0 DO eyedist := 1000.0
+//writef("eyedist=%9.3f*n", eyedist)
               LOOP
       CASE 13:     // Set pilot view
               eyedir, hatdir := 0, 0;              LOOP

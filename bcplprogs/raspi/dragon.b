@@ -12,8 +12,9 @@ GLOBAL {
 }
 
 LET start() = VALOF
-{ initsdl()
-  mkscreen("Dragon Curve", 600, 600)
+{ LET title = "The Dragon Curve"
+  initsdl()
+  mkscreen(title, 600, 600)
 
   col_blue        := maprgb(  0,   0, 255)
   col_white       := maprgb(255, 255, 255)
@@ -22,7 +23,9 @@ LET start() = VALOF
   fillsurf(col_blue)
 
   setcolour(col_lightcyan)
-  plotf(240, 50, "The Dragon Curve")
+  drawf((screenxsize - title%0 * (fontW+charHsep))/2,
+        screenysize/20,
+	title)
 
   setcolour(col_white)
   moveto(260, 200)

@@ -56,9 +56,10 @@ AND rdn() = VALOF
 
   IF ch='-' DO { sign := '-'; ch := rdch() }
 
-  WHILE '0'<=ch<='9' DO { a := 10*a + ch - '0'; ch := rdch()  }
+  WHILE '0'<=ch<='9' DO { a := 10*a + ch - '0'; ch := rdch() }
 
   IF sign='-' RESULTIS -a
+
   RESULTIS a
 }
 
@@ -66,13 +67,12 @@ AND rdn() = VALOF
 AND scan() BE
 { LET ocodeop = rdn()
   LET op0, op1, op2, op1l, len = 0, 0, 0, 0, -1
-  //LET opf2, ops2 = 0, 0
   LET ops2 = 0
 
   SWITCHON ocodeop INTO
 
   { DEFAULT:         writef("Bad OCODE op %n*n", ocodeop)
-                     abort(1000)
+                     abort(1001)
                      LOOP
 
     CASE 0:          RETURN
@@ -83,10 +83,20 @@ AND scan() BE
     CASE s_lp:       op1 := "LP";            ENDCASE
     CASE s_lg:       op1 := "LG";            ENDCASE
     CASE s_ln:       op1 := "LN";            ENDCASE
-
-//    CASE s_fnum:     opf2 := "FNUM";         ENDCASE
+    
+    CASE s_lflt:     op1 := "LFLT";          ENDCASE
 
     CASE s_lstr:     op0, len := "LSTR", rdn(); ENDCASE
+    CASE s_comment:  writef("# ")
+                     FOR i = 1 TO rdn() DO
+                     { LET ch = rdn()
+		     //writef("ch = %i3 ", ch)
+		       wrch(ch)
+		       //newline()
+		       //IF ch='*n' | ch=endstreamch BREAK
+		     } //REPEAT
+		     newline()
+		     LOOP
 
     CASE s_true:     op0 := "TRUE";          ENDCASE
     CASE s_false:    op0 := "FALSE";         ENDCASE
@@ -118,6 +128,7 @@ AND scan() BE
     CASE s_fsub:     op0 := "FSUB";          ENDCASE
     CASE s_fneg:     op0 := "FNEG";          ENDCASE
     CASE s_feq:      op0 := "FEQ";           ENDCASE
+    CASE s_fmod:     op0 := "FMOD";          ENDCASE
     CASE s_fne:      op0 := "FNE";           ENDCASE
     CASE s_fls:      op0 := "FLS";           ENDCASE
     CASE s_fgr:      op0 := "FGR";           ENDCASE
@@ -126,7 +137,7 @@ AND scan() BE
 
     CASE s_mul:      op0 := "MUL";           ENDCASE
     CASE s_div:      op0 := "DIV";           ENDCASE
-    CASE s_rem:      op0 := "REM";           ENDCASE
+    CASE s_mod:      op0 := "MOD";           ENDCASE
     CASE s_add:      op0 := "ADD";           ENDCASE
     CASE s_sub:      op0 := "SUB";           ENDCASE
     CASE s_eq:       op0 := "EQ";            ENDCASE
@@ -140,7 +151,7 @@ AND scan() BE
     CASE s_logand:   op0 := "LOGAND";        ENDCASE
     CASE s_logor:    op0 := "LOGOR";         ENDCASE
     CASE s_eqv:      op0 := "EQV";           ENDCASE
-    CASE s_neqv:     op0 := "NEQV";          ENDCASE
+    CASE s_xor:      op0 := "XOR";           ENDCASE
     CASE s_not:      op0 := "NOT";           ENDCASE
     CASE s_neg:      op0 := "NEG";           ENDCASE
     CASE s_abs:      op0 := "ABS";           ENDCASE
@@ -172,7 +183,7 @@ AND scan() BE
     CASE s_fnrn:     op0 := "FNRN";          ENDCASE
     CASE s_rtrn:     op0 := "RTRN";          ENDCASE
 
-    CASE s_endproc:  op0 := "ENDPROC";       ENDCASE // no args now
+    CASE s_endproc:  op0 := "ENDPROC";       ENDCASE // No args now
 
     CASE s_res:      op1l := "RES";          ENDCASE
     CASE s_jump:     op1l := "JUMP";         ENDCASE
@@ -207,16 +218,25 @@ AND scan() BE
 
     CASE s_datalab:  op1l := "DATALAB";      ENDCASE
     CASE s_itemn:    op1  := "ITEMN";        ENDCASE
+    CASE s_itemflt:  op1  := "ITEMFLT";      ENDCASE
   }
 
   UNLESS op0=0   DO writef("%S",     op0)
-  UNLESS op1=0   DO writef("%S %n",  op1,  rdn())
+  UNLESS op1=0   DO { LET a = rdn()
+                      TEST -10_000_000 < a < 10_000_000
+                      THEN writef("%S %n",  op1,  a)
+                      ELSE TEST ON64
+		           THEN writef("%S #%16x",  op1,  a)
+		           ELSE writef("%S #%8x",   op1,  a)
+                    }
   UNLESS op2=0   DO writef("%S %n %n",  op2,  rdn(), rdn())
   UNLESS op1l=0  DO writef("%S L%n", op1l, rdn())
-  ///UNLESS opf2=0  DO writef("%S %n %n", opf2, rdn(), rdn())
   UNLESS ops2=0  DO
-  { LET s = sfname(rdn())
-    writef("%s %s %n %n", ops2, s, rdn(), rdn())
+  { LET assop = rdn()
+    LET len   = rdn()
+    LET sh    = rdn()
+    LET s = sfname(assop)
+    writef("%s %s %n %n", ops2, s, len, sh)
   }
   IF len>=0 DO { // Write a string of len characters
                  writef(" %n ", len)
@@ -229,7 +249,7 @@ AND scan() BE
                }
 
   newline()
-//abort(1000)
+//abort(2345)
 } REPEAT
 
 AND sfname(sfop) = VALOF SWITCHON sfop INTO
@@ -239,11 +259,12 @@ AND sfname(sfop) = VALOF SWITCHON sfop INTO
   CASE sf_vecap:  RESULTIS "VECAP"
   CASE sf_fmul:   RESULTIS "FMUL"
   CASE sf_fdiv:   RESULTIS "FDIV"
+  CASE sf_fmod:   RESULTIS "FMOD"
   CASE sf_fadd:   RESULTIS "FADD"
   CASE sf_fsub:   RESULTIS "FSUB"
   CASE sf_mul:    RESULTIS "MUL"
   CASE sf_div:    RESULTIS "DIV"
-  CASE sf_rem:    RESULTIS "REM"
+  CASE sf_mod:    RESULTIS "MOD"
   CASE sf_add:    RESULTIS "ADD"
   CASE sf_sub:    RESULTIS "SUB"
   CASE sf_lshift: RESULTIS "LSHIFT"
@@ -251,7 +272,7 @@ AND sfname(sfop) = VALOF SWITCHON sfop INTO
   CASE sf_logand: RESULTIS "LOGAND"
   CASE sf_logor:  RESULTIS "LOGOR"
   CASE sf_eqv:    RESULTIS "EQV"
-  CASE sf_neqv:   RESULTIS "NEQV"
+  CASE sf_xor:    RESULTIS "XOR"
 }
 
 

@@ -6,6 +6,17 @@ sortxref rawxref to xrefdata
 delete rawxref
 >>
 
+xrefbcpl <= com/bcpl.b com/bcplfe.b com/bcplcgcin.b
+            sysb/blib.b sysb/dlib.b
+<<
+delete -f rawxref
+c bs blib "ver rawxref xref"
+c bs dlib "ver rawxref xref"
+c bc bcpl "ver rawxref xref"
+sortxref rawxref to xrefbcpl
+delete rawxref
+>>
+
 xplaymus <= com/playmus.b g/playmus.h
 <<
 delete -f rawxref

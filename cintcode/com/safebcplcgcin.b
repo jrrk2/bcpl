@@ -1,13 +1,22 @@
-// This is the BCPL64 OCODE to Cintcode codegenerator.
+// This is the OCODE to 32/64 bit BCPL Cintcode codegenerator.
 
 // Implemented by Martin Richards (c) 12 May 2013
 
 /* Change history
 
-15/05/13
-Modified to use c64 and t64 that specify the BCPL word length of
-the compiler and target machines, respectively.
+21/09/2019
+Use ON64 instead of c64, It is defined in libhdr.h.
 
+14/05/18
+Added codegeneration of Ocode operator FMOD.
+
+06/08/14
+Modified to include floating point constants and the operators
+#* #/ ~+ #- #= #~= #< #> #<= and #>=.
+
+15/05/13
+Modified to use ON64 and t64 that specify the BCPL word length of
+the compiler and target machines, respectively.
 10/05/13
 Major change to the compilation of SWITCHON to stop the compiler
 crashing when given CASE minint:. See function switcht.
@@ -18,17 +27,18 @@ bcplcgcin.b and bcplcgsial.b and added the interface
 header g/bcplfecg.h
 
 07/09/06
-This is a version of the BCPL compiler that generates 64-cintcode.  It
-is designed to run on both 32- and 64-bit systems. The options t32 and
-t64 specify the bit length of the BCPL word in the target system. The
-default is the same as the current system.  On 64-bit systems
-numerical constants are compiles to full precision, but on 32-bit
-systems they are truncated to 32 bits then sign extended to 64
-bits. 64-bit Cintcode has one new instruction (MW) that modifies the
-operand of the next W type instruction (KW, LLPW, LW, LPW, SPW, APW
-and AW). It does this by setting the senior 32-bits of the new 64-bit
-MW register. This is added to the operand of any W type instruction
-and is cleared after use.
+
+This is a version of the BCPL Cintcode generator can generate eithe 32
+or 64-bit cintcode.  It is designed to run on both 32- and 64-bit
+systems. The options t32 and t64 specify the bit length of the BCPL
+word in the target system. The default is the same as the current
+system.  On 64-bit systems numerical constants are compiles to full
+precision, but on 32-bit systems they are truncated to 32 bits then
+sign extended to 64 bits. 64-bit Cintcode has one new instruction (MW)
+that modifies the operand of the next W type instruction (KW, LLPW,
+LW, LPW, SPW, APW and AW). It does this by setting the senior 32-bits
+of the new 64-bit MW register. This is added to the operand of any W
+type instruction and is cleared after use.
 
 18/01/06
 Based on Dave Lewis's suggestion,
@@ -87,10 +97,10 @@ Removed S2 compiler option.
 Cured bug concerning the closing of gostream when equal to stdout.
 */
 
-SECTION "BCPL64CGCIN"
+SECTION "BCPLCGCIN"
 
-// If c64 is FALSE, we are running an a 32-bit system
-// If c64 is TRUE,  we are running an a 64-bit system
+// If ON64 is FALSE, we are running an a 32-bit system
+// If ON64 is TRUE,  we are running an a 64-bit system
 
 // If t64 is FALSE, it generates 32-bit Cintcode.
 // If t64 is TRUE,  it generates 64-bit Cintcode.
@@ -185,6 +195,10 @@ initdatalists
 geng
 gen
 genb
+genbb
+genflt
+genfb
+genfbb
 genr
 genh
 genw
@@ -218,6 +232,7 @@ dboutput
 wrkn
 wrcode
 wrfcode
+sopname
 
 // Global variables.
 arg1
@@ -286,6 +301,7 @@ gn_stop=2
 // CINTCODE op codes.
 MANIFEST {
 f_k0   =   0
+f_fltop=   1  // Added 20/07/10
 f_lf   =  12
 f_lm   =  14
 f_lm1  =  15
@@ -390,10 +406,13 @@ f_l1p0 = 240
 f_l2p0 = 244
 f_l3p0 = 247
 f_l4p0 = 249
+f_selld= 254  // Added 20/07/10
+f_selst= 255  // Added 20/07/10
 }
 
 LET codegenerate(workspace, workspacesize) BE
-{ //writef("%n-bit system generating %n-bit code*n", (c64->64,32), (t64->64,32))
+{ //writef("%n-bit BCPL generating %n-bit %s ender Cintcode*n",
+  //         (ON64->64,32), (t64->64,32), (bigender->"big","little"))
 
   IF workspacesize<2000 DO { cgerror("Too little workspace")
                              errcount := errcount+1
@@ -433,7 +452,7 @@ AND cgsects(workvec, vecsize) BE UNTIL op=0 DO
   procdepth := 0
   info_a, info_b := 0, 0
 
-  TEST t64 & ~c64
+  TEST t64 & ~ON64
   THEN blkupb := 3 // t64 set but running on a 32-bit implementation
   ELSE blkupb := 2 // otherwise.
 
@@ -449,7 +468,7 @@ AND cgsects(workvec, vecsize) BE UNTIL op=0 DO
     rdname(n, v) // Pack up to 11 character of the name into v
 
     IF naming DO
-    { TEST c64
+    { TEST ON64
       THEN codew(  sectword>>32,  sectword)
       ELSE codew(-(sectword>>31), sectword) // Sign extend
       codestr(v)
@@ -506,10 +525,11 @@ AND checklab() BE IF maxlab>=labnumber DO
   longjump(fin_p, fin_l)
 }
 
-AND cgerror(mes, a) BE
+AND cgerror(mes, a, b, c) BE
 { writes("*nError: ")
-  writef(mes, a)
+  writef(mes, a, b, c)
   newline()
+  IF hard DO abort(1000)
   errcount := errcount+1
   IF errcount>errmax DO { writes("Too many errors*n")
                           longjump(fin_p, fin_l)
@@ -560,16 +580,50 @@ AND store(s1, s2) BE FOR p = tempv TO arg1 BY 3 DO
                      }
 
 AND scan() BE
-{ IF debug>1 DO { writef("OP=%i3 PND=%i3 ", op, pendingop)
+{ IF debug>1 DO { writef("OP=%t5 PND=%t5 ", opname(op), opname(pendingop))
                   dboutput()
                 }
   SWITCHON op INTO
 
-  { DEFAULT:     cgerror("Bad OCODE op %n", op)
+  { DEFAULT:     cgerror("Bad OCODE op %n %s", op, opname(op))
                  ENDCASE
+
+    CASE s_selld: // Added 05/11/2018
+               { LET len = rdn()
+                 LET sh  = rdn()
+                 cgpendingop()
+                 loada(arg1)
+                 genbb(f_selld, len, sh)
+                 forget_a()
+                 ENDCASE
+               }
+
+    CASE s_selst: // Added 05/11/2018
+               { LET sfop = rdn() // Only sf_none (=0) allowed.
+                 LET len  = rdn()
+                 LET sh   = rdn()
+                 cgpendingop()
+                 loadba(arg2, arg1)
+                 genfbb(f_selst, sfop, len, sh)
+                 forgetallvars()
+                 stack(ssp-2)
+                 ENDCASE
+               }
 
     CASE 0:      RETURN
       
+    CASE s_comment:
+               { LET n = rdn()
+	         IF debug>0 DO writef("# ")
+                 FOR i = 1 TO n DO
+		 { LET ch = rdn()
+		   IF debug>0 DO wrch(ch)
+		 }
+	         IF debug>0 DO newline()
+                 ENDCASE
+               }
+
+		 
     CASE s_needs:
                { LET n = rdn()  // Ignore NEEDS directives.
                  FOR i = 1 TO n DO rdn()
@@ -599,13 +653,19 @@ AND scan() BE
 
     CASE s_rv:   cgrv(); ENDCASE
 
-    CASE s_mul:CASE s_div:CASE s_rem:
+    CASE s_float: CASE s_fix: CASE s_fneg: CASE s_fabs:
+    CASE s_not:CASE s_neg:CASE s_abs:
+    CASE s_fmul: CASE s_fdiv:CASE s_fmod:
+    CASE s_fadd:CASE s_fsub:
+    CASE s_feq: CASE s_fne:
+    CASE s_fls:CASE s_fgr:CASE s_fle:CASE s_fge:
+
+    CASE s_mul:CASE s_div:CASE s_mod:
     CASE s_add:CASE s_sub:
     CASE s_eq: CASE s_ne:
     CASE s_ls:CASE s_gr:CASE s_le:CASE s_ge:
     CASE s_lshift:CASE s_rshift:
-    CASE s_logand:CASE s_logor:CASE s_eqv:CASE s_neqv:
-    CASE s_not:CASE s_neg:CASE s_abs:
+    CASE s_logand:CASE s_logor:CASE s_eqv:CASE s_xor:
                  cgpendingop()
                  pendingop := op
                  ENDCASE
@@ -782,7 +842,7 @@ AND scan() BE
 
                    // For 64-bit target deal with the senior 4 bytes
                    IF t64 DO
-                   { TEST c64
+                   { TEST ON64
                      THEN w := val>>32
                      ELSE w := val<0 -> -1, 0 // Sign extend
                      FOR i = 4 TO 7 DO
@@ -804,20 +864,40 @@ AND scan() BE
 
 // Compiles code to deal with any pending op.
 LET cgpendingop() BE
-{ LET f = 0
+{ LET f, flop = 0, 0
   LET sym = TRUE
   LET pndop = pendingop
   pendingop := s_none
 
   SWITCHON pndop INTO
-  { DEFAULT:      cgerror("Bad pendingop %n", pndop)
+  { DEFAULT:      cgerror("Bad pendingop %s", opname(pndop))
 
     CASE s_none:  RETURN
+
+    CASE s_float: loada(arg1)
+                  genflt(fl_float)
+                  forget_a()
+                  RETURN
+
+    CASE s_fix:   loada(arg1)
+                  genflt(fl_fix)
+                  forget_a()
+                  RETURN
+
+    CASE s_fabs:  loada(arg1)
+                  genflt(fl_abs)
+                  forget_a()
+                  RETURN
 
     CASE s_abs:   loada(arg1)
                   chkrefs(3)
                   genb(jfn0(f_jgr), 2) // Conditionally skip
                   gen(f_neg)           // over this NEG instruction.
+                  forget_a()
+                  RETURN
+
+    CASE s_fneg:  loada(arg1)
+                  genflt(fl_neg)
                   forget_a()
                   RETURN
 
@@ -829,6 +909,19 @@ LET cgpendingop() BE
     CASE s_not:   loada(arg1)
                   gen(f_not)
                   forget_a()
+                  RETURN
+
+    CASE s_feq:   flop := fl_eq; GOTO case_feq
+    CASE s_fne:   flop := fl_ne; GOTO case_feq
+    CASE s_fls:   flop := fl_ls; GOTO case_feq
+    CASE s_fgr:   flop := fl_gr; GOTO case_feq
+    CASE s_fle:   flop := fl_le; GOTO case_feq
+    CASE s_fge:   flop := fl_ge; GOTO case_feq
+case_feq:         loadba(arg2, arg1)
+                  genflt(flop)
+                  lose1(k_a, 0)
+                  forget_a()
+                  forget_b()
                   RETURN
 
     CASE s_eq: CASE s_ne:
@@ -852,15 +945,34 @@ LET cgpendingop() BE
 
     CASE s_add:   cgadd(); RETURN
 
-    CASE s_mul:   f      := f_mul;        ENDCASE
-    CASE s_div:   f, sym := f_div, FALSE; ENDCASE
-    CASE s_rem:   f, sym := f_rem, FALSE; ENDCASE
-    CASE s_lshift:f, sym := f_lsh, FALSE; ENDCASE
-    CASE s_rshift:f, sym := f_rsh, FALSE; ENDCASE
-    CASE s_logand:f      := f_and;        ENDCASE
-    CASE s_logor: f      := f_or;         ENDCASE
+    CASE s_fmul:  f := fl_mul;  GOTO case_fmul
+    CASE s_fadd:  f := fl_add;  GOTO case_fmul
+
+case_fmul:        loadboth(arg2, arg1)
+                  genflt(f)
+                  forget_a()
+                  lose1(k_a, 0)
+                  RETURN
+
+    CASE s_fdiv:  f := fl_div; GOTO case_fdiv
+    CASE s_fmod:  f := fl_mod; GOTO case_fdiv
+    CASE s_fsub:  f := fl_sub; GOTO case_fdiv
+
+case_fdiv:        loadba(arg2, arg1)
+                  genflt(f)
+                  forget_a()
+                  lose1(k_a, 0)
+                  RETURN
+
+    CASE s_mul:   f      := f_mul;         ENDCASE
+    CASE s_div:   f, sym := f_div,  FALSE; ENDCASE
+    CASE s_mod:   f, sym := f_rem,  FALSE; ENDCASE
+    CASE s_lshift:f, sym := f_lsh,  FALSE; ENDCASE
+    CASE s_rshift:f, sym := f_rsh,  FALSE; ENDCASE
+    CASE s_logand:f      := f_and;         ENDCASE
+    CASE s_logor: f      := f_or;          ENDCASE
     CASE s_eqv:
-    CASE s_neqv:  f      := f_xor;        ENDCASE
+    CASE s_xor:   f      := f_xor;         ENDCASE
   }
 
   TEST sym THEN loadboth(arg2, arg1)
@@ -1030,7 +1142,7 @@ AND forgetvar(k, n) BE
                }
 }
 
-AND forgetallvars() BE  // Called after STIND or PUTBYTE.
+AND forgetallvars() BE  // Called after STIND, SELST or PUTBYTE.
 { LET p = info_a
   UNTIL p=0 DO { IF h2!p>=k_loc DO h2!p := k_none
                  p := !p
@@ -1364,7 +1476,7 @@ AND cgentry(l, n) BE
   chkrefs(80)  // Deal with some forward refs.
   align(wordbytelen)
   IF naming DO
-  { TEST c64
+  { TEST ON64
     THEN codew(  entryword>>32,  entryword)
     ELSE codew(-(entryword>>31), entryword) // Sign extend
     codestr(v)   // Compile the words containing the packed
@@ -1742,10 +1854,10 @@ AND cgstring(n) BE
            IF n>=3 DO h := rdn()
            n := n-4    // 1 to 8 bytes have been packed
            TEST bigender
-           THEN TEST c64
+           THEN TEST ON64
                 THEN h3!t := pack4b(a,b,c,d)<<32 | pack4b(e,f,g,h)
                 ELSE h4!t, h3!t := pack4b(a,b,c,d), pack4b(e,f,g,h)
-           ELSE TEST c64
+           ELSE TEST ON64
                 THEN h3!t := pack4b(h,g,f,e)<<32 | pack4b(d,c,b,a)
                 ELSE h4!t, h3!t := pack4b(h,g,f,e), pack4b(d,c,b,a)
          }
@@ -1812,10 +1924,10 @@ AND cgstatics() BE WHILE nlist DO
     LET w   = h3!blk
     nlist := !nlist
 //writef("cgstatics: blk=%n -> [%n, %n, %x8]*n", blk, blk!0, blk!1, blk!2)
-    TEST c64
+    TEST ON64
     THEN TEST t64
-         THEN codew( (w>>32), w)  // c64 -> T64
-         ELSE codew(-(w>>31), w)  // c64 -> t32   sign extend
+         THEN codew( (w>>32), w)  // ON64 -> T64
+         ELSE codew(-(w>>31), w)  // ON64 -> t32   sign extend
     ELSE TEST t64
          THEN codew(  h4!blk, w)  // c32 -> t64
          ELSE codew(       0, w)  // c32 -> t32
@@ -1867,6 +1979,24 @@ LET genb(f, a) BE IF incode DO
   codeb(a)
 }
 
+LET genbb(f, a, b) BE IF incode DO
+{ chkrefs(3)
+  IF debug>0 DO wrcode(f, "%i3 %i3", a, b)
+  codeb(f)
+  codeb(a)
+  codeb(b)
+}
+
+LET genflt(flop) BE IF incode DO
+{ // flop is an operator whic can be the argument of FLTOP
+  // Typical value for flop is fl_mul
+  // which would generate FLTOP MUL
+  chkrefs(2)
+  IF debug>0 DO wrcode(f_fltop, "%s", flopname(flop))
+  codeb(f_fltop)
+  codeb(flop)
+}
+
 LET genr(f, n) BE IF incode DO
 { chkrefs(2)
   IF debug>0 DO wrcode(f, "L%n", n)
@@ -1883,19 +2013,24 @@ LET genh(f, h) BE IF incode DO  // Assume 0 <= h <= #xFFFF
 }
 
 LET genw(f, w) BE IF incode DO
-{ UNLESS -#x80000000 <= w <= #x7FFFFFFF DO
-  { // This code is only executed if running on a 64-bit system
-    // and an MW instruction is needed.
+{ IF t64 & ON64 DO
+  { // Only compile the MW instruction when in 64 bit BCPL
+    // compiling 64 bit Cintcode, and then only when w is
+    // large enough to need it.
     LET mw = w>>32
-    IF (w & #x80000000)~=0 DO mw := mw+1
-    chkrefs(5)
-    // Output code to set the senior 32 bits of the mw register
-    // so that w = mw + sign_extend32(w & #xFFFFFFFF)
-    // The MW register is always cleared after use.
+    // 32 bits immediate operands are signed before adding
+    // the mw correction, so mw may need correction.
+    UNLESS (w & #x_8000_0000)=0 DO mw := (mw+1) & #x_FFFF_FFFF
+    // mw is chosen to cause
+    //    w = (mw<<32) + signextend(w & #x_FFFF_FFFF)
 
-    IF debug>0 DO wrcode(f_mw, "#x%x8", mw)
-    codeb(f_mw)
-    code4b(mw)
+    IF mw DO
+    { chkrefs(5)
+      IF debug>0 DO wrcode(f_mw, "#x%x8", mw)
+      codeb(f_mw)
+      code4b(mw)
+    }
+    w := w & #xFFFFFFFF // A 32 bit positive value.
   }
 
   chkrefs(5)
@@ -1904,7 +2039,25 @@ LET genw(f, w) BE IF incode DO
   code4b(w)
 }
 
-AND checkspace() BE IF stvp/wordbytelen>dp-stv DO
+LET genfb(f, flop, a) BE IF incode DO
+{ // Only called by: genfb(f_fltop, fl_mk, exponent)
+  chkrefs(3)
+  IF debug>0 DO wrcode(f, "%s %n", flopname(flop), a)
+  codeb(f)
+  codeb(flop)
+  codeb(a)
+}
+
+LET genfbb(f, sfop, a, b) BE IF incode DO
+{ chkrefs(4)
+  IF debug>0 DO wrcode(f, "%s %n %n", sfname(sfop), a, b)
+  codeb(f)
+  codeb(sfop)
+  codeb(a)
+  codeb(b)
+}
+
+AND checkspace() BE IF stvp/4>dp-stv DO
 { cgerror("Program too large, %n bytes compiled", stvp)
   errcount := errcount+1
   longjump(fin_p, fin_l)
@@ -2036,7 +2189,13 @@ AND coder(n) BE
   TEST labval=-1 THEN { !refliste := getblk(0, stvp-2, n)
                         refliste := !refliste
                       }
-                 ELSE puth(stvp-2, labval-stvp+2)
+                 ELSE { LET reladdr = labval-stvp+2
+		        puth(stvp-2, reladdr)
+		        //UNLESS -#x8000 <= reladdr <- #x7FFF DO
+		        UNLESS -32000 <= reladdr <= 32000 DO
+			  cgerror("Relative address %n too large, at %n L%n*n",
+			           reladdr, stvp-2, n)
+		      }
 }
 
 AND getw(a) = VALOF TEST bigender
@@ -2106,7 +2265,7 @@ AND putw(a, w) BE
               stv%(a+0) := w
             }
 
-AND align(n) BE UNTIL stvp REM n = 0 DO codeb(0)
+AND align(n) BE UNTIL stvp MOD n = 0 DO codeb(0)
 
 AND chkrefs(n) BE  // Resolve references until it is possible
                    // to compile n bytes without a reference
@@ -2140,7 +2299,7 @@ AND chkrefs(n) BE  // Resolve references until it is possible
     // can be resolved by a direct relative
     // address.
     TEST inrange_d(a, stvp)
-    THEN p := r        // Keep the item.
+    THEN p := r       // Keep the item.
     ELSE { !p := !r   // Free item if already resolved
            freeblk(r) // and no longer in direct range.
            IF !p=0 DO rliste := p  // Correct RLISTE.
@@ -2156,8 +2315,10 @@ AND chkrefs(n) BE  // Resolve references until it is possible
 }
 
 AND genindword(l) BE  // Called only from CHKREFS.
-{ LET r = rlist      // Assume RLIST ~= 0
-
+{ LET r = rlist       // Assume RLIST ~= 0
+  // r -> [link, a, labno]
+  // where a is the address of a relative address instruction and
+  // and labno is the destination label number.
   IF incode DO
   { skiplab := newlab()
     // genr(f_j, skiplab) without the call of chkrefs(2).
@@ -2195,8 +2356,11 @@ AND fillref_d(a, p) BE
 }
 
 AND fillref_i(a, p) BE  // P is even.
-{ stv%a := stv%a | 1   // Force indirect form.
-  stv%(a+1) := (p-a)/2
+{ LET offset = (p-a)/2
+  stv%a := stv%a | 1   // Force indirect form.
+  stv%(a+1) := offset
+  UNLESS 0<=a<=64000 & 0<=offset<=255 DO
+    sawritef("fillref_i: a=%n offset=%n*n", a, offset)
 }
 
 AND relref(a, l) BE
@@ -2204,10 +2368,13 @@ AND relref(a, l) BE
 // a relative reference instruction at
 // address A (=stvp-2).
 { LET labval = labv!l
-
-  IF labval>=0 & inrange_d(a, labval) DO { fillref_d(a, labval)
-                                           RETURN
-                                         }
+  // labval>=0 if the label value is already set.
+  IF labval>=0 & inrange_d(a, labval) DO
+  { // Resolve a direct relative address for the instruction
+    // at address a.
+    fillref_d(a, labval)
+    RETURN
+  }
 
   // All other references in RLIST have
   // addresses smaller than A and so RLIST will
@@ -2219,16 +2386,18 @@ AND relref(a, l) BE
 
 LET outputsection() BE
 { LET outstream = output()
+
   UNTIL reflist=0 DO { cgerror("Label L%n unset", h3!reflist)
                        reflist := !reflist
                      }
-
+//IF t64 DO abort(3000)
   selectoutput(gostream)  // Output a HUNK or BHUNK.
 
   UNLESS objline1written IF objline1%0 DO
   { writef("%s*n", objline1)
     objline1written := TRUE
   }
+//IF t64 DO abort(3001)
 
   TEST bining
   THEN { writef("%X3 ", t_bhunk)          // writes 4 chars "BB8 "
@@ -2238,26 +2407,35 @@ LET outputsection() BE
   ELSE { newline()
          TEST t64
          THEN { LET p = 0
+//IF t64 DO abort(30011)
                 writef("%16x ",t_hunk64)
                 writef("%16x ", stvp/wordbytelen)
+//IF t64 DO { newline(); abort(30012) }
                 WHILE p < stvp DO
-                { IF p REM 32 = 0 DO newline()
+                { IF p MOD 32 = 0 DO newline()
                   wrword_at(p)
                   p := p+wordbytelen
+		  //IF p>64 RETURN  //####
                 }
+//IF t64 DO { newline(); abort(30013) }
               }
          ELSE { LET p = 0
                 writef("%8x ", t_hunk)
                 writef("%8x ", stvp/wordbytelen)
                 WHILE p < stvp DO
-                { IF p REM 32 = 0 DO newline()
+                { IF p MOD 32 = 0 DO newline()
                   wrword_at(p)
                   p := p+wordbytelen
                 }
               }
+//IF t64 DO abort(30014)
          newline()
+//IF t64 DO abort(30015)
        }
+//IF t64 DO abort(3002)
+
   selectoutput(outstream)
+//IF t64 DO abort(3003)
 }
 
 AND wrhex2(byte) BE
@@ -2315,6 +2493,7 @@ AND dboutput() BE
                     wrkn(h1!p,h2!p)
                     wrch('*s')
                   }
+		  writef("ssp=%n ", ssp)
                 }
    
   IF debug=3 DO { LET l = rlist
@@ -2356,12 +2535,12 @@ AND wrkn(k,n) BE
   UNLESS k=k_none | k=k_a | k=k_b | k=k_c DO writen(n)
 }
 
-AND wrcode(f, form, a, b) BE
+AND wrcode(f, form, a, b, c) BE
 { IF debug=2 DO dboutput()
   writef("%i4: ", stvp)
   wrfcode(f)
   writes("  ")
-  writef(form, a, b)
+  writef(form, a, b, c)
   newline()
 }
 

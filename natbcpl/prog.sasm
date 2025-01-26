@@ -1,55 +1,22 @@
 MODSTART
-SECTION K3 C116 C115 C116
+SECTION K4 C66 C76 C73 C66
 
-//Entry to: f
-ENTRY   K1 C102
-LAB     L3
-J       L5
-LAB     L7
-L       K123
-RTN
-LAB     L8
-L       K124
-RTN
-LAB     L9
-L       K125
-RTN
+//Entry to: stop
+ENTRY   K4 C115 C116 C111 C112
 LAB     L10
-L       K126
-RTN
-LAB     L5
+LP      P4
+SG      G10
 LP      P3
-ATB
-L       K2000000
-JGE     L9001
-S       K1000000
-JEQ     L7
-J       L6
-LAB     L9001
-JEQ     L8
-A       K1000000
-JEQ     L9
-A       K1000000
-JEQ     L10
-J       L6
-LAB     L6
-L       K999
+KPG     P5 G20
 RTN
-STATIC  L1 K1 W10
-STATIC  L2 K1 W11
 
 //Entry to: clihook
 ENTRY   K7 C99 C108 C105 C104 C111 C111 C107
 LAB     L11
-L       K0
-SG      G10
-SP      P7
-L       K1000000
-ATB
-LF      L3
-K       P3
+KPG     P4 G1
 RTN
-GLOBAL K1
+GLOBAL K2
 G4 L11
-G10
+G2 L10
+G20
 MODEND

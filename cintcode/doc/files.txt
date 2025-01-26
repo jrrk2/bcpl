@@ -87,7 +87,7 @@ sysc/cintsys.h  Header file containing system/architecture
 sysc/cintsys.c, sys/cinterp.c, sys/kblib.c and sys/nullrastlib.c
                 The C components of the system.
 
-sysasm/LINUX/cintasm.s   An assembly language program equivalent to
+sysasm/linux/cintasm.s   An assembly language program equivalent to
                 sys/cinterp.c.
 
 sysc/rastsys.c sys/rastlib.c

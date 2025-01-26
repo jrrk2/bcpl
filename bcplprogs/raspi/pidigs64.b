@@ -21,36 +21,71 @@ Using modulo arithmetic, it is possible to find the nth hexadecimal
 digit of pi without having to compute the others.
 
 Herkommer's program uses double length floating point values, but mine
-uses 32-bit scaled fixed point arithmetic, as a result my version
-suffer rounding errors for smaller values of n. Using scaled numbers
-with 28 bits after the decimal point allows this program to compute
-the hex digits of pi from position 0 to 5000 correctly. It also
-calculates the digits from position 100000 to 100050 correctly as well
-as the digit at position one million. There is no guarantee that all
-the other positions will be computed correctly since errors can arise
-when long sequences of ones occur in the binary representation of pi,
-and this is unpredictable.
+uses 32-bit (or 64-bit) scaled fixed point arithmetic, as a result my
+version suffer rounding errors for smaller values of n. Using scaled
+numbers with 28 bits after the decimal point allows this program to
+compute the hex digits of pi from position 0 to 5000 correctly. It
+also calculates the digits from position 100000 to 100050 correctly as
+well as the digit at position one million. There is no guarantee that
+all the other positions will be computed correctly since errors can
+arise when long sequences of ones occur in the binary representation
+of pi, and this is unpredictable. Using 64-bit BCPL and 60 fractional
+bits the accuracy is far better.
 
-Implemented in BCPL by Martin Richards (c) July 2012
+This program automatically takes advantage of 64-bit precision if the BCPL
+word length allows. It outputs the hex digits of Pi from position 999950
+to 1000000.
+
+Calculating digits of Pi using 64-bit BCPL and a fraclen=60
+
+       3.
+ 999950: BC89273ABBCED2884ADAA7F46C59B44C28E672C29FFD342362
+1000000: 6
+1241.710> 
+
+
+Implemented in BCPL by Martin Richards (c) July 2012 (updated October 2017)
+
+
+
+Calculating digits of Pi using 64-bit BCPL and a fraclen=60
+
+       3.4C28E672C29FFD342362
+1000000: 6
+508.490> 
 
 */
 
 GET "libhdr"
 
-MANIFEST {
-// Define the scaled arithmetic parameters
-fraclen = 60        // Number of binary digits after the decimal point
-                    // eg 28 allows numbers in the range -8.0 <= x < 8.0
-One  = 1<<fraclen   // eg #x10000000
-Two  = 2*One        // eg #x20000000
-Four = 4*One        // eg #x40000000
-fracmask = One - 1  // eg #x0FFFFFFF 
+GLOBAL {
+  // Define the scaled arithmetic parameters
+  fraclen:ug
+  One
+  Two
+  Four
+  fracmask
 }
 
 LET start() = VALOF
-{ writef("*n       3.")
-  FOR n = 1000000-50 TO 1000000 DO {
-    IF n MOD 50 = 0 DO writef("*n%5i: ", n)
+{ LET bperword = 1
+  UNTIL (1<<bperword)=0 DO bperword := bperword+1
+
+  fraclen := bperword-4 // Number of binary digits after the decimal point
+                        // eg 28 allows numbers in the range -8.0 <= x < 8.0
+  One  := 1<<fraclen    // eg #x10000000
+  Two  := 2*One         // eg #x20000000
+  Four := 4*One         // eg #x40000000
+
+  fracmask := One - 1   // eg #x0FFFFFFF 
+
+  writef("Calculating digits of Pi using %n-bit BCPL and a fraclen=%n*n",
+          bperword, fraclen)
+
+  writef("*n       3.")
+  FOR n = 1000000-20 TO 1000000 DO {
+  //FOR n = 0 TO 6000 DO {
+    IF n MOD 50 = 0 DO writef("*n%7i: ", n)
     writef("%x1", pihexdig(n)); deplete(cos)
   }
   newline()
@@ -71,7 +106,7 @@ AND pihexdig(n) = VALOF
     LET c = muldiv( One, powmod(16, n-i, 8*i+5), 8*i+5)
     LET d = muldiv( One, powmod(16, n-i, 8*i+6), 8*i+6)
 
-    s := s + a - b - c - d & fracmask
+    s := (s + a - b - c - d) & fracmask
 
     //tr("a", a); tr("b", b); tr("c", c); tr("d", d); tr("s", s)
     //newline()
@@ -85,7 +120,7 @@ AND pihexdig(n) = VALOF
       LET c =     t / (8*i+5)
       LET d =     t / (8*i+6)
 
-      s := s + a - b - c - d & fracmask
+      s := (s + a - b - c - d) & fracmask
 
       //tr("a", a); tr("b", b); tr("c", c); tr("d", d); tr("s", s)
       //newline()

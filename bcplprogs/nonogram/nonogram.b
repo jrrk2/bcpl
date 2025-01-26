@@ -4,28 +4,42 @@
 
 // Copyright: Martin Richards,  January 1997
 
+/*
+History
+
+29/01/2016
+Modified to take a preset board and generate bmp images.
+*/
+
 GET "libhdr"
 
+// Insert the graphics library
+//MANIFEST { g_grbase=450 }
+
+GET "graphics.h"
+GET "graphics.b"
+
 GLOBAL {
-xupb     : 200
-yupb     : 201
-spacev   : 202
-spacet   : 203
-spacep   : 204
-boardv   : 205
-knownv   : 206
-xdatav   : 207
-ydatav   : 208
-xfreedomv: 209
-yfreedomv: 210
-change   : 211
-tracing  : 212
-rowbits  : 213
-known    : 214
-orsets   : 215
-andsets  : 216
-count    : 217
-debug    : 218
+xupb:ug
+yupb
+spacev
+spacet
+spacep
+boardv
+knownv
+xdatav
+ydatav
+xfreedomv
+yfreedomv
+change
+tracing
+rowbits
+known
+orsets
+andsets
+count
+debug
+preset
 }
 
 LET start() = VALOF
@@ -33,13 +47,14 @@ LET start() = VALOF
   LET retcode = 0
   LET datafile = "nonograms/n220"
 
-  IF rdargs("DATA,TO/K,TRACE/S,D1/S,D2/S", argv, 50)=0 DO
+  IF rdargs("DATA,TO/K,TRACE/S,D1/S,D2/S,-s/s", argv, 50)=0 DO
   {  writef("Bad arguments for NONOGRAM*n")
      RESULTIS 20
   }
 
-  UNLESS argv!0=0 DO datafile := argv!0
-  UNLESS argv!1=0 DO
+  IF argv!0 DO datafile := argv!0  // DATA
+
+  IF argv!1 DO                     // TO/k
   { LET out = findoutput(argv!1)
     IF out=0 DO
     { writef("Cannot open file %s*n", argv!1)
@@ -48,12 +63,14 @@ LET start() = VALOF
     selectoutput(out)
   }
 
-  tracing := argv!2
-  debug := 0
-  IF argv!3 DO debug := debug+1
-  IF argv!4 DO debug := debug+2
+  tracing := argv!2                // TRACE/s
 
-  UNLESS initdata() DO 
+  debug := 0
+  IF argv!3 DO debug := debug+1    // D1/s
+  IF argv!4 DO debug := debug+2    // D2/s
+  preset := argv!5                 // -s/s
+
+  UNLESS initdata(preset) DO 
   { writes("Cannot allocate workspace*n")
     retcode := 20
     GOTO ret
@@ -76,7 +93,7 @@ ret:
   RESULTIS retcode
 }
 
-AND initdata() = VALOF
+AND initdata(preset) = VALOF
 { 
   xupb     := 0
   yupb     := 0
@@ -102,17 +119,48 @@ AND initdata() = VALOF
     yfreedomv!i := 0
   }
 
+  IF preset DO
+  { // This is the preset board for the GCHQ Christmas puzzle
+    boardv! 0 := #b_00000_00000_00000_00000_00000
+    boardv! 1 := #b_00000_00000_00000_00000_00000
+    boardv! 2 := #b_00000_00000_00000_00000_00000
+    boardv! 3 := #b_00010_00000_01100_00000_11000
+    boardv! 4 := #b_00000_00000_00000_00000_00000
+    boardv! 5 := #b_00000_00000_00000_00000_00000
+    boardv! 6 := #b_00000_00000_00000_00000_00000
+    boardv! 7 := #b_00000_00000_00000_00000_00000
+    boardv! 8 := #b_00000_01001_10001_00110_00000
+    boardv! 9 := #b_00000_00000_00000_00000_00000
+    boardv!10 := #b_00000_00000_00000_00000_00000
+    boardv!11 := #b_00000_00000_00000_00000_00000
+    boardv!12 := #b_00000_00000_00000_00000_00000
+    boardv!13 := #b_00000_00000_00000_00000_00000
+    boardv!14 := #b_00000_00000_00000_00000_00000
+    boardv!15 := #b_00000_00000_00000_00000_00000
+    boardv!16 := #b_00001_00010_00010_00010_00000
+    boardv!17 := #b_00000_00000_00000_00000_00000
+    boardv!18 := #b_00000_00000_00000_00000_00000
+    boardv!19 := #b_00000_00000_00000_00000_00000
+    boardv!20 := #b_00000_00000_00000_00000_00000
+    boardv!21 := #b_00000_00000_00000_00000_00000
+    boardv!22 := #b_00000_00000_00000_00000_00000
+    boardv!23 := #b_00000_00000_00000_00000_00000
+    boardv!24 := #b_00000_00000_00000_00000_00000
+
+    FOR i = 0 TO 24 DO knownv!i := boardv!i
+  }
+
   RESULTIS TRUE
 }
 
 AND retspace() BE
-{ UNLESS spacev=0    DO freevec(spacev)
-  UNLESS boardv=0    DO freevec(boardv)
-  UNLESS knownv=0    DO freevec(knownv)
-  UNLESS xdatav=0    DO freevec(xdatav)
-  UNLESS ydatav=0    DO freevec(ydatav)
-  UNLESS xfreedomv=0 DO freevec(xfreedomv)
-  UNLESS yfreedomv=0 DO freevec(yfreedomv)
+{ IF spacev    DO freevec(spacev)
+  IF boardv    DO freevec(boardv)
+  IF knownv    DO freevec(knownv)
+  IF xdatav    DO freevec(xdatav)
+  IF ydatav    DO freevec(ydatav)
+  IF xfreedomv DO freevec(xfreedomv)
+  IF yfreedomv DO freevec(yfreedomv)
 }
 
 AND readdata(filename) = VALOF
@@ -120,8 +168,8 @@ AND readdata(filename) = VALOF
   LET data = findinput(filename)
   LET argv = VEC 200
 
-  IF data=0 DO
-  { writef("Unable to open file %s*b", filename)
+  UNLESS data DO
+  { writef("Unable to open file %s*n", filename)
     RESULTIS FALSE
   }
 
@@ -134,7 +182,9 @@ AND readdata(filename) = VALOF
     IF ch=endstreamch BREAK
     unrdch()
 
-    IF rdargs("ROW/S,COL/S,,,,,,,,,,,,,,,,,,,", argv, 200)=0 DO
+    IF rdargs("ROW/S,COL/S,SET/S,*
+              *a/n,b/n,c/n,d/n,e/n,f/n,g/n,h/n,i/n,*
+              *j/n,k/n,l/n,m/n,n/n,o/n,p/n,q/n,r/n", argv, 200)=0 DO
     { writes("Bad data file*n")
       endread()
       selectinput(stdin)
@@ -158,9 +208,9 @@ AND readdata(filename) = VALOF
       xdatav!xupb := spacep
     }
 
-    FOR i = 2 TO 20 DO
-    { IF argv!i = 0 BREAK
-      !spacep := str2numb(argv!i)
+    FOR i = 3 TO 20 DO
+    { UNLESS argv!i BREAK
+      !spacep := !(argv!i)
       spacep := spacep + 1
     }
     !spacep := 0
@@ -210,7 +260,9 @@ AND freedom(p, upb) = VALOF
 }
 
 AND allsolutions() BE
-{ UNLESS solve() RETURN // no solutions can be found from here
+{ IF tracing DO prboard()
+  //abort(1002)
+  UNLESS solve() RETURN // no solutions can be found from here
 
   { LET b = VEC 31
     LET k = VEC 31
@@ -231,10 +283,12 @@ AND allsolutions() BE
     { count := count + 1
       writef("*nSolution %n*n*n", count)
       prboard()
+      prpic(count)
+//abort(1000)
       RETURN
     }
 
-    // there may be a solution from here
+    // There may be a solution from here
     // try both setting of the unresolved square 
     // given by pos and bit
     knownv!pos := knownv!pos | bit
@@ -261,7 +315,8 @@ AND solve() = VALOF
 { change := TRUE
 
   WHILE change DO
-  { change := FALSE
+  { //abort(1001)
+    change := FALSE
     UNLESS dorows() RESULTIS FALSE
     IF tracing DO prboard()
     flip()
@@ -391,4 +446,47 @@ AND prboard() BE
   }
   newline()
 }
+
+AND prpic(n) BE
+{ LET name = "pic000.bmp"
+  LET xsize, ysize = 400, 400
+  LET x0 = xsize/2 + 25*3
+  LET y0 = ysize/2 + 25*3
+
+  name%6 := (n)     MOD 10 + '0'
+  name%5 := (n/10)  MOD 10 + '0'
+  name%4 := (n/100) MOD 10 + '0'
+  writef("Writing image %s*n", name)
+
+
+  UNLESS opengraphics(xsize, ysize, mode8bit) DO
+  { writef("Unable to open the graphics library*n")
+    RETURN
+  }
+
+  FOR y = 0 TO yupb DO
+  { LET row, known = boardv!y, knownv!y
+    FOR x = 0 TO xupb DO
+    { LET x1 = x0 - 6*x
+      LET y1 = y0 - 6*y
+      TEST (known>>x & 1)=0
+      THEN currcolour := col_black
+      ELSE TEST (row>>x & 1)=0
+           THEN LOOP
+           ELSE currcolour := col_black
+      fillrect(x1, y1, x1+5, y1+5)
+    }
+  }
+  wrgraph(name)
+  closegraphics()
+}
+
+AND setxy(x, y) BE
+{ LET row, known = boardv!y, knownv!y
+  LET bit = 1<<x
+  known := known | bit
+  row := row | bit
+}
+
+
 

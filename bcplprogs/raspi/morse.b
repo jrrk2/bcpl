@@ -155,8 +155,8 @@ AND plotscreen() BE
   fillsurf(c_dgray)
 
   setcolour(c_white)
-  plotf(10,  screenysize-15*lineno, str)
-  plotf(10, 20, "dotlen=%3i  dashlen=%3i", dotlen, dashlen)
+  drawf(10,  screenysize-15*lineno, str)
+  drawf(10, 20, "dotlen=%3i  dashlen=%3i", dotlen, dashlen)
 }
 
 AND processevents() BE WHILE getevent() SWITCHON eventtype INTO

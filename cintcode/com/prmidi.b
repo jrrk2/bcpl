@@ -1,6 +1,6 @@
 /*
 
-This is a test program trying to read a midi stream and output it in a
+This is a program trying to read a midi stream and output it in a
 readable form. It should work with any MIDI file and also hopefully
 with data received from my Roland HP107e Digital Piano, typically
 using input device /dev/dmmidi1 under Linux or the default midi device

@@ -42,7 +42,7 @@ GLOBAL
   pagetab          // The page table
   pagenoupb        // The page table upb
 
-  rec_p; rec_l   // Recovery label for longjump
+  rec_p; rec_l     // Recovery label for longjump
 }
 
 MANIFEST {
@@ -72,7 +72,7 @@ MANIFEST {
 
 LET start() BE
 { LET argv       = VEC 50
-  AND datv       = VEC 1
+  AND datv       = VEC 2
   AND datstrings = VEC 12
   AND sysin      = input()
   AND sysout     = output()
@@ -96,11 +96,18 @@ LET start() BE
 
   rec_p, rec_l := level(), fin
 
+  membase, memlim := 0, 1_000_000  // Temp setting to make mem work.
+
   tasktab := mem(rootnode+rtn_tasktab)
   devtab  := mem(rootnode+rtn_devtab)
   membase := mem(rootnode+rtn_membase)
   memlim  := mem(rootnode+rtn_memsize)
   context := mem(rootnode+rtn_context)
+
+  UNLESS tasktab & devtab & memlim & context DO
+  { writef("The DUMP file is corrupt*n")
+    stop(20)
+  }
   // context = 1   SIGINT received
   // context = 2   SIGSEGV received
   // context = 3   dump caused by fault in BOOT of standalone debug
@@ -147,6 +154,8 @@ LET start() BE
   
   writef("*nLast abort code: %n*n", mem(rootnode+rtn_abortcode))
 
+  writef("*nCintcode memory from %n to %n*n", membase, memlim)
+
   wrregs("BOOT Registers", bootregs)
   wrregs("KLIB Registers", klibregs)
   wrregs("SAVE Registers", saveregs)
@@ -173,17 +182,21 @@ AND memdatstamp(v) = VALOF
  
   v!0 := mem(tv+0)
   v!1 := mem(tv+1)
+  v!2 := mem(tv+2) // For compatibility with old dat format
 
   RESULTIS TRUE
 }
 
-AND prpkt(pkt) BE
-{ writef("%6i: PKT: ", pkt)
-  FOR i = pkt_link TO pkt_r2 DO writearg(mem(pkt+i))
-  writef("*n")
-  FOR i = pkt_a1   TO pkt_a6 DO writearg(mem(pkt+i))
-  newline()
-}
+AND prpkt(pkt) BE TEST pkt & validaddr(pkt)
+THEN { writef("%6i: PKT:   ", pkt)
+       FOR i = pkt_link TO pkt_r2 DO writearg(mem(pkt+i))
+       writef("*n")
+       FOR i = pkt_a1   TO pkt_a6 DO writearg(mem(pkt+i))
+       newline()
+     }
+ELSE { writearg(pkt)
+       writes("   Bad packet address*n")
+     }
 
 AND dumprootnode() BE
 { writef("*nRootnode at %n*n*n", rootnode)
@@ -204,8 +217,9 @@ AND dumprootnode() BE
   writef("  klib       %10i*n", mem(rtn_klib+rootnode))
   writef("  abortcode  %10i*n", mem(rtn_abortcode+rootnode))
   writef("  context    %10i*n", mem(rtn_context+rootnode))
-  writef("  lastp      %10i*n", mem(rtn_lastp+rootnode))
-  writef("  lastg      %10i*n", mem(rtn_lastg+rootnode))
+  writef("  sysp       %10i*n", mem(rtn_sysp+rootnode))
+  writef("  sysg       %10i*n", mem(rtn_sysg+rootnode))
+  writef("  sysst      %10i*n", mem(rtn_sysst+rootnode))
   writef("  days       %10i*n", mem(rtn_days+rootnode))
   writef("  msecs      %10i*n", mem(rtn_msecs+rootnode))
   writef("  idletcb    %10i*n", mem(rtn_idletcb+rootnode))
@@ -221,13 +235,15 @@ AND dumprootnode() BE
     WHILE wkq DO
     { LET pkt = wkq
       prpkt(pkt)
+      UNLESS pkt & validaddr(pkt) BREAK
       wkq := mem(wkq)
     }
   }
   writef("*nDevtab at %n upb=%n*n", devtab, mem(devtab))
-  FOR i = 1 TO mem(devtab) IF mem(devtab+i) DO
+  IF validaddr(devtab) FOR i = 1 TO mem(devtab) IF mem(devtab+i) DO
   { LET dcb = mem(devtab+i)
     LET id, type, wkq = mem(dcb+Dcb_devid), mem(dcb+Dcb_type), mem(dcb+Dcb_wkq)
+    IF dcb=0 LOOP
     writef("%6i: DCB for device %3i type %n ", dcb, id, type)
     SWITCHON type INTO
     { DEFAULT:          writef("(unknown)"); ENDCASE
@@ -239,8 +255,9 @@ AND dumprootnode() BE
       CASE Devt_tcpdev: writef("(tcpdev)"); ENDCASE
     }
     newline()
-    IF id=-1 DO wkq := mem(rtn_clwkq+rootnode)
-    WHILE wkq DO
+    IF id=-1 DO // The clock wkq is in the root node
+      wkq := mem(rtn_clwkq+rootnode)
+    WHILE wkq>0 & validaddr(wkq) DO
     { LET pkt = wkq
       prpkt(pkt)
       wkq := mem(wkq)
@@ -250,7 +267,9 @@ AND dumprootnode() BE
 
 AND dumpmemory() BE
 { LET blocklist  = mem(rootnode+rtn_membase)
+  LET blocklistok = result2
   LET topofstore = mem(rootnode+rtn_memsize)
+  LET topofstoreok = result2
   LET a = blocklist
   LET free, used, n = 0, 0, 0
   LET largest_free = 0
@@ -259,11 +278,25 @@ AND dumpmemory() BE
   LET constr = output()
   LET outstr = 0
 
+  UNLESS blocklistok DO
+  { writef("The blocklist pointer is corrunpt*n")
+    RETURN
+  }
+  UNLESS topofstoreok DO
+  { writef("The topofstore value is corrunpt*n")
+    RETURN
+  }
+
   writef("*nMap of free and allocated blocks in %n..%n*n*n", membase, memlim)
 
-  WHILE mem(a) DO
+  WHILE mem(a) & result2 DO
   { LET size = mem(a)
     LET freeblk = (size&1)=1
+
+    UNLESS a=0 | validaddr(a) DO
+    { writef("*nStore chain corrupt*n")
+      BREAK
+    }
 
     //IF testflags(flag_b) GOTO exit
 
@@ -291,6 +324,9 @@ AND dumpmemory() BE
     { LET creator = a+size-5
       LET len = memb(creator, 0)
       writef(" allocated by: ")
+      
+      UNLESS 1 <= len <= 16 DO len := 0 // Invalid creator name
+
       FOR i = 1 TO len DO wrch(memb(creator, i))
       FOR i = len+1 TO 16 DO wrch(' ')
     }
@@ -310,10 +346,11 @@ AND dumpmemory() BE
         IF a+1=p DO { writef("Task %n stack", id); GOTO nxt }
         IF a+1=g DO { writef("Task %n global vector", id); GOTO nxt }
         IF a+1=t DO { writef("Task %n TCB", id); GOTO nxt }
-        IF g & a>500 FOR gn = 1 TO mem(g) IF a+1=mem(g+gn) DO
-                     { writef("Task %n G%n => ", id, gn)
-                       GOTO dump
-                     }
+        IF g & a>500 & 1<mem(g)<=1000 DO
+          FOR gn = 1 TO mem(g) IF a+1=mem(g+gn) DO
+          { writef("Task %n G%n => ", id, gn)
+            GOTO dump
+          }
       }
     }
 dump:
@@ -338,21 +375,22 @@ nxt:
 exit:
 }
 
-AND dumptask(tcb) BE
+AND dumptask(tcb) BE IF tcb DO
 { LET id = mem(tcb+tcb_taskid)
   LET seglist, pkt = 0, 0
   LET state, flags, cliseg = 0, 0, 0
   LET dead = FALSE             // Assume activated unless proved otherwise
   LET pkt = mem(tcb_wkq+tcb)
   regs, pptr, gptr := 0, 0, 0
-  UNLESS tcb RETURN
+
+  UNLESS validaddr(tcb) RETURN
 
   seglist := mem(tcb_seglist+tcb)
-  pkt   := mem(tcb + tcb_wkq)
-  state := mem(tcb + tcb_state)
-  flags := mem(tcb + tcb_flags)
-  dead  := (state & State_dead) = State_dead
-  cliseg := mem(seglist+4)    // The CLI segment
+  pkt     := mem(tcb + tcb_wkq)
+  state   := mem(tcb + tcb_state)
+  flags   := mem(tcb + tcb_flags)
+  dead    := (state & State_dead) = State_dead
+  cliseg  := mem(seglist+4)    // The CLI segment
 
   writef("*n################### Task %2i:", id)
   wrch(' ')
@@ -361,9 +399,9 @@ AND dumptask(tcb) BE
   FOR i = memb(tcb+tcb_namebase, 0)+1 TO 15+16 DO wrch('#')
   writef("*n*n")
   writef("tcb=%n:", tcb)
-  writef(" priority %n,", mem(tcb + tcb_pri))
+  writef(" priority %n,",   mem(tcb + tcb_pri))
   writef(" stack size %n,", mem(tcb+tcb_stsiz))
-  writef(" flags=#b%b6*n", mem(tcb+tcb_flags))
+  writef(" flags=#b%b6*n",  mem(tcb+tcb_flags))
 
   { LET state = mem(tcb+tcb_state)
     writef("*nState #b%b4: ", mem(tcb+tcb_state))
@@ -380,8 +418,9 @@ AND dumptask(tcb) BE
   }
 
   writef("*nPackets: wkq=%n*n", pkt)
-  UNTIL pkt<=0 DO
+  WHILE validaddr(pkt) DO
   { prpkt(pkt)
+    UNLESS validaddr(pkt) BREAK
     pkt := mem(pkt_link+pkt)
   }
 
@@ -423,11 +462,14 @@ AND dumptask(tcb) BE
 
   { LET segl = mem(tcb + tcb_seglist)
 
-    FOR j = 1 TO mem(segl) DO
-    { LET seg = mem(segl+j)
-      LET layout = 0
+    IF segl & validaddr(segl) FOR j = 1 TO mem(segl) DO
+    { LET layout = 0
+      LET seg = mem(segl+j)
+      
+      IF result2 LOOP
+
       writef("*nSeg%n %6i: ", j, seg)
-      WHILE seg DO
+      WHILE seg & validaddr(seg) DO
       { IF layout & (layout MOD 5)=0 DO writef("*n             ")
         wrch(' ')
         layout := layout + 1
@@ -437,10 +479,10 @@ AND dumptask(tcb) BE
     }
     newline()
 
-    IF gptr DO
+    IF gptr & validaddr(gptr) DO
     { LET gupb = mem(gptr)
       writef("*nGlobal variables at G = %n:*n", gptr)
-      FOR gn = 0 TO gupb DO
+      IF 0<gupb<=1000 FOR gn = 0 TO gupb DO
       { LET w = mem(gptr+gn)
         IF gn REM 5 = 0 DO
         { LET v, gw = gptr+gn, globword+gn
@@ -449,7 +491,7 @@ AND dumptask(tcb) BE
              (gn+2>gupb | mem(v+2)=gw+2) &
              (gn+3>gupb | mem(v+3)=gw+3) &
              (gn+4>gupb | mem(v+4)=gw+4) DO { gn := gn+4; LOOP }
-          writef("*nG%3i:", gn)
+          writef("*nG%z3:", gn)
         }
         writearg(w)
       }
@@ -463,7 +505,8 @@ AND dumptask(tcb) BE
 
 AND wrregs(str, regs) BE
 { writef("*n%s:*n", str)
-  writef("a=%n b=%n c=%n ", mem(regs+r_a), mem(regs+r_b), mem(regs+r_c))
+  UNLESS validaddr(regs) RETURN
+  writef("a=%n b=%n c=%n ",    mem(regs+r_a), mem(regs+r_b), mem(regs+r_c))
   writef("p=%n(%n) g=%n(%n) ", mem(regs+r_p), mem(regs+r_p)>>2,
                                mem(regs+r_g), mem(regs+r_g)>>2)
   writef("st=%n pc=%n count=%n*n", mem(regs+r_st), mem(regs+r_pc),
@@ -472,14 +515,19 @@ AND wrregs(str, regs) BE
 
 AND write_sectname(s) BE
 { LET name = s+3
-  TEST (mem(s+2) = sectword) & (memb(s+3, 0) = 11)
+  TEST validaddr(s) & (mem(s+2) = sectword) & (memb(name, 0) = 11)
   THEN FOR i = 1 TO 11 DO wrch(memb(name, i))
-  ELSE writes("???????????")
+  ELSE { writes("Bad Section Name ")
+writef("*ns=%n %x8 %x8 %x8*n", s, mem(s+2), mem(s+3), mem(s+4), mem(s+5))
+         //abort(1278)
+       }
 }
+
+AND validaddr(a) = a>=0 & membase<=a<=memlim -> TRUE, FALSE
 
 AND checkaddr(a) = VALOF
 { UNLESS membase<=a<=memlim DO
-  { writef("*n bad address %d not in %n--%n*n", a, membase, memlim)
+  { writef("*nBad address %n not in range %n--%n*n", a, membase, memlim)
     RESULTIS 0
   }
   RESULTIS a
@@ -490,21 +538,43 @@ AND cont(a) = mem(checkaddr(a))
 AND wrcortns(tcb) BE
 { cptr := cont(gptr+g_colist)
 
+  UNLESS validaddr(cptr) DO
+  { writef("*nInvalid coroutine list*n")
+    RETURN
+  }
+
 //sawritef("cptr=%n pptr=%n gptr=%n regs=%n*n", cptr, pptr, gptr, regs)
 
   WHILE 0<cptr<=memlim DO
   { TEST cptr=cont(gptr+g_currco)
     THEN TEST 1<=mem(rootnode+rtn_context)<=2 & // SIGINT or SIGSEGV
               mem(rootnode+rtn_crntask)=tcb
-         THEN pptr := mem(rootnode+rtn_lastp)
+         THEN pptr := mem(rootnode+rtn_sysp)
          ELSE pptr := mem(regs+r_p)>>2
     ELSE pptr := cont(cptr+co_pptr)>>2
+
+    UNLESS validaddr(pptr) DO
+    { writef("*nInvalid coroutine resumption point*n")
+      RETURN
+    }
 
     fsize := cptr + 6 + mem(cptr+co_size) - pptr
 //sawritef("cptr=%n pptr=%n gptr=%n fsize=%n*n", cptr, pptr, gptr, fsize)
 
     { LET size = cont(cptr+co_size)
       LET hwm = size+6
+      LET parent = mem(cptr+co_parent)
+
+      UNLESS validaddr(size) DO
+      { writef("*nInvalid coroutine size=%n*n", size)
+        RETURN
+      }
+
+      UNLESS parent=0 | parent=-1 | validaddr(parent) DO
+      { writef("*nInvalid coroutine parent=%n*n", parent)
+        RETURN
+      }
+
       writef("*n%7i: ", cptr)
       IF cptr=mem(gptr+g_currco) DO writes("Current ")
       writes("Coroutine ")
@@ -554,17 +624,21 @@ AND wrframe() BE
 }
 
 AND writearg(n) BE TEST isfun(n)
-                   THEN { LET s = (n>>2)-3  // MR 1/11/03
-//FOR i = 1 TO 11 DO writef("i=%2i  ch=%n*n", 
-                          wrch(' ')
-                          FOR i = 1 TO memb(s, 0) DO wrch(memb(s, i))
-                          wrch(' ')
+                   THEN { // Write the function name right justified
+                          LET s = (n>>2)-3  // MR 1/11/03
+                          LET len = 0
+                          FOR i = 1 TO 11 DO
+                          { IF memb(s, i)='*s' BREAK
+                            len := len+1
+                          }
+                          FOR i = len+1 TO 15 DO wrch('*s')
+                          FOR i = 1 TO len DO wrch(memb(s, i))
                         }
                    ELSE TEST globword<=n<=globword+1000  // MR 1/11/03
-                        THEN writef("   #G%3z#    ", n-globword)
+                        THEN writef("         #G%z3#", n-globword)
                         ELSE TEST -10_000_000<=n<=10_000_000
-                             THEN writef(" %11i ", n)
-                             ELSE writef("  #x%8x ", n)
+                             THEN writef("    %11i", n)
+                             ELSE writef("     #x%8x", n)
 
 AND isfun(f) = VALOF
 { LET a = f>>2
@@ -626,15 +700,18 @@ AND getimage(filename) = VALOF
   pagetab := 0
   pagenoupb := 0
 
+  // The first word of the dump file is the upper bound of
+  // the Cintcode memory in words.
+
   // Get the memory upb
   UNLESS readwords(@memupb, 1) DO
   { sawritef("Bad memupb in dump file*n")
     GOTO ret
   }
 
-  IF memupb<0 GOTO ret
+  IF memupb<0 GOTO ret  // and return FALSE
 
-  pagenoupb := memupb>>pageshift
+  pagenoupb := memupb>>pageshift    // pageshift typically 10
   pagetab := getvec(pagenoupb)
   UNLESS pagetab DO
   { writef("Unable to to allocate space for the page table*n")
@@ -643,8 +720,9 @@ AND getimage(filename) = VALOF
   // Initialise the page table
   FOR pageno = 0 TO pagenoupb DO pagetab!pageno := 0
 
+  // Read pages from the dump sharing them whenever possible.
   FOR pageno = 0 TO pagenoupb DO
-  { LET page = VEC pageupb
+  { LET page = VEC pageupb          // pageupb is typically 1023 = 2**10-1
     AND newpage = 0
     // Read the next page
     FOR i = 0 TO pageupb DO page!i := nextword()
@@ -680,7 +758,7 @@ AND deleteimage() BE IF pagetab DO
   { LET page = pagetab!pageno
     UNLESS page LOOP
     freevec(page)
-    // Delete all page table entries pointing to this page.
+    // Delete all entries pointing to this page.
     FOR p = pageno+1 TO pagenoupb IF page=pagetab!p DO pagetab!p := 0
   }
   freevec(pagetab)
@@ -690,17 +768,17 @@ AND mem(p) = VALOF
 { LET pageno = p>>pageshift  // Typically 10
   AND offset = p & pagemask  // Typically 1023
   
-  IF pageno > pagenoupb DO
-  { writef("*nBad Cintpos memory address %8x  %n*n", p, p)
-    longjump(rec_p, rec_l)
-    // Should not reach this point
-    RESULTIS #xBAD00BAD
+  IF validaddr(p) & pageno <= pagenoupb DO
+  { result2 := 0
+    RESULTIS pagetab!pageno!offset
   }
 
+  result2 := TRUE // To indicate success.
   RESULTIS pagetab!pageno!offset
 }
 
 AND memb(p, n) = VALOF
 { LET word = mem(p+(n>>2))
+  UNLESS result2 RESULTIS 0
   RESULTIS (@word)%(n&3)
 }

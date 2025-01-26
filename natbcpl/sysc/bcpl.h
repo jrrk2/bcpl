@@ -1,35 +1,130 @@
-/* This header file contains machine/system dependent #defines
-** These are dependent on the -D parameter specified in Makefile.
-** The possible -D parameters are:
-**
-**  -DforMAC           for Apple MAC (not recently tested)
-**  -DforMIPS          for DEC R2000/3000 Workstations under Ultrix 4.3
-**  -DforSGI           for SGI MIPS machines under Ultrix
-**  -DforARM           for ARM under RISC OS (under development)
-**  -DforLINUX         for Linux on a Pentium
-**  -DforVmsItanium    for the Itanium under VMS
-**  -DforVmsVax        for the Vax under VMS
-**  -DforLINUX64       for 64-bit Linux
-**  -DforGP2X          for the GP2X handheld Linux gaming machine
-**  -DforLINUXAMD64    for Linux on the AMD 64
-**  -DforLINUXPPC      for Linux on a PowerMac G4
-**  -DforMacOSPPC      for Mac OS X on a Mac Power PC G4
-**  -DforMacOSX        for Mac OS X
-**  -DforSUN4          for Sun4m under SunOS 4.1.3
-**  -DforSPARC         for Sun4m spac under SunOS 5.4
-**  -DforALPHA         for DEC Alpha under OSF1 V3.2 17
-**  -DforMSDOS         for MSDOS 32 bit protected mode usinf Borland C v4.0
-**  -DforWin32         for Windows (eg XP) using Microsoft Visual C
-**  -DforCYGWIN32      for Windows (eg XP) using GNU Cygnus Solutions
-**  -DforBC4           for Windows (eg XP) using Borland C 4.0 and TASM
-**  -DforOS2           for OS/2 V2.1 using Cset/2 and Borland Tasm
-**  -DforSHwinCE       for WinCE 2.0 (SH3 processor)
+/*
+This header file contains machine/system dependent #defines
+
+The possible -D parameters given to the C compiler are as follows:
+
+  -DforLinux         for Linux on a Pentium
+  -DforiSH           for Alpine Linux on the iSH app for iPad and iPhone
+  -DforLinuxSDL      for Linux on a Pentium with SDL
+  -DforLinuxGL       for Linux on a Pentium with SDL and GL
+  -DforLinuxSDL2GL   for Linux on a Pentium with SDL2 and GL
+  -DforRaspi         for the Raspberry Pi without graphics
+  -DforRaspiSDL      for the Raspberry Pi with SDL graphics
+  -DforRaspiGL       for the Raspberry Pi with OpenGL ES graphics
+  -DforVmsVax        for the Vax under VMS
+  -DforMacOSX        for Mac OSX
+  -DforWin32         for Windows (eg XP) using Microsoft Visual C ???
+  -DforCYGWIN        for Windows (eg XP) using GNU Cygnus Solutions
+
+  -DforARM           for ARM Linux without any graphics libraries
+  -DforLinux64       for 64 bit BCPL without graphics
+
+Other #defines
+
+  -DCALLC
+  -DSOUND
+  -DSDLavail
+  -DSDL2avail
+  -DEXTavail
+  -DJSavail
+
+  -DCINTSYSyes
+  -DRASTERPyes
+  -DFASTERPyes
+  -DCINTERPyes
+  -DTARGET64
+
+
+// defies.h is created by mkdefines-h (source mkdefines-h.c). It is loacated
+in BCPL/cintcode/sysc. defines.h should be copied from cintcode/sysc to the
+natbcpl/sysc directory.
 */
 
-/* INT.h is created by mkint-h (source mkint-h.c), it defines
-** the macros BCPLINT32 and BCPLINT64
-*/
-#include "INT.h"
+#include "defines.h"
+
+/* Conditionally set TARGET64 is the BCPL wordlength is to be 64 bits. */
+
+#if defined(forLinux64) || defined(forLinuxAMD64)
+#define TARGET64
+#endif
+
+// TARGET64 is defined if we are compiling a 64 bit Cintcode system.
+
+#ifdef TARGET64
+
+/* For 64-bit versions of Cintcode */
+#define B2Wsh 3
+#define BperW 64
+#define BCPLWORD BCPLINT64
+#define UBCPLWORD BCPLUINT64
+#define BCPLFLOAT FLOAT64
+#define FormD FormD64
+#define FormX FormX64
+
+#define Cacos acos
+#define Casin asin
+#define Catan atan
+#define Catan2 atan2
+#define Ccos cos
+#define Csin sin
+#define Ctan tan
+#define Ccosh cosh
+#define Csinh sinh
+#define Ctanh tanh
+#define Cexp exp
+#define Cfrexp frexp
+#define Cldexp ldexp
+#define Clog log
+#define Clog10 log10
+#define Cfmod fmodf
+#define Cmodf fmod
+#define Cpow pow
+#define Csqrt sqrt
+#define Cceil ceil
+#define Cfloor floor
+
+#else
+
+/* For 32-bit versions of Cintcode */
+#define B2Wsh 2
+#define BperW 32
+#define BCPLWORD BCPLINT32
+#define UBCPLWORD BCPLUINT32
+#define BCPLFLOAT FLOAT32
+#define FormD FormD32
+#define FormX FormX32
+
+#define Cacos acosf
+#define Casin asinf
+#define Catan atanf
+#define Catan2 atan2f
+#define Ccos cosf
+#define Csin sinf
+#define Ctan tanf
+#define Ccosh coshf
+#define Csinh sinhf
+#define Ctanh tanhf
+#define Cexp expf
+#define Cfrexp frexpf
+#define Cldexp ldexpf
+#define Clog logf
+#define Clog10 log10f
+#define Cfmod fmodf
+#define Cmodf modff
+#define Cpow powf
+#define Csqrt sqrt
+#define Cceil ceilf
+#define Cfloor floorf
+
+#endif
+
+// Macro to force a BCPLWORD bitpattern to be treated as
+// a floating point number of type BCPLFLOAT represented by
+// the same bit pattern.
+#define N2F *(BCPLFLOAT*)&
+// Macro to force a floating point number to be treated as
+// a BCPLWORD without changing its bit pattern.
+#define F2N *(BCPLWORD*)&
 
 #ifndef forWinCE
 #include <stdio.h>
@@ -55,25 +150,6 @@
 #include <math.h>
 #endif
 
-/* For 32-bit implementations -- uncomment the following */
-/*
-#define B2Wsh 2
-#define BperW 32
-#define BCPLWORD BCPLINT32
-#define UBCPLWORD BCPLUINT32
-#define FormD FormD32
-#define FormX FormX32
-*/
-
-/* For 64-bit implementations -- uncomment the following */
-
-#define B2Wsh 3
-#define BperW 64
-#define BCPLWORD BCPLINT64
-#define UBCPLWORD BCPLUINT64
-#define FormD FormD64
-#define FormX FormX64
-
 /*
 ** Cintsys/Cintpos and cinterp need the type signed char but this is
 ** not available on all implementations of C. On some the type char
@@ -87,9 +163,6 @@
 #define SIGNEDCHAR signed char
 /* #define SIGNEDCHAR char */
 
-#define PRINTFS printf
-#define PRINTFD printf
-#define PRINTF printf
 #define FILEPT FILE*
 
 #ifdef forLINUX
@@ -178,6 +251,16 @@ typedef unsigned int socklen_t;
 #endif
 
 #ifdef forLINUXAMD64
+#include <sys/stat.h>
+#include <time.h>
+#include <sys/timeb.h>
+#define MALLOC(n) malloc((n)<<B2Wsh)
+#define TICKS_PER_SEC (CLOCKS_PER_SEC)
+#define REMOVE unlink
+#define UNIXNAMES
+#endif
+
+#ifdef forLINUX64
 #include <sys/stat.h>
 #include <time.h>
 #include <sys/timeb.h>
@@ -387,11 +470,10 @@ extern int Readch(void);
 extern int init_keyb(void);
 extern int close_keyb(void);
 extern int intflag(void);
-extern int pollReadch(void);
 
 /* externals defined in init*.c  */
-extern BCPLWORD stackupb;
-extern BCPLWORD gvecupb;
+extern int stackupb;
+extern int gvecupb;
 extern void initsections(BCPLWORD *);
 
 #define Rtn_tasktab       0L
@@ -523,16 +605,17 @@ extern void initsections(BCPLWORD *);
 #define fl_abs    5
 #define fl_mul    6
 #define fl_div    7
-#define fl_add    8
-#define fl_sub    9
-#define fl_pos   10 
-#define fl_neg   11
-#define fl_eq    12
-#define fl_ne    13
-#define fl_ls    14
-#define fl_gr    15
-#define fl_le    16
-#define fl_ge    17
+#define fl_mod    8
+#define fl_add    9
+#define fl_sub   10
+#define fl_pos   11 
+#define fl_neg   12
+#define fl_eq    13
+#define fl_ne    14
+#define fl_ls    15
+#define fl_gr    16
+#define fl_le    17
+#define fl_ge    18
 
 #define fl_acos  20
 #define fl_asin  21
@@ -549,12 +632,12 @@ extern void initsections(BCPLWORD *);
 #define fl_ldexp 32
 #define fl_log   33
 #define fl_log10 34
-#define fl_modf  35
+
 #define fl_pow   36
 #define fl_sqrt  37
 #define fl_ceil  38
 #define fl_floor 39
-#define fl_fmod  40
+#define fl_modf 40  // Modified from fmod 14/5/18
 
 #define fl_N2F   41
 #define fl_F2N   42

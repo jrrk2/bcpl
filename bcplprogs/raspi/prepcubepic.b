@@ -1,6 +1,6 @@
 /*
 
-This program read pigcube.txt and generates cubepic.txt which is
+This program reads pigcube.txt and generates cubepic.txt which is
 suitable data for cubepic.b which plots a 3D image of the optimum
 strategy for the pig dice game.
 

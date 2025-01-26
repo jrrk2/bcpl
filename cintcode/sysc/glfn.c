@@ -5,17 +5,28 @@ This contains the implemetation of the sys(Sys_gl, fno, ...) facility.
 
 Implemented by Martin Richards (c) Mar 2015
 
+History
+
+05/11/2020
+Added gl_deleteBuffer to delete a single buffer.
+
+30/05/2020
+Reorganised the conditional compilation macros.
+
+01/05/2020
+Making substantion modifications to this file.
+
+06/10/2019
+Modified to use floating point values. 32-bit BCPL is assumed.
+
+01/04/2015
+Initial implementation
+
+
 This file is planned to provide and interface to either OpenGL using SDL or
 OpenGL ES using EGL (typically for the Raspberry Pi).  To hide the differences
 between these two versions of OpenGL, BCPL programs should use the g/gl.b
 library with the g/gl.h header file.
-
-SDLavail is defined only if GL is called from SDL
-GLavail is defined if OpenGL or OpenGL ES libraries are available.
-EGLavail is defined if GL is called from EGL
-
-Note that RaspiGL uses EGL to call GL but also uses some features provided by
-the SDL libraries. SDLavail and EGLavail will never both be defined.
 
 Whichever version of OpenGL is used the BCPL interface using
 
@@ -32,64 +43,64 @@ fno=0  Test that a version of OpenGL is available
        res is TRUE if it is.
 
 fno=1 ...
+
+Typical values of fno are GL_Init, GL_Quit, or GL_CompileVshader.
+
+This interface currently assumes 32-bit BCPL is being used and most GL calls in
+this library are limited to those that pass 32-bit operands.  They thus
+correspond to GL types such as GLint, GLuint and GLfloat. The BCPL types are
+converted to the GL types where necessary.
+
+In general the manifest constants for fno are essentially the same as the
+functions names in GL. Most of these GL calls are implemented simply, as
+for instance, the following
+
+  case gl_Uniform4f: // (loc, x, y, z, w)
+    return (BCPLWORD) glUniform4f((GLuint) a[1],
+                                  N2F(a[2]), N2F(a[3]), N2F(a[4]), N2F(a[5]));
+
+If the GL library is not required, a dummy version of glfn is defined.
+
+SDLavail  is defined if SDL is available.
+GLavail   is defined if OpenGL or OpenGL ES libraries are available.
+EGLavail  is defined if EGL is available.
+GLUTAvail is defined if the GLUT library is available.
+
+Note that RaspiGL uses EGL to call GL but also uses some features provided by
+the SDL libraries. SDLavail and EGLavail will never be defined.
+
 */
 
-#include "cintsys.h"
 
-extern char *b2c_str(BCPLWORD bstr, char *cstr);
-extern BCPLWORD c2b_str(const char *cstr, BCPLWORD bstr);
+#include "cintmain.h"
+// Note that cintmain.h conditionally defines quantities such as
+// SDLaval and GLavail so must be included early.
 
-#include <stdio.h>
-#include <stdlib.h>
-
-#ifdef forRaspiGL
-#define GLavail
-#define EGLavail
-#endif
 
 #ifndef GLavail
+// GL in not required so define a dummy version of glfn.
 BCPLWORD glfn(BCPLWORD *args, BCPLWORD *g, BCPLWORD *W) {
-  //printf("glfn: GLavail was not defined\n");
-    return 0;   // GL is not available
+  return 0;   // All Sys_gl calls return FALSE if OpenGL is not available
+              // This typically only happens in the call: sys(Sys_gl, gl_Init)
 }
 #endif
 
-#ifdef GLavail
-
-// If SDLavail include the SDL headers since GL is being called from SDL
-// and EGL is not present.
-#ifdef SDLavail
-#ifdef forWIN32
-#include <SDL.h>
-#else
-#include <SDL/SDL.h>
-#endif
-#endif
-
-// RaspiGL uses EGL to call GL but also uses some SDL features.
-#ifdef forRaspiGL
-
-#include <assert.h>
-
-#include "bcm_host.h"
-#include "GLES2/gl2.h"
-#include "EGL/egl.h"
-#include "EGL/eglext.h"
-// If RaspiGL we use SDL to access keyboard, Mouse and Joystick events
-// so include the SDL headers
-#include <SDL.h>
-#endif
-
-#ifndef forRaspiGL
-#include <GL/gl.h>
-//#include <GL/glu.h>
-//#include <GL/glut.h>
-#include <EGL/egl.h>
-#endif
-
 
 #ifdef GLavail
-// These must agree with the declarations in g/gl.h
+// Define a proper version of glfn.
+
+extern BCPLFLOAT N2F(BCPLWORD  x);
+extern BCPLWORD  F2N(BCPLFLOAT x);
+
+// Conversion between BCPL and C strings
+extern char *b2c_str(BCPLWORD bstr, char *cstr);
+extern BCPLWORD c2b_str(const char *cstr, BCPLWORD bstr);
+extern void copyaddrB2C(void*from, void*to);
+extern void copyaddrC2B(void*from, void*to);
+
+
+// The following constants are used by glfn.c and
+// they must agree with the declarations in g/gl.h
 #define gl_Init                1
 #define gl_SetFltScale         2
 #define gl_Quit                3
@@ -118,14 +129,17 @@ BCPLWORD glfn(BCPLWORD *args, BCPLWORD *g, BCPLWORD *W) {
 #define gl_Disable            27
 #define gl_DepthFunc          28
 #define gl_VertexData         29
-#define gl_DrawTriangles      30
-#define gl_EnableVertexAttribArray 31
+#define gl_DrawElements       30
+#define gl_EnableVertexAttribArray  31
 #define gl_DisableVertexAttribArray 32
 #define gl_GenVertexBuffer    33
 #define gl_GenIndexBuffer     34
 #define gl_VertexAttribPointer 35
 #define gl_M4mulV            36
 #define gl_ScreenSize        37
+#define gl_PrimitiveRestartIndex 38
+#define gl_Test              39
+#define gl_Clear             40
 
 // Joystick functions -- implemented using SDL
 #define gl_numjoysticks       41
@@ -144,11 +158,11 @@ BCPLWORD glfn(BCPLWORD *args, BCPLWORD *g, BCPLWORD *W) {
 #define gl_joystickgetball    57
 #define gl_joystickgethat     58
 
-
-
-#endif
+#define gl_DeleteBuffer       60
+#define gl_BlendFunc          61
 
 #ifdef EGLavail
+// This code is typically only used when compiling for the Raspberry Pi.
 typedef struct
 {
    uint32_t screen_width;
@@ -179,118 +193,38 @@ static CUBE_STATE_T _state, *state=&_state;
 
 #endif
 
-typedef union fn {
-  BCPLWORD i;
-  GLfloat f;
-} FN;
-
 #ifdef SDLavail
+#include <SDL/SDL.h>
+
 const SDL_VideoInfo* info = NULL;
 int width  = 700;
 int height = 200;
 int bpp = 0;
-int flags=0; // Flag to pass to SDL_SetVideoMode
+int flags=0;         // Flags to pass to SDL_SetVideoMode
 #endif
 
-GLuint glProgram;
-
-
-BCPLWORD decodeevent1(SDL_Event*e, BCPLWORD *ptr) {
-  if(e) {
-    ptr[0] = (BCPLWORD)(e->type);
-    switch (e->type) {
-    default:
-      printf("glfn: Unknown event type %d\n", e->type);
-      return -1;
-
-    case SDL_ACTIVEEVENT:      // 1
-      ptr[1] = (BCPLWORD)(e->active).gain;  // 0 if loss, 1 if gain
-      ptr[2] = (BCPLWORD)(e->active).state; // 0=mouse focus, 1=keyboard focus,
-                                            // 2=minimised
-      return -1;
-
-    case SDL_KEYDOWN:          // 2
-    case SDL_KEYUP:            // 3
-      //printf("getevent: KEYDOWN or UP\n");
-    { SDL_keysym *ks = &(e->key).keysym;
-      BCPLWORD sym = ks->sym;
-      BCPLWORD mod = ks->mod;
-      BCPLWORD ch = (BCPLWORD)(ks->unicode);
-      if(ch==0) ch = sym;
-      ptr[1] = mod;
-      ptr[2] = ch;
-      return -1;
-    }
-
-    case SDL_MOUSEMOTION:      // 4
-      ptr[1] = (BCPLWORD)(e->motion).state;
-      ptr[2] = (BCPLWORD)(e->motion).x;
-      ptr[3] = (BCPLWORD)(e->motion).y;
-      //printf("getevent: MOUSEMOTION %4d %4d %4d\n", ptr[1], ptr[2], ptr[3]);
-      return -1;
-
-    case SDL_MOUSEBUTTONDOWN:  // 5
-    case SDL_MOUSEBUTTONUP:    // 6
-      ptr[1] = (BCPLWORD)(e->button).state;
-      ptr[2] = (BCPLWORD)(e->button).x;
-      ptr[3] = (BCPLWORD)(e->button).y;
-      //printf("getevent: MOUSEBUTTONDOWN/UP %4d %4d %4d\n", ptr[1], ptr[2], ptr[3]);
-      return -1;
-
-    case SDL_JOYAXISMOTION:    // 7
-      ptr[1] = (BCPLWORD)(e->jaxis).which;  // Which joystick
-      ptr[2] = (BCPLWORD)(e->jaxis).axis;   // Which axis
-                                            // 0 = aileron
-                                            // 1 = elevator
-                                            // 2 = throttle
-      ptr[3] = (BCPLWORD)(e->jaxis).value;  // What value  -32768 to + 32767
-      return -1;
-
-    case SDL_JOYBALLMOTION:    // 8
-      ptr[1] = (BCPLWORD)(e->jball).which;  // Which joystick
-      ptr[2] = (BCPLWORD)(e->jball).ball;   // Which ball
-      ptr[3] = (BCPLWORD)(e->jball).xrel;   // X relative motion
-      ptr[4] = (BCPLWORD)(e->jball).yrel;   // Y relative motion
-      return -1;
-
-    case SDL_JOYHATMOTION:     // 9
-      ptr[1] = (BCPLWORD)(e->jhat).which;  // Which joystick
-      ptr[2] = (BCPLWORD)(e->jhat).hat;    // Which hat
-      ptr[3] = (BCPLWORD)(e->jhat).value;  // Hat position
-      return -1;
-
-    case SDL_JOYBUTTONDOWN:    // 10
-    case SDL_JOYBUTTONUP:      // 11
-      ptr[1] = (BCPLWORD)(e->jbutton).which;  // Which joystick
-      ptr[2] = (BCPLWORD)(e->jbutton).button; // Which button
-      ptr[3] = (BCPLWORD)(e->jbutton).state;  // What state
-      return -1;
-
-    case SDL_QUIT:             // 12
-      return -1;
-
-    case SDL_SYSWMEVENT:       // 13
-      return -1;
-
-    case SDL_VIDEORESIZE:      // 16
-      ptr[1] = (BCPLWORD)(e->resize).w;  // New window width
-      ptr[2] = (BCPLWORD)(e->resize).h;  // New window height
-      //printf("VIDEORESIZE=%d\n", SDL_VIDEORESIZE);
-      return -1;
-
-    case SDL_VIDEOEXPOSE:      // 17
-      // Screen needs to be redrawn
-      //printf("VIDEOEXPOSE=%d\n", SDL_VIDEOEXPOSE);
-      return -1;
-
-    case SDL_USEREVENT:        // 24
-      return -1;
-    }
-  }
-  *ptr = 0;
-  return 0;
-}
 #ifdef GLavail
+GLuint glProgram=0;
+#endif
+
+#ifdef SDLavail
+// SDLavail is set when any of the following are set
+//    forLinuxSDL, forLinuxGL, forRaspiSDL
+
+// decodeevent is defined in sdlfn.c
+extern BCPLWORD decodeevent(SDL_Event*e, BCPLWORD *ptr);
+#else
+// SDL is not a available so define decodeevents.
+BCPLWORD decodeevent(SDL_Event*e, BCPLWORD *ptr) {
+  printf("decodeevents should be defined in glfn when SDL is not available\n");
+}
+#endif
+
+
+#ifdef GLavail
+
+// This is the proper definition of glfn providing the BCPL interface with
+// OpenGL.
 
 BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
   char tmpstr[256];
@@ -298,19 +232,75 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
 
   //printf("glfn: GLavail was defined\n");
 
-  //printf("glfn: fno=%d a1=%d a2=%d a3=%d a4=%d\n",
-  //        a[0], a[1], a[2], a[3], a[4]);
+  //printf("glfn: Entered: fno=%lld a1=%lld a2=%lld a3=%lld a4=%lld\n",
+  //	   LL a[0], LL a[1], LL a[2], LL a[3], LL a[4]);
 
   switch(a[0]) {
   default:
-    printf("glfn: Unknown op: fno=%d a1=%d a2=%d a3=%d a4=%d\n",
-            a[0], a[1], a[2], a[3], a[4]);
-    return 0;
+  { int i = 0;
+    printf("glfn: Unknown GL op: "
+	   "fno=%lld a1=%lld a2=%lld a3=%lld a4=%lld\n",
+	   LL a[0], LL a[1], LL a[2], LL a[3], LL a[4]);
+    printf("GL_SRC_ALPHA=%d\n", GL_SRC_ALPHA);
+    printf("GL_SRC_ONE_MINUS_SRC_ALPHA=%d\n", GL_ONE_MINUS_SRC_ALPHA);
+    printf("GL_BLEND=%d\n", GL_BLEND);
+    return 1/i; // Cause and abort
+  }
 
-#ifdef forRaspiGL
   case gl_Init:
-
-   { //gl_init
+/*
+    #ifdef forLinux
+    printf("gl_Init: forLinux is set\n");
+    #endif
+    #ifdef forLinuxSDL
+    printf("gl_Init: forLinuxSDL is set\n");
+    #endif
+    #ifdef forLinuxGL
+    printf("gl_Init: forLinuxGL is set\n");
+    #endif
+    #ifdef forLinuxSDLGL
+    printf("gl_Init: forLinuxSDLGL is set\n");
+    #endif
+    #ifdef forLinuxSDL2GL
+    printf("gl_Init: forLinuxSDL2GL is set\n");
+    #endif
+    #ifdef forRaspi
+    printf("gl_Init: forRaspi is set\n");
+    #endif
+    #ifdef forRaspiSDL
+    printf("gl_Init: forRaspiSDL is set\n");
+    #endif
+    #ifdef forRaspiGL
+    printf("gl_Init: forRaspiGL is set\n");
+    #endif
+    #ifdef forRaspiSDLGL
+    printf("gl_Init: forRaspiSDLGL is set\n");
+    #endif
+    #ifdef forRaspiSDL2GL
+    printf("gl_Init: forRaspiSDL2GL is set\n");
+    #endif
+    
+    #ifdef SDLavail
+    printf("gl_Init: SDLavail is set\n");
+    #endif
+    #ifdef EGLavail
+    printf("gl_Init: EGLLavail is set\n");
+    #endif
+    #ifdef GLavail
+    printf("gl_Init: GLavail is set\n");
+    #endif
+    #ifdef ALSAavail
+    printf("gl_Init: ALSAavail is set\n");
+    #endif
+*/
+#endif
+    
+#ifdef forRaspiGLXXX // The OpenGL contxt s now always create using SDL
+   // Note that GLavail is only defined when SDLavail is defined.
+    
+   // On the Raspberry Pi gl_Init creates the OpenGL context using EGL.
+   // The SDL library is not loaded.
+ { // gl_Init code for the Raspberry Pi.
    int32_t success = 0;
    EGLBoolean result;
    EGLint num_config;
@@ -345,12 +335,16 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
    // RaspiGL uses some SDL features so initialise SDL
    //printf("Calling SDL_Init\n");
 
-   { BCPLWORD res = (BCPLWORD) SDL_Init(SDL_INIT_EVERYTHING);
-     // Enable Unicode translation of keyboard events.
-     SDL_EnableUNICODE(1);
-     SDL_JoystickEventState(SDL_ENABLE);
-     printf("SDL_Init => %d\n", res);
-   }
+   ///{ BCPLWORD res = (BCPLWORD) SDL_Init(SDL_INIT_EVERYTHING);
+   ///  if(res!=0)
+   ///  { printf("SDL_init failed\n");
+   ///    return 0;
+   ///  }
+   ///  // Enable Unicode translation of keyboard events.
+   ///  SDL_EnableUNICODE(1);
+   ///  SDL_JoystickEventState(SDL_ENABLE);
+   ///  //printf("SDL_Init => %d\n", res);
+   ///}
 
    printf("Calling bcm_host_init()\n");
 
@@ -358,7 +352,7 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
 
    printf("Calling eglGetDisplay(..)\n");
 
-   // get an EGL display connection
+   // Get an EGL display connection
    state->display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
    if(state->display == EGL_NO_DISPLAY) {
      printf("ERROR: eglGetDisplay(..) failed\n");
@@ -385,26 +379,30 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
      printf("EGL_VERSION     = %s\n\n", str);
    }
 
-   // get an appropriate EGL frame buffer configuration
-   printf("Calling eglChooseConfig(..)\n");
-   result = eglChooseConfig(state->display, attribute_list, &config, 1, &num_config);
+   // Get an appropriate EGL frame buffer configuration
+   //printf("Calling eglChooseConfig(..)\n");
+   result = eglChooseConfig(state->display, attribute_list,
+			    &config, 1, &num_config);
    assert(EGL_FALSE != result);
    check();
 
-   // get an appropriate EGL frame buffer configuration
+   // Get an appropriate EGL frame buffer configuration
    result = eglBindAPI(EGL_OPENGL_ES_API);
    assert(EGL_FALSE != result);
    check();
 
-   // create an EGL rendering context
-   printf("Calling eglCreateContext(..)\n");
-   state->context = eglCreateContext(state->display, config, EGL_NO_CONTEXT, context_attributes);
+   // Create an EGL rendering context
+   //printf("Calling eglCreateContext(..)\n");
+   state->context = eglCreateContext(state->display, config,
+				     EGL_NO_CONTEXT, context_attributes);
    assert(state->context!=EGL_NO_CONTEXT);
    check();
 
-   // create an EGL window surface
-   printf("Calling graphics_get_display_size(..)\n");
-   success = graphics_get_display_size(0 /* LCD */, &state->screen_width, &state->screen_height);
+   // Create an EGL window surface
+   //printf("Calling graphics_get_display_size(..)\n");
+   success = graphics_get_display_size(0 /* LCD */,
+				       &state->screen_width,
+				       &state->screen_height);
    assert( success >= 0 );
 
    dst_rect.x = 0;
@@ -412,21 +410,26 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
    dst_rect.width = state->screen_width;
    dst_rect.height = state->screen_height;
       
-   printf("width=%d  height=%d\n", dst_rect.width, dst_rect.height);
+   //printf("width=%d  height=%d\n", dst_rect.width, dst_rect.height);
 
    src_rect.x = 0;
    src_rect.y = 0;
    src_rect.width = state->screen_width << 16;
    src_rect.height = state->screen_height << 16;        
 
-   printf("Calling vc_dispmanx_display_open(..)\n");
+   //printf("Calling vc_dispmanx_display_open(..)\n");
 
    dispman_display = vc_dispmanx_display_open( 0 /* LCD */);
    dispman_update = vc_dispmanx_update_start( 0 );
          
-   dispman_element = vc_dispmanx_element_add ( dispman_update, dispman_display,
-      0/*layer*/, &dst_rect, 0/*src*/,
-      &src_rect, DISPMANX_PROTECTION_NONE, 0 /*alpha*/, 0/*clamp*/, 0/*transform*/);
+   dispman_element = vc_dispmanx_element_add(dispman_update,
+					     dispman_display,
+                                             0/*layer*/, &dst_rect, 0/*src*/,
+                                             &src_rect,
+					     DISPMANX_PROTECTION_NONE,
+					     0 /*alpha*/,
+					     0/*clamp*/,
+					     0/*transform*/);
       
    nativewindow.element = dispman_element;
    nativewindow.width = state->screen_width;
@@ -435,12 +438,14 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
       
    check();
 
-   state->surface = eglCreateWindowSurface( state->display, config, &nativewindow, NULL );
+   state->surface = eglCreateWindowSurface( state->display, config,
+					    &nativewindow, NULL );
    assert(state->surface != EGL_NO_SURFACE);
    check();
 
-   // connect the context to the surface
-   result = eglMakeCurrent(state->display, state->surface, state->surface, state->context);
+   // Connect the context to the surface
+   result = eglMakeCurrent(state->display, state->surface,
+			   state->surface, state->context);
    assert(EGL_FALSE != result);
    check();
 
@@ -454,25 +459,24 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
    eglSwapBuffers(state->display, state->surface);
    check();
 
-   return -1;
+   return -1; // Return TRUE
    }
 #endif
 
-#ifdef SDLavail
-   // This is for systems that use SDL to call GL
-
-  case gl_Init:  // Initialise all SDL features
-
+ //#ifdef forRaspiGL
+#ifdef GLavail
     { int argc = 0;
+      // forLinuxGL used SDL to create the GL context
+      printf("Using SDL to create the OpenGL context\n");
       BCPLWORD res = (BCPLWORD) SDL_Init(SDL_INIT_EVERYTHING);
-      //BCPLWORD res = 0; //(BCPLWORD) SDL_Init(SDL_INIT_VIDEO);
+      //BCPLWORD res = (BCPLWORD) SDL_Init(SDL_INIT_VIDEO);
       if (res<0) {
         fprintf(stderr, "Video initialization failed: %s\n", "error");
 		//	SDL_GetError());
         return 0;
         //SDL_Quit();
       }
-
+      
       //printf("glfn: SDL_init returned ok\n");
 
       info = SDL_GetVideoInfo();
@@ -485,7 +489,7 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
       }
 
       bpp = info->vfmt->BitsPerPixel;
-      printf("bpp=%d\n", bpp);
+      //printf("bpp=%d\n", bpp);
 
       SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 5);
       SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 5);
@@ -493,53 +497,117 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
       SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
       SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
-      return -1;
+      //printf("Selecting GL Version %d.%d\n", 3, 1);
+      //SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+      //SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+      //SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
+      //                    SDL_GL_CONTEXT_PROFILE_MASK);
+
+      return -1; // Return TRUE
     }
 #endif
 
 
-    case gl_Quit:      // Shut down SDL
+    case gl_Quit:      // Shut down GL
 #ifdef SDLavail
       SDL_Quit();
 #else
-      printf("Calling eglTerminate(..)\n");
+      //printf("Calling eglTerminate(..)\n");
       eglTerminate(state->display);
 #endif
       return -1;
 
 #ifdef SDLavail
-
-      ///*
-    case gl_GetError:   // str -- fill str with BCPL string for the latest SDL error
+    case gl_GetError: // Fill str with BCPL string for the latest SDL error
     { char *str = SDL_GetError();
-      printf("sdl_GetError: %s\n", str);
+      //printf("sdl_GetError: %s\n", str);
       return c2b_str(str, a[1]); // Convert to BCPL string format
     }
-    //*/
 #endif
+
 
 #ifdef EGLavail
     case gl_MkScreen: // (title, width, height)
-      printf("EGLavail: gl_MkScreen does nothing\n");
+      //printf("EGLavail: gl_MkScreen does nothing\n");
       return -1; // Success
 #endif
 
-#ifdef SDLavail
+//#ifdef forLinuxGL
+#ifdef GLavail
     case gl_MkScreen: // (title, width, height)
-    { char tmpstr[256];
+    { // Withe forLinuxGL we use SDL to create the OpenGL window
+      char tmpstr[256];
       int i;
-      char *title = (char *)(a[1]);
+      char *title = (char *)(&W[a[1]]);
       SDL_Surface *scr;
 
       width  = a[2];
       height = a[3];
 
+      // Use SDL to create an OpenGL window
       flags = SDL_OPENGL;
 
-      printf("glfn: SDLavail: gl_MkScreen width=%d height=%d\n",
+      //printf("glfn: SDLavail: gl_MkScreen width=%d height=%d\n",
+      //        width, height);
+
+      //printf("Calling SDL_SetVideoMode(%d, %d, %d, %8x)\n",
+      //      width, height, bpp, flags);
+      scr = SDL_SetVideoMode(width, height, bpp, flags);
+
+      if(scr==0){
+        fprintf(stderr, "Video mode set failed: %s\n",
+                SDL_GetError());
+        SDL_Quit();
+        exit(0);
+      }
+
+      b2c_str(a[1], tmpstr);
+
+      //printf("gl_MkScreen: title=%s width=%d height=%d\n",
+      //      tmpstr, a[2], a[3]);
+      SDL_WM_SetCaption(tmpstr, 0);
+
+      // Enable Unicode translation of keyboard events.
+      SDL_EnableUNICODE(1);
+      // Enable joystick interface evn if there is no joystck.
+      SDL_JoystickEventState(SDL_ENABLE);
+
+      //glEnable(GL_BLEND);
+      //glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      
+      //{ SDL_Rect rect = {100, 200, 400, 300};
+      //printf("\nfillrect: surface rect=(%d,%d,%d,%d) col=%8x\n",
+      //   100, 200, 400, 300, 0x11111111);
+      //SDL_FillRect((SDL_Surface*)(scr), &rect, 0x11111111);
+      //printf("\nglfn: calling SDL_GL_SwapBuffers\n");
+      //SDL_GL_SwapBuffers();
+        ////sleep(5);
+      //}
+
+      //printf("gl_MkScreen: setting result2=height=%d\n", height);
+      g[Gn_result2] = height;
+      //printf("gl_MkScreen: returning width=%d\n", width);
+      return width;
+      //return (BCPLWORD) scr;
+    }
+#endif
+
+/*
+#ifdef GLavail
+// Older version.
+    { char tmpstr[256];
+      int i;
+      char *title = (char *)(&W[a[1]]);
+      SDL_Surface *scr;
+
+      width  = a[2];
+      height = a[3];
+
+      printf("glfn: GLavail: gl_MkScreen width=%d height=%d\n",
 	     width, height);
 
-      //printf("Calling SetVideoMode(%d, %d, %d, %8x)\n", a[1], a[2], a[3], a[4]);
+      //printf("Calling SetVideoMode(%d, %d, %d, %8x)\n",
+                                     a[1], a[2], a[3], a[4]);
       scr = SDL_SetVideoMode(width, height, bpp, flags);
 
       if(scr==0){
@@ -562,11 +630,21 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
       printf("gl_MkScreen: setting result2 height=%d\n", height);
       g[Gn_result2] = height;
       printf("gl_MkScreen: returning width=%d\n", width);
+
+      { SDL_Rect rect = {100, 200, 400, 300};
+    printf("\nfillrect: surface rect=(%d,%d,%d,%d) col=%8x\n",
+           100, 200, 400, 300, 0x12345678);
+    SDL_FillRect((SDL_Surface*)(scr), &rect, 0x12345678);
+      SDL_GL_SwapBuffers();
+
+      }
+
       return width;
       //return (BCPLWORD) scr;
     }
 #endif
-
+*/
+      
     case gl_MkProg: // ()
     { GLuint prog =  glCreateProgram();
       //printf("glfn: glCreateProgram => %d\n", prog);
@@ -580,24 +658,31 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
       const char* cstr = (char *) (&W[a[2]]);
 
       GLuint Vshader = glCreateShader(GL_VERTEX_SHADER);
-
+      //printf("gl_CompileVshader: => %d\n", Vshader);
       glShaderSource(Vshader, 1, &cstr, NULL);
-      glCompileShader(Vshader);
+      //printf("gl_CompileVshader: glShaderSource returned\n");
+      glCompileShader(Vshader);  // Returns void
+      //printf("gl_CompileVshader: glCompileSource returned\n");
 
       GLint nCompileResult = 0;
 
       glGetShaderiv(Vshader, GL_COMPILE_STATUS, &nCompileResult);
+      //printf("gl_CompileVshader: nCompileResult=%d\n", nCompileResult);
 
       if(!nCompileResult)
       { int i;
         char Log[1024];
         GLint nLength;
+	printf("glGetShaderiv failed\n");
         glGetShaderInfoLog(Vshader, 1024, &nLength, Log);
         for(i=0; i<nLength; i++) printf("%c", Log[i]);
         printf("\n");
       }      
 
+      //printf("gl_CompileVshader: Calling glAttachShader\n");
       glAttachShader(prog, Vshader);
+      //printf("gl_CompileVshader: Returned from glAttachShader => %d\n",
+      //        Vshader);
       return Vshader;
     }
 
@@ -607,13 +692,16 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
       GLuint prog = (GLuint) a[1];
       const char* cstr = (char *) (&W[a[2]]);
       GLuint Fshader = glCreateShader(GL_FRAGMENT_SHADER);
-
+      //printf("gl_CompileFshader: => %d\n", Fshader);
       glShaderSource(Fshader, 1, &cstr, NULL);
-      glCompileShader(Fshader);
+      //printf("gl_CompileFshader: glShaderSource returned\n");
+      glCompileShader(Fshader);  // Returns null
+      //printf("gl_CompileFshader: glCompileSource returned\n");
 
       GLint nCompileResult = 0;
 
       glGetShaderiv(Fshader, GL_COMPILE_STATUS, &nCompileResult);
+      //printf("gl_CompileFshader: nCompileResult=%d\n", nCompileResult);
 
       if(!nCompileResult)
       { int i;
@@ -624,12 +712,16 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
         printf("\n");
       }      
 
+      //printf("gl_CompileFshader: Calling glAttachShader\n");
       glAttachShader(prog, Fshader);
+      //printf("gl_CompileFshader: Returned from glAttachShader => %d\n",
+      //        Fshader);
       return Fshader;
     }
 
     case gl_LinkProgram: // (prog)
-    { GLuint prog = (GLuint)a[1];
+    { // Return -1 if successful.
+      GLuint prog = (GLuint)a[1];
       glLinkProgram(prog);
 
       GLint nLinkResult = 0;
@@ -645,244 +737,241 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
         printf("\n");
       }
       //printf("glfn: gl_LinkProgram returning -1\n");
-      return -1;
+      return -1; // Successful return
     }
 
-#ifdef XXX
+
     case gl_BindAttribLocation: // (prog, loc, name)
     { // Specify the location of an attribute before linking
       GLuint prog = (GLuint) a[1];
       GLuint loc  = (GLuint) a[2];
       b2c_str(a[3], tmpstr);
-      printf("glfn: BindAttribLocation prog=%d loc=%d name=%s\n", prog, loc, tmpstr);
-      return (BCPLWORD) glBindAttribLocation(prog, loc, tmpstr);
+      printf("glfn: BindAttribLocation prog=%d loc=%d name=%s\n",
+	     prog, loc, tmpstr);
+      return 0;///(BCPLWORD) glBindAttribLocation(prog, loc, tmpstr);
     }
 
-    case gl_Uniform1f: // (loc, x)
-    { // Set 1 uniform element
-      FN x;
-      GLuint  loc   = (GLuint) a[1];
-      x.i = a[2];
-      printf("glfn: Uniform1f loc=%7d value=%6.3g\n", loc, (float)x.f);
-      return (BCPLWORD) glUniform1f(loc, (float)x.f);
-    }
+    case gl_Uniform1f: // (loc, x)  Set 1 uniform element
+      glUniform1f((GLuint) a[1], N2F(a[2]));
+      return 0;
 
-    case gl_Uniform2f: // (loc, x, y)
-    { // Set 2 uniform elements
-      FN x;
-      FN y;
-      GLuint  loc   = (GLuint) a[1];
-      x.i = a[2];
-      y.i = a[3];
-      //printf("glfn: Uniform2f loc=%7d values: %6.3g %6.3g\n",
-      //        loc, x.f, y.f);
-      return (BCPLWORD) glUniform2f(loc, (float)x.f, (float)y.f);
-    }
+    case gl_Uniform2f: // (loc, x, y)   Set 2 uniform elements
+      glUniform2f((GLuint) a[1], N2F(a[2]), N2F(a[3]));
+      return 0;
 
-    case gl_Uniform3f: // (loc, x, y, z)
-    { // Set 3 uniform elements
-      FN x;
-      FN y;
-      FN z;
-      GLuint  loc   = (GLuint) a[1];
-      x.i = a[2];
-      y.i = a[3];
-      z.i = a[4];
-      //printf("glfn: Uniform3f loc=%7d values: %6.3f %6.3f %6.3f\n",
-      //        loc, x.f, y.f, z.f);
-      //return (BCPLWORD) glUniform3f(loc, (float)x.f, (float)y.f, (float)z.f);
-      return (BCPLWORD) glUniform3f(loc, 1.0f, 0.0f, 0.0f);
-    }
+    case gl_Uniform3f: // (loc, x, y, z)  // Set 3 uniform elements
+      glUniform3f((GLuint) a[1], N2F(a[2]), N2F(a[3]), N2F(a[4]));
+      return 0;
 
-    case gl_Uniform4f: // (loc, x, y, z, w)
-    { // Set 4 uniform elements
-      FN x;
-      FN y;
-      FN z;
-      FN w;
-      GLuint  loc   = (GLuint) a[1];
-      x.i = a[2];
-      y.i = a[3];
-      z.i = a[4];
-      w.i = a[5];
-      //printf("glfn: Uniform4f loc=%7d values: %6.3g %6.3g %6.3g %6.3g\n",
-      //        loc, x.f, y.f, z.f, w.f);
-      return (BCPLWORD) glUniform4f(loc, (float)x.f, (float)y.f, (float)z.f, (float)w.f);
-    }
-#endif
+    case gl_Uniform4f: // (loc, x, y, z, w)  // Set 4 uniform elements
+      glUniform4f((GLuint) a[1], N2F(a[2]), N2F(a[3]), N2F(a[4]), N2F(a[5]));
+      return 0;
 
     case gl_GetAttribLocation: // (prog, name)
-    { // Find out where the linker put an attribute variable
-      GLuint prog = (GLuint) a[1];
-      b2c_str(a[2], tmpstr);
-      //printf("glfn: GetAttribLocation prog=%d name=%s\n", prog, tmpstr);
-      return (BCPLWORD) glGetAttribLocation(prog, tmpstr);
-    }
+      // Find out where the linker put an attribute variable
+      return (BCPLWORD) glGetAttribLocation((GLuint) a[1],
+					     b2c_str(a[2], tmpstr));
 
     case gl_GetUniformLocation: // (prog, name)
-    { // Find out where the linker put a uniform variable
-      GLuint prog = (GLuint) a[1];
-      GLint loc;
-      b2c_str(a[2], tmpstr);
-      loc = glGetUniformLocation(prog, tmpstr);
-      printf("glfn: GetAttribLocation prog=%d name=%s  => loc=%d\n", prog, tmpstr, loc);
-      return (BCPLWORD)loc;
-    }
+      // Find out where the linker put a uniform variable
+      return (BCPLWORD) glGetUniformLocation((GLuint) a[1],
+                                              b2c_str(a[2], tmpstr));
 
     case gl_UniformMatrix4fv: // (loc, prog, matrix) -- 4x4 matrix
-    { 
-      GLuint loc = (GLuint) a[1];
-      GLuint prog = (GLuint) a[2];
-      float *matrix = (float *) (&W[a[3]]);
-      //int i;
-      //for(i=0; i<16; i++) printf("%9.3f\n", matrix[i]);
-      glUniformMatrix4fv(loc, prog, GL_FALSE, matrix);
-      //return (BCPLWORD) glUniformMatrix4fv(loc, prog, GL_FALSE, matrix);
+    { glUniformMatrix4fv((GLuint) a[1],
+                         (GLuint) a[2],
+                         GL_FALSE,
+                         (GLfloat *) (&W[a[3]]));
       return -1;
     }
 
     case gl_DeleteShader: // (shader)
-    { GLuint shader = (GLuint) a[1];
-      glDeleteShader(shader);
+    { glDeleteShader((GLuint) a[1]);
       return -1;
     }
-
     case gl_UseProgram: // (prog)
-    { GLuint prog = (GLuint)a[1];
-      glUseProgram(prog);
+    { glUseProgram((GLuint) a[1]);
       return -1;
     }
-
     case gl_Enable: // (op)
-    { GLint op = (GLint)a[1];
-      glEnable(op);
+    { glEnable((GLint)a[1]);
       return -1;
     }
 
     case gl_Disable: // (op)
-    { GLint op = (GLint)a[1];
-      glDisable(op);
+    { glDisable((GLint)a[1]);
+      return -1;
+    }
+
+    case gl_BlendFunc: // (src, dest)
+    { glBlendFunc((GLint)a[1], (GLint)a[2]);
       return -1;
     }
 
     case gl_DepthFunc: // (relation)
-    { GLint relation = (GLint)a[1];
-      glDepthFunc(relation);
+    { glDepthFunc((GLuint)a[1]);
       return -1;
     }
 
-    case gl_VertexData: // (loc, n, stride, datav))
-    { // datav<32 the a vertex object is being used and datav is an offset
-      // The are n vertex items each containing stride floating point numbers
-      GLint loc = (GLint)a[1];
-      GLint n = (GLint)a[2];
-      GLint stride = (GLint)(a[3]*4);
-      GLfloat *datav = (GLfloat *)((0<=a[4] && a[4]<32) ? (const void *)(a[4]*4) : &W[a[4]]);
-      //int i;
-      //printf("glfn: calling glVertexAttribPointer loc=%d n=%d stride=%d a[4]=%d\n",
-      //     loc, n, stride, a[4]);
-      //printf("glfn: calling       glVertexAttribPointer loc=%d n=%d stride=%d a[4]=%d\n",
-      //     loc, n, a[3], a[4]);
+    case gl_VertexData: // (loc, n, stride, offset))
+    { // This copied vertex values from client to GL memory.
+      // loc is the location of the vertex shader input variable
+      // used to access this data.
+      // n is the number of words in the value.
+      // stride is the size of the vertex in words
+      // offset is the word offset of the data in a vertex.
 
-      glVertexAttribPointer(loc,
-                            n, GL_FLOAT,   // n elements of type float
-                            GL_FALSE,      // Do not normalise
-                            stride,        // Stride
-                            datav);
-      glEnableVertexAttribArray(loc);
-      //printf("glfn: gl_VertexData loc=%d n=%d stride=%d\n", loc, n, stride);
-      //for(i = 0; i<3; i++) printf("%3d: %5.3f\n", i, datav[i]);
-      //printf("glfn: returned from glVertexAttribPointer loc=%d n=%d stride=%d a[4]=%d\n",
-      //     loc, n, a[3], a[4]);
+      glVertexAttribPointer((GLint) a[1],    // Location value of the vertex
+                                             // shader input variable.
+
+                            (GLint) a[2],    // n elements
+			    GL_FLOAT,        //   always of type float
+                            GL_FALSE,        // Do not normalise
+                            (GLint)(a[3]*4), // Stride in bytes
+			    (void *)(ADDRINT)(GLint)(a[4]*4)); // offset
+
+      glEnableVertexAttribArray((GLint) a[1]); // Enable the shader variable.
       return -1;
     }
 
-    case gl_DrawTriangles: // (n, indexv)
-      // n = number of index values ( ie 3*n/3 triangles)
-      // indexv is a vector of 16-bit integers.
-      // If indexv=0 objects are being used
-    { GLint n = (GLint)(a[1]); // Number of index values
-      GLushort *datav = (GLushort *)(a[2] ? &W[a[2]]: 0);
+    case gl_DrawElements: // (mode, count, offset)
+      // mode   is 1=points, 2=lines, 3=linestrip, etc.
+      //           4=linellop, 5=triangles, 6=tranglestrip,
+      //           7=trianglefan.
+      // count  is the number of index values to use.
+      // offset is the subscript position of the first index vector
+      //           element to use. The elements are 32-bit integers.
 
-      //printf("glfn: gl_DrawTriangles n=%d a[2]=%d\n", n, a[2]);
-      //int i;
-      //for(i=0; i<24; i++)
-      //  printf("glfn: DrawTriangles i=%2d  datav[i]=%d\n", i, datav[i]);
-      glDrawElements(GL_TRIANGLES,
-                     n,                 // Number of vertices
-                     GL_UNSIGNED_SHORT, // Type of index elements
-                     datav);            // Index data
-      //printf("glfn: returned from gl_DrawTriangles n=%d\n", n);
-      return -1;
-    }
+
+      glDrawElements((GLenum)(a[1]),    // mode
+                     (GLsizei)(a[2]),   // Number of elements to use
+                     GL_UNSIGNED_INT,   // Type of the index elements
+                     (GLint*)(ADDRINT)(4*a[3]));// The position in bytes
+                                        // (cast as a pointer) of
+                                        // the first element of
+                                        // the index vector to use.
+      return -1;  // Successful return
+
 
     case gl_EnableVertexAttribArray: // (attrib)
-    { GLint attrib = (GLint)(a[1]);
-      //printf("glfn: EnableVertexAttribArray(%d)\n", attrib);
-      glEnableVertexAttribArray(attrib);
+      glEnableVertexAttribArray((GLint)(a[1]));
       return -1;
-    }
 
     case gl_DisableVertexAttribArray: // (attrib)
-    { GLint attrib = (GLint)(a[1]);
-      printf("glfn: DisableVertexAttribArray(%d)\n", attrib);
-      glDisableVertexAttribArray(attrib);
+      glDisableVertexAttribArray((GLint)(a[1]));
       return -1;
-    }
 
     case gl_GenVertexBuffer: // (size, data)
-    { GLint size = (GLint)a[1]; // Number of floats
-      GLfloat *data = (GLfloat *)&W[a[2]];
+    { // Generate a new buffer object 'name'
+      // Bind it and fill it with data
+      GLint size = (GLint)a[1];            // The number of floats in data,
+      GLfloat *data = (GLfloat *)&W[a[2]]; // data points to 32-bit floats
       GLuint buffer;
-      glGenBuffers(1, &buffer);
+      glGenBuffers(1, &buffer);            // Allocate a buffer object
       glBindBuffer(GL_ARRAY_BUFFER, buffer);
-      glBufferData(GL_ARRAY_BUFFER,        // Copy vertex data to graphics memory
+      glBufferData(GL_ARRAY_BUFFER,        // Copy data to graphics memory
                    size * sizeof(GLfloat), // The size of data in bytes
                    data,                   // The vertex data
                    GL_STATIC_DRAW);        // Usage hint
+
       return (BCPLWORD)buffer;
     }
 
-    case gl_GenIndexBuffer: // (data, size)
-    { GLushort *data = (GLushort *)&W[a[1]];
-      GLint size = (GLint)a[2]; // Number of 16-bit indices
+    case gl_GenIndexBuffer: // (size, data) // Order changed 26/11/2020
+    { // Generate a new index buffer object 'name'
+      // Bind it and fill it with data
+      GLint size = (GLint)a[1]; // Number of 32-bit indices
+      GLuint *data = (GLuint *)&W[a[2]];
       GLuint buffer;
-      //int i;
-      //for(i=0; i<size; i++) printf("glfn: i=%2d index=%3d\n", i, data[i]);
       glGenBuffers(1, &buffer);
       glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffer);
-      glBufferData(GL_ELEMENT_ARRAY_BUFFER, // Copy index data to graphics memory
-                   size * sizeof(GLushort), // The size index data in bytes
-                   data,                    // The vertex data
+      glBufferData(GL_ELEMENT_ARRAY_BUFFER, // Copy index data to GL  memory
+                   size * sizeof(GLuint),   // The number data bytes to copy.
+                   data,                    // The vector of index data
                    GL_STATIC_DRAW);         // Usage hint
       return (BCPLWORD)buffer;
     }
 
-    case gl_ClearColour: // (r, g, b, a)
-      glClearColor(a[1]/255.0f, a[2]/255.0f, a[3]/255.0f, a[4]/255.0f);
+    case gl_DeleteBuffer: // (buffer)
+    { // Delete a vertex or index buffer.
+      // buffer=0 is OK but does nothing. 
+      GLuint buffer = (GLuint)a[1];
+      glDeleteBuffers(1, &buffer);
+      return -1;
+    }
+
+    case gl_ClearColour: // (r, g, b, a)  all floats in range 0.0 to 1.0
+      glClearColor(N2F(a[1]), N2F(a[2]), N2F(a[3]), N2F(a[4]));
       return -1;
 
-    case gl_ClearBuffer: // ()
+    case gl_Clear: // (bits)
+      glClear((GLbitfield) a[1]);
+      return -1;
+
+    case gl_ClearBuffer: // ()    Obsolete -- replace by a call of gl_Clear
       glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
       //glClear(GL_COLOR_BUFFER_BIT);
       return -1;
 
-#ifdef EGLavail
+/*
+    case gl_Test:               // 39 ()
+    { int i;
+      printf("\ngl_test\n");
+
+      glMatrixMode(GL_PROJECTION);
+      glLoadIdentity();
+      //gluOrtho2D(0.0, 640.0, 0.0, 480.0);
+
+      for (i = 0; i<20; i++) {
+        int x = rand()%640; 
+        int y = rand()%480;
+
+        float r=(float)((rand() % 9))/8;
+        float g=(float)((rand() % 9))/8;
+        float b=(float)((rand() % 9))/8;
+
+        printf("x=%3d y=%3d r=%6.3f r=%6.3f r=%6.3f\n", x,y, r,g,b);
+      
+        //glColor3f(r,g,b); 	
+
+        //glBegin(GL_POINTS);
+        //glVertex2i (x,y);
+        //glEnd();
+
+        glFlush();
+        sleep(2);
+
+      }
+  
+      printf("Return from gl_Test\n");
+      return -1;
+    }
+*/
+      
     case gl_SwapBuffers: // ()
+
+#ifdef forRaspiGLXXX  // Only use SDL to swap buffers
       eglSwapBuffers(state->display, state->surface);
       check();
       return -1;
-#endif
-
-#ifdef SDLavail
-    case gl_SwapBuffers: // ()
+#else
       SDL_GL_SwapBuffers();
       return -1;
 #endif
 
-#ifdef SDLavail
-  case gl_pollevent:    // (pointer) to [type, args, ... ] to hold details of
-			// the next event
+
+    case gl_pollevent: // (pointer) to [type, args, ... ] to hold
+          	       // details of the next event
+#ifdef forRaspiGLXXX
+      printf("gl_pollevent not yet implemented for Raspberry Pi\n");
+      ///{ SDL_Event test_event;
+      ///if (SDL_PollEvent(&test_event))
+      ///{ decodeevent(&test_event, &W[a[1]]);
+      ///  return -1;
+      ///}
+      ///decodeevent(0, &W[a[1]]);
+      return 0;
+#else
     { SDL_Event test_event;
       if (SDL_PollEvent(&test_event))
       { decodeevent(&test_event, &W[a[1]]);
@@ -893,24 +982,17 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
     }
 #endif
 
-#ifdef forRaspiGL
-    // RaspiGL uses SDL to pollevents
-  case gl_pollevent:    // (pointer) to [type, args, ... ] to hold details of
-			// the next event
-    { SDL_Event test_event;
-      if (SDL_PollEvent(&test_event))
-      { decodeevent(&test_event, &W[a[1]]);
-        return -1;
-      }
-      decodeevent(0, &W[a[1]]);
-      return 0;
-    }
-#endif
 
     case gl_M4mulM4: // (A, B, C) performs C := A * B
     { float *A = (float *)(&W[a[1]]);
       float *B = (float *)(&W[a[2]]);
       float *C = (float *)(&W[a[3]]);
+      
+      // aij    i is the row number
+      //        j is the column number
+      // The calculation required is
+      // cij = ai0*b0j + ai1*b1j + ai2*b2j + ai3*b3j
+      
       float a00=A[ 0], a10=A[ 1], a20=A[ 2], a30=A[ 3];
       float a01=A[ 4], a11=A[ 5], a21=A[ 6], a31=A[ 7];
       float a02=A[ 8], a12=A[ 9], a22=A[10], a32=A[11];
@@ -921,17 +1003,17 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
       float b02=B[ 8], b12=B[ 9], b22=B[10], b32=B[11];
       float b03=B[12], b13=B[13], b23=B[14], b33=B[15];
 
-      //printf("gl_M4mulM4: entered %d %d %d\n", a[1], a[2], a[3]);
+      //printf("\ngl_M4mulM4: Multiplication details\n");
 
-      //printf("%8.3f %8.3f %8.3f %8.3f \n",   a00, a01, a02, a03);
-      //printf("%8.3f %8.3f %8.3f %8.3f \n",   a10, a11, a12, a13);
-      //printf("%8.3f %8.3f %8.3f %8.3f \n",   a20, a21, a22, a23);
-      //printf("%8.3f %8.3f %8.3f %8.3f \n\n", a30, a31, a32, a33);
+      //printf("%11.6f %11.6f %11.6f %11.6f \n",   a00, a01, a02, a03);
+      //printf("%11.6f %11.6f %11.6f %11.6f \n",   a10, a11, a12, a13);
+      //printf("%11.6f %11.6f %11.6f %11.6f \n",   a20, a21, a22, a23);
+      //printf("%11.6f %11.6f %11.6f %11.6f \n\n", a30, a31, a32, a33);
 
-      //printf("%8.3f %8.3f %8.3f %8.3f \n",   b00, b01, b02, b03);
-      //printf("%8.3f %8.3f %8.3f %8.3f \n",   b10, b11, b12, b13);
-      //printf("%8.3f %8.3f %8.3f %8.3f \n",   b20, b21, b22, b23);
-      //printf("%8.3f %8.3f %8.3f %8.3f \n\n", b30, b31, b32, b33);
+      //printf("%11.6f %11.6f %11.6f %11.6f \n",   b00, b01, b02, b03);
+      //printf("%11.6f %11.6f %11.6f %11.6f \n",   b10, b11, b12, b13);
+      //printf("%11.6f %11.6f %11.6f %11.6f \n",   b20, b21, b22, b23);
+      //printf("%11.6f %11.6f %11.6f %11.6f \n\n", b30, b31, b32, b33);
 
       C[ 0] = a00*b00 + a01*b10 + a02*b20 + a03*b30; // c00
       C[ 1] = a10*b00 + a11*b10 + a12*b20 + a13*b30; // c10
@@ -953,10 +1035,10 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
       C[14] = a20*b03 + a21*b13 + a22*b23 + a23*b33; // c23
       C[15] = a30*b03 + a31*b13 + a32*b23 + a33*b33; // c33
 
-      //printf("%8.3f %8.3f %8.3f %8.3f \n",   C[0], C[4], C[ 8], C[12]);
-      //printf("%8.3f %8.3f %8.3f %8.3f \n",   C[1], C[5], C[ 9], C[13]);
-      //printf("%8.3f %8.3f %8.3f %8.3f \n",   C[2], C[6], C[10], C[14]);
-      //printf("%8.3f %8.3f %8.3f %8.3f \n\n", C[3], C[7], C[11], C[15]);
+      //printf("%11.6f %11.6f %11.6f %11.6f \n",   C[0], C[4], C[ 8], C[12]);
+      //printf("%11.6f %11.6f %11.6f %11.6f \n",   C[1], C[5], C[ 9], C[13]);
+      //printf("%11.6f %11.6f %11.6f %11.6f \n",   C[2], C[6], C[10], C[14]);
+      //printf("%11.6f %11.6f %11.6f %11.6f \n\n", C[3], C[7], C[11], C[15]);
       return 0;
     }
 
@@ -966,12 +1048,14 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
     { float *A = (float *)(&W[a[1]]);
       float *B = (float *)(&W[a[2]]);
       float *C = (float *)(&W[a[3]]);
+
       float a00=A[ 0], a10=A[ 1], a20=A[ 2], a30=A[ 3];
       float a01=A[ 4], a11=A[ 5], a21=A[ 6], a31=A[ 7];
       float a02=A[ 8], a12=A[ 9], a22=A[10], a32=A[11];
       float a03=A[12], a13=A[13], a23=A[14], a33=A[15];
 
       float b0=B[0], b1=B[1], b2=B[2], b3=B[3];
+
       C[0] = a00*b0 + a01*b1 + a02*b2 + a03*b3; // c0
       C[1] = a10*b0 + a11*b1 + a12*b2 + a13*b3; // c1
       C[2] = a20*b0 + a21*b1 + a22*b2 + a23*b3; // c2
@@ -980,57 +1064,93 @@ BCPLWORD glfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
       return 0;
     }
 
+    case gl_PrimitiveRestartIndex:
+    { GLuint w = (GLuint)(a[1]);
+      //glEnable(GL_PRIMITIVE_RESTART);
+      printf("PrimitiveRestart: w=%4x NOT AVAILABLE\n", w);
+      ///glPrimitiveRestartIndex(w);
+      return -1;
+    }
+
     case gl_ScreenSize: // (@xsize, @ysize)
       printf("glfn: gl_ScreenSize called\n");
-#ifdef EGLavail
+#ifdef forRaspiGLXXX
       W[a[2]] = state->screen_width;
       W[a[3]] = state->screen_height;
 #endif
       return -1;
 
-
-// Joystick functions
+#ifdef SDLavail
+// Joystick functions currently provided by sdlfn.c
   case gl_numjoysticks:
     return SDL_NumJoysticks();
 
-  case gl_joystickopen:       // 42 (index) => joy
-    return (BCPLWORD)SDL_JoystickOpen(a[1]);
+  case gl_joystickopen:       // 42 (index, joyptr) => joy
+    { SDL_Joystick *joystick = SDL_JoystickOpen(a[1]);
+      copyaddrC2B(&joystick, &W[a[2]]);
+      return 0;
+    }
 
-  case gl_joystickclose:      // 43 (joy)
-    SDL_JoystickClose((SDL_Joystick *)a[1]);
+  case gl_joystickclose:      // 43 (joyptr)
+  { SDL_Joystick *joystick;
+    copyaddrB2C(&W[a[1]], &joystick);
+    SDL_JoystickClose(joystick);
     return 0;
-
-  case gl_joystickname:       // 44 (index)
+  }
+  
+  case gl_joystickname:       // 44 (index, name)
   { const char *name = SDL_JoystickName(a[1]);
-    return c2b_str(name, a[1]);
+    return c2b_str(name, a[2]);
   }
 
-  case gl_joysticknumaxes:    // 45 (joy)
-    return SDL_JoystickNumAxes((SDL_Joystick*)a[1]);
-
-  case gl_joysticknumbuttons: // 46 (joy)
-    return SDL_JoystickNumButtons((SDL_Joystick*)a[1]);
-
-  case gl_joysticknumballs:   // 47 (joy)
-    return SDL_JoystickNumBalls((SDL_Joystick*)a[1]);
-
-  case gl_joysticknumhats:    // 47 (joy)
-    return SDL_JoystickNumHats((SDL_Joystick*)a[1]);
-
+  case gl_joysticknumaxes:    // 45 (joyptr)
+  { SDL_Joystick *joystick;
+    copyaddrB2C(&W[a[1]], &joystick);
+    return (BCPLWORD)SDL_JoystickNumAxes(joystick);
+  }
+  
+  case gl_joysticknumbuttons: // 46 (joyptr)
+  { SDL_Joystick *joystick;
+    copyaddrB2C(&W[a[1]], &joystick);
+    return SDL_JoystickNumButtons(joystick);
+  }
+  
+  case gl_joysticknumballs:   // 47 (joyptr)
+  { SDL_Joystick *joystick;
+    copyaddrB2C(&W[a[1]], &joystick);
+    return SDL_JoystickNumBalls(joystick);
+  }
+  
+  case gl_joysticknumhats:    // 47 (joyptr)
+  { SDL_Joystick *joystick;
+    copyaddrB2C(&W[a[1]], &joystick);
+    return SDL_JoystickNumHats(joystick);
+  }
+      
   case gl_joystickeventstate: //49  sdl_enable=1 or sdl_ignore=0
     return SDL_JoystickEventState(a[1]);
 
-  case gl_joystickgetbutton: // 55 (joy)
-    return SDL_JoystickGetButton((SDL_Joystick*)a[1], a[2]);
-
-  case gl_joystickgetaxis: // 56 (joy)
-    return SDL_JoystickGetAxis((SDL_Joystick*)a[1], a[2]);
-
-  case gl_joystickgethat: // 58 (joy)
-    return SDL_JoystickGetHat((SDL_Joystick*)a[1], a[2]);
-
+  case gl_joystickgetbutton:  // 55 (joyptr)
+  { SDL_Joystick *joystick;
+    copyaddrB2C(&W[a[1]], &joystick);
+    return SDL_JoystickGetButton(joystick, a[2]);
   }
+  
+  case gl_joystickgetaxis:    // 56 (joyptr)
+  { SDL_Joystick *joystick;
+    copyaddrB2C(&W[a[1]], &joystick);
+    return SDL_JoystickGetAxis(joystick, a[2]);
+  }
+  
+  case gl_joystickgethat:     // 58 (joyptr)
+  { SDL_Joystick *joystick;
+    copyaddrB2C(&W[a[1]], &joystick);
+    return SDL_JoystickGetHat(joystick, a[2]);
+  }
+#endif
+  }  // End of switch
 }
 #endif
-#endif
+
+
 

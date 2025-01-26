@@ -86,13 +86,13 @@ s_dl=86
 s_ds=87
 
 s_inc1b=90; 
-s_inc4b=91; 
+//s_inc4b=91; 
 s_dec1b=92; 
-s_dec4b=93
+//s_dec4b=93
 s_inc1a=94; 
-s_inc4a=95; 
+//s_inc4a=95; 
 s_dec1a=96; 
-s_dec4a=97
+//s_dec4a=97
 
 s_goto=103; 
 s_raise=104; 
@@ -291,13 +291,13 @@ $( LET mcodeop = rdn()
       CASE s_ds:        opn    := "DS";        ENDCASE
 
       CASE s_inc1b:     op     := "INC1B";     ENDCASE
-      CASE s_inc4b:     op     := "INC4B";     ENDCASE
+      //CASE s_inc4b:     op     := "INC4B";     ENDCASE
       CASE s_dec1b:     op     := "DEC1B";     ENDCASE
-      CASE s_dec4b:     op     := "DEC4B";     ENDCASE
+      //CASE s_dec4b:     op     := "DEC4B";     ENDCASE
       CASE s_inc1a:     op     := "INC1A";     ENDCASE
-      CASE s_inc4a:     op     := "INC4A";     ENDCASE
+      //CASE s_inc4a:     op     := "INC4A";     ENDCASE
       CASE s_dec1a:     op     := "DEC1A";     ENDCASE
-      CASE s_dec4a:     op     := "DEC4A";     ENDCASE
+      //CASE s_dec4a:     op     := "DEC4A";     ENDCASE
 
       CASE s_handle:    opl    := "HANDLE";    ENDCASE
       CASE s_unhandle:  op     := "UNHANDLE";  ENDCASE

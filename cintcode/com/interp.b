@@ -3,23 +3,31 @@ This program was an ASCII INTCODE assembler and interpreter
 for a 16 bit EBCDIC machine. The original version was tested
 in 1982 on the IBM 370(a 32 bit EBCDIC machine).
 
-This version is a modification of the program to run under 32-bit
-Cintcode BCPL. It is still under development.
+This version has been modified and extended to modern BCPL on the
+current 32-bit BCPL Cintcode system. It is still under development.
 
 Implemented by Martin Richards (c) September 2012
 
 To compile and run a BCPL program, type eg
 
-bcplint com/hello.b to hello.int
-type hello.int
-bcplint sysb/blib.b to blib.int
-bcplint sysb/dlib.b to dlib.int
-interp blib.int dlib.int hello.int
+bcplint com/cmpltest.b to cmpltest.int noselst
+type cmpltest.int
+interp cmpltest.int
 
-The above sequence is nowhere near working yet, given time who knows.
+Alternatively, use bcint
 
-30/09/12
-Initial modification of the original interp.b. At least it compiles.
+c bcint cmpltest
+interp cmpltest.int
+
+This is nearly working.
+
+History
+
+14/03/2021
+Made substantial changes to interp.b.
+
+30/09/2012
+Initial modification of the original interp.b.
 
 */
  
@@ -33,33 +41,59 @@ tracing
 source
 tofile
 tostream
-progsize
 
 etoa       // EBCDIC -> ASCII  table
 atoe       // ASCII  -> EBCDIC table
+
 progvec
+progupb
 
 g
 p
 ch
 cyclecount
 labv
-cp
+cp          // Number of characters assembled in word
+            // at location p. If cp>=4 the current word
+	    // full and the next character require a new
+	    // word to be allocated.
 a
 b
-c
-d
-w
+c           // Program counter
+
+w           // Current instruction
+d           // Effective address of current instruction
 }
  
 MANIFEST {
-fshift=13
-ibit=#10000; pbit=#4000; gbit=#2000; dbit=#1000
-abits=dbit-1
-wordsize=16; bytesize=8
-lig1=0<<fshift | ibit | gbit | 1 //#012001
-k3  =6<<fshift |  3              //#140003
-x22 =7<<fshift | 22              //#160026
+// Intcode instruction format - Original version for 16-bit machines
+//         fff ipgd aaaaaaaaa    
+//fshift=13
+//ibit=#10000; pbit=#4000; gbit=#2000; dbit=#1000
+//abits=dbit-1             // Address bits
+//wordsize=16; bytesize=8
+
+// Intcode instruction format - Extended version for 32-bit machines
+//         0fff ipgd aaaa aaaa aaaa aaaa aaaa aaaa
+//          fff                                     Op code
+//              i                                   Indirection bit
+//               p                                  Add P pointer bit
+//                g                                 Add G pointer bit
+//                 d                                Double length bit
+//                   aaaa aaaa aaaa aaaa aaaa aaaa  Address field
+fshift=28
+ibit=#x08000000; pbit=#x04000000; gbit=#x02000000; dbit=#x01000000
+abits=dbit-1             // Address bits
+wordsize=32; bytesize=8
+
+// Preloaded instruction words
+lig1= 0<<fshift | ibit | gbit | 1 //#x0_A_000001       LIG1
+k3  = 6<<fshift |  3              //#x3_0_000003       K3
+x22 = 7<<fshift | 22              //#x7_0_060016       FINISH
+x27 = 7<<fshift | 27              //#x7_0_06001B       SYS
+x4  = 7<<fshift |  4              //#x7_0_060004       RTN
+
+labvupb = 4000                    // Originally 2000
 }
  
  
@@ -67,7 +101,7 @@ LET assemble(filename) BE
 { LET f = 0
   LET oldin = input()
   LET filestream = findinput(filename)
-  LET v = VEC 2000
+  LET v = VEC labvupb
   labv := v
 
   UNLESS filestream DO
@@ -78,7 +112,7 @@ LET assemble(filename) BE
   selectinput(filestream)
  
 clear:   // Start reading the next section, if any.
-  FOR i = 0 TO 2000 DO labv!i := 0
+  FOR i = 0 TO labvupb DO labv!i := 0 // First clear the label vector.
   cp := 4
  
 next:
@@ -105,18 +139,19 @@ sw:
     CASE '*n':
             GOTO next
  
-    CASE 'L': f := 0; ENDCASE
-    CASE 'S': f := 1; ENDCASE
-    CASE 'A': f := 2; ENDCASE
-    CASE 'J': f := 3; ENDCASE
-    CASE 'T': f := 4; ENDCASE
-    CASE 'F': f := 5; ENDCASE
-    CASE 'K': f := 6; ENDCASE
-    CASE 'X': f := 7; ENDCASE
+    CASE 'L': f := 0; ENDCASE // B := A; A := EA
+    CASE 'S': f := 1; ENDCASE // Store A in memory address EA
+    CASE 'A': f := 2; ENDCASE // A := A + EA
+    CASE 'J': f := 3; ENDCASE // PC := EA
+    CASE 'T': f := 4; ENDCASE // PC := EA if A is non zero
+    CASE 'F': f := 5; ENDCASE // PC := EA if A is zero
+    CASE 'K': f := 6; ENDCASE // Call function at entry point A
+                              // incrementing P by EA and saving the link
+    CASE 'X': f := 7; ENDCASE // Execute special operation EA
  
     CASE 'C': rch(); stc(rdn()); GOTO sw   // Cn     assemble a character
 
-    CASE 'D': rch()
+    CASE 'D': rch()                        // Assemble a word ofmemory
               TEST ch='L'
               THEN { rch()                 // DLn
                      stw(0)
@@ -129,7 +164,7 @@ sw:
             { LET gn, ln = ?,?
               rch()                  // GgLn   set global g to Ln
               gn := rdn()
-              a := gn + g
+              a := g + gn
               TEST ch='L'
               THEN rch()
               ELSE writef("*nbad code at p = %n*n", p)
@@ -141,7 +176,7 @@ sw:
             }
  
     CASE 'Z': // End of section
-              FOR i = 0 TO 500 IF labv!i>0 DO writef("L%n unset*n", i)
+              FOR i = 0 TO labvupb IF labv!i>0 DO writef("L%n unset*n", i)
               GOTO clear
   }
  
@@ -160,18 +195,18 @@ sw:
        }
   ELSE { LET a = rdn()
          TEST (a&abits)=a
-         THEN stw(w+a)
-         ELSE { stw(w+dbit); stw(a)  }
+         THEN stw(w+a)                 // a fits in the address field
+         ELSE { stw(w+dbit); stw(a)  } // a is too large for the address field
        }
  
   GOTO sw
 }
  
-AND stw(w) BE { !p := w
+AND stw(w) BE { !p := w                // Store a word of code
                  p, cp := p+1, 4
               }
  
-AND stc(c) BE { IF cp>=4 DO { stw(0)
+AND stc(c) BE { IF cp>=4 DO { stw(0)   // Store a byte of code
                               cp := 0
                            }
                 (p-1)%cp := c
@@ -203,7 +238,8 @@ AND setlab(n) BE
 
 AND labref(n, a) BE
 { LET k = labv!n
-  TEST k<0 THEN k := -k ELSE labv!n := a
+  TEST k<0 THEN k := -k
+           ELSE labv!n := a
   !a := !a + k
 }
 
@@ -223,7 +259,7 @@ AND interpret() = VALOF
 { // Start of main loop
 
   IF tracing DO
-  { LET w = !c
+  { LET w = !c                   // c is the address of the next instruction
     LET op = w>>fshift
     LET opstr = fstr(op)
     writef("a=%11i  b=%11i  p=%i6 %7i: %s",a, b, p, c, opstr)
@@ -232,13 +268,16 @@ AND interpret() = VALOF
     IF (w & gbit) ~= 0 DO wrch('G')
     IF (w & dbit) ~= 0 DO wrch('D')
     writef("%n", w&abits)
+    IF (w & dbit) ~= 0 DO writef(" %n", c!1)
+    newline()
+    //abort(3456)
   }
 
   cyclecount := cyclecount + 1
   w := !c
   c := c + 1
  
-  TEST (w&dbit)=0 THEN d := w&abits
+  TEST (w&dbit)=0 THEN { d := w&abits }
                   ELSE { d := !c; c := c+1  }
  
   IF (w & pbit) ~= 0 DO d := d + p
@@ -270,7 +309,7 @@ AND interpret() = VALOF
     CASE 5: UNLESS a DO c := d; LOOP // F
  
     CASE 6: d := p + d               // K
-            d!0, d!1, d!2 := p, c, a
+            d!0, d!1, d!2 := p, c, a // old P, old C, entry point
             p, c := d, a
             LOOP
  
@@ -278,51 +317,53 @@ AND interpret() = VALOF
  
     { DEFAULT: GOTO error
  
-      CASE 1:  a := !a;      LOOP
-      CASE 2:  a := -a;      LOOP
-      CASE 3:  a := NOT a;   LOOP
-      CASE 4:  c := p!1     // FNRN
+      CASE 1:  a := !a;      LOOP     // RV
+      CASE 2:  a := -a;      LOOP     // NEG
+      CASE 3:  a := NOT a;   LOOP     // NOT
+      CASE 4:  c := p!1               // FNRN   
                p := p!0
                LOOP
-      CASE 5:  a := b * a;   LOOP
-      CASE 6:  a := b / a;   LOOP
-      CASE 7:  a := b MOD a; LOOP
-      CASE 8:  a := b + a;   LOOP
-      CASE 9:  a := b - a;   LOOP
-      CASE 10: a := b = a;   LOOP
-      CASE 11: a := b ~= a;  LOOP
-      CASE 12: a := b < a;   LOOP
-      CASE 13: a := b >= a;  LOOP
-      CASE 14: a := b > a;   LOOP
-      CASE 15: a := b <= a;  LOOP
-      CASE 16: a := b << a;  LOOP
-      CASE 17: a := b >> a;  LOOP
-      CASE 18: a := b & a;   LOOP
-      CASE 19: a := b | a;   LOOP
-      CASE 20: a := b XOR a; LOOP
-      CASE 21: a := b EQV a; LOOP
+      CASE 5:  a := b * a;   LOOP     // MUL
+      CASE 6:  a := b / a;   LOOP     // DIV
+      CASE 7:  a := b MOD a; LOOP     // MOD
+      CASE 8:  a := b + a;   LOOP     // ADD
+      CASE 9:  a := b - a;   LOOP     // SUB
+      CASE 10: a := b = a;   LOOP     // EQ
+      CASE 11: a := b ~= a;  LOOP     // NE
+      CASE 12: a := b < a;   LOOP     // LT
+      CASE 13: a := b >= a;  LOOP     // GE
+      CASE 14: a := b > a;   LOOP     // GT
+      CASE 15: a := b <= a;  LOOP     // LE
+      CASE 16: a := b << a;  LOOP     // LSHIFT
+      CASE 17: a := b >> a;  LOOP     // RSHIFT
+      CASE 18: a := b & a;   LOOP     // AND
+      CASE 19: a := b | a;   LOOP     // OR
+      CASE 20: a := b XOR a; LOOP     // XOR
+      CASE 21: a := b EQV a; LOOP     // EQV
  
-      CASE 22: RESULTIS a         // FINISH  ie leave the interpreter
+      CASE 22: RESULTIS a             // FINISH  ie leave the interpreter
  
-      CASE 23: b, d := c!0, c!1   // SWITCHON n dlab
+      CASE 23: b, d := c!0, c!1       // SWITCHON n dlab
                UNTIL b=0 DO
-               { b, c := b-1, c+2 // case k and label
+               { b, c := b-1, c+2     // case k and label
                  IF a=c!0 DO
                  { d := c!1
                    BREAK
                  }
                }
-               c := d             // Jump to default
+               c := d                 // Jump to default
                LOOP
-      CASE 24: a := b % a; LOOP
-      CASE 25: b % a := p!(c!0)
+      CASE 24: a := b % a; LOOP       // GBYT
+      CASE 25: b % a := p!(c!0)       // PBYT
                c := c+1
                LOOP
-      CASE 26: a := ABS a; LOOP
+      CASE 26: a := ABS a; LOOP       // ABS
  
-      CASE 27: // The sys function
-               //writef("SYS %n %n %n*n", p!3, p!4, p!5)
+      CASE 27: // The sys function    // SYS
+               //writef(" SYS %n %n %n*n", p!3, p!4, p!5)
+	       //IF p!4=11 & p!5=118 DO abort(3478)
                a := sys(p!3, p!4, p!5, p!6, p!7)
+	       g!g_result2 := result2
                LOOP
 
 // cases 40 upwards are only called from the following
@@ -382,6 +423,8 @@ AND interpret() = VALOF
              }
       CASE 38: a := ABS a  // abs
                LOOP
+
+abort(1234)
     }
   }
 } REPEAT
@@ -414,7 +457,7 @@ LET start() = VALOF
  
   writes("intcode system entered*n")
 
-  UNLESS rdargs(",,,,,,,,,,TO/K,SIZE/K/N,TRACE/S", argv, 100) DO
+  UNLESS rdargs(",,,,,,,,,,TO/K,SIZE/K/N,-t=TRACE/S", argv, 100) DO
   { writef("Bad arguments for interp*n")
     RESULTIS 0
   }
@@ -422,39 +465,45 @@ LET start() = VALOF
   tofile := 0
   IF argv!10 DO tofile := argv!10            // TO/K
 
-  progsize := 1_000_000
-  IF argv!11 DO progsize := !(argv!11)       // SIZE/K/N
+  progupb := 1_000_000                       // In words
+  IF argv!11 DO progupb := !(argv!11)        // SIZE/K/N
 
   tracing := argv!12                         // TRACE/S
 
-  g, progvec := getvec(1000), getvec(progsize)
+  g, progvec := getvec(1000), getvec(progupb)
   FOR i = 0 TO 1000 DO g!i := 0
-  FOR i = 0 TO progsize DO progvec!i := 0
+  FOR i = 0 TO progupb DO progvec!i := 0
 
   // Initialise some globals
   g!0 := 1000
   introotnode := progvec+100
   g!g_rootnode := introotnode
 
-  // Initialise some rootnode elements
+  // Copy some rootnode elements
   FOR n = 0 TO 49 DO introotnode!n := rootnode!n
 
   // Leave space for the rootnode
-  p := progvec+200
+  p := progvec+200                  // Position of the first instructions
 
   stdin  := input()
   stdout := output()
  
-  c := p       // Initial program counter
+  c := p       // Initial program counter -- Execution starts here
   p!0 := lig1  // Initial orders
   p!1 := k3
   p!2 := x22
-  p := p+3
 
-  // Load the Intcode programs
+  g!g_sys := p+3 // Initialise the sys global
+  
+  p!3 := x27   // SYS    Code for the sys function
+  p!4 := x4    // RTN
+  
+  p := p+5     // Position of the first assembled intcode section
+
+  // Load up to 10 Intcode program files.
   FOR i = 0 TO 9 IF argv!i DO assemble(argv!i)
  
-  IF FALSE 
+  //IF FALSE 
   IF tracing DO
   { writef("Loaded program*n*n")
     FOR i = 200 TO 220 DO
@@ -472,12 +521,12 @@ LET start() = VALOF
       newline()
     }
 
-    //writef("*nGlobals*n*n")
-    //FOR i = 0 TO 10 DO writef("G%i3: %x8 %n*n", i, g!i, g!i)
+    writef("*nGlobals*n*n")
+    FOR i = 0 TO 10 DO writef("G%i3: %x8 %n*n", i, g!i, g!i)
 
-    //writef("*nRootnode*n*n")
-    //FOR i = 0 TO 49 DO writef("Rootnode!%i2: %x8 %n*n",
-    //                           i, introotnode!i, introotnode!i)
+    writef("*nRootnode*n*n")
+    FOR i = 0 TO 49 DO writef("Rootnode!%i2: %x8 %n*n",
+                               i, introotnode!i, introotnode!i)
   }
   writef("*nProgram size = %n*n", p-progvec-200)
  
@@ -539,14 +588,15 @@ LET start() = VALOF
   //c := TABLE lig1, k3, x22
  
   cyclecount := 0
-
+//abort(2345)
   a := interpret()
  
   freevec(g)
   freevec(progvec)
 
   selectoutput(stdout)
-  writef("*n*nExecution complete cycles = %n", cyclecount)
+  writef("*n*nExecution complete after executing %n intcode instruction%-%ps",
+          cyclecount)
   IF a DO writef(" return code = %n", a)
   newline()
 }

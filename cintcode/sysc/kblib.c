@@ -6,15 +6,21 @@
    int init_keyb(void)  initialises the keyboard interface.
    int close_keyb(void) restores the keyboard to its original state.
    int intflag(void)    returns 1 if interrupt key combination pressed.
+
+Following Colin Liebenrood's suggestion (for LINUX),
+
+   init_keyb return 1 is stdin is a tty, 0 otherwise
+and
+   Readch() return endstreamch if the stdin is exhausted or ^D read.
 */
 
-#ifndef forSHwinCE
+
 #include <stdio.h>
 #include <stdlib.h>
-#endif
 
-/* cintsys.h contains machine/system dependent #defines  */
-#include "cintsys.h"
+
+/* cintmain.h contains machine/system dependent #defines  */
+#include "cintmain.h"
 
 #if defined(forMIPS) || defined(forSUN4) || defined(forALPHA) || \
     defined(forLinuxPPC) || defined(forMacOSPPC) || defined(forMacOSX)
@@ -51,165 +57,12 @@ int intflag(void)
 }
 #endif
 
-#if defined(forVmsItanium1)
-// This is for an Itanium running VMS
-typedef unsigned long uLong;
-typedef unsigned long long uQuad;
-typedef unsigned short uWord;
-typedef unsigned char uByte;
 
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-
-#include dcdef
-#include iodef
-#include ssdef
-#include tt2def
-
-static uByte originalmodes[12];		/* original terminal modes */
-static uWord ttchan = 0;		/* 0: channel has not been assigned yet */
-					/* else: i/o channel to the terminal */
-static char keybuf[256];                /* Bytes received from TT */
-static int keyp=0;                      /* position of next byte in keybuf */
-static int keylen=0;                    /* Number of bytes in keylen */
-
-uLong sys$assign ();
-uLong sys$dassgn ();
-uLong sys$exit ();
-uLong sys$gettim ();
-uLong sys$qio ();
-uLong sys$qiow ();
-uLong sys$setast ();
-uLong sys$setimr ();
-uLong sys$synch ();
-
-int init_keyb(void)
-{ char *p, *ttname;
-  struct { uLong size;
-           char *buff;
-         } ttdesc;
-  uLong sts;
-
-  struct { uWord sts, len;
-           char trm[4];
-         } iosb;
-
-  /* Assign I/O channel to terminal */
-
-  ttname = "TT";
-  ttdesc.size = strlen (ttname);
-  ttdesc.buff = ttname;
-  sts = sys$assign (&ttdesc, &ttchan, 0, 0);
-  if (!(sts & 1)) {
-    fprintf (stderr, "error 0x%x assigning channel to terminal %s\n", sts, ttname);
-    return sts;
-  }
-
-  /* Sense mode - get original modes and make sure it is a terminal */
-
-  sts = sys$qiow (1, ttchan, IO$_SENSEMODE, &iosb, 0, 0,
-                  originalmodes, sizeof originalmodes,
-                  0, 0, 0, 0);
-  if (sts & 1) sts = iosb.sts;
-  if (!(sts & 1)) {
-    fprintf (stderr, "error 0x%x sensing terminal %s modes\n", sts, ttname);
-    sys$exit (sts);
-  }
-  if (originalmodes[0] != DC$_TERM) {
-    fprintf (stderr, "device %s is not a terminal\n", ttname);
-    return SS$_IVDEVNAM;
-  }
-  return 0;
-}
-
-int close_keyb(void)
-{ sys$dassgn(ttchan);
-  return 0;
-}
-
-int readkeyseq(char *keystr, int flag) {
-  // If flag!=0 read at least one key press into keystr
-  // otherwise read as many as are currently available.
-  // Return the number of bytes read.
-  int  len = 0;
-  int i;
-  char buf[256];
-  struct { uWord sts, len;
-           char termchr;
-           char fill1;
-           char termlen;
-           char fill2;
-         } iosb;
-  uLong sts;
-
-  if(flag) {
-    /* Read without echoing, wait for one character */
-
-    sts = sys$qiow (1, ttchan, IO$_READVBLK | IO$M_NOECHO,
-                    &iosb, 0, 0, buf, 1,
-                    0, 0, 0, 0);
-
-    /* Check termination status, treat any error like an eof */
-
-    if (sts & 1) sts = iosb.sts;
-    if (!(sts & 1)) return -1;                // EOF
-
-    /* Concat any fetched data to string */
-
-    for (i=0; i<iosb.len; i++) keystr[len++] = buf[i];
-    for (i=0; i<iosb.termlen; i++) keystr[len++] = (&iosb.termchr)[i];
-  }
-
-  /* Read again, but just get whatever happens to be in read-ahead, don't wait */
-
-  sts = sys$qiow (1, ttchan, IO$_READVBLK | IO$M_NOECHO | IO$M_TIMED,
-                  &iosb, 0, 0,
-                  buf, sizeof buf,
-                  0, 0, 0, 0);
-
-  /* Check termination status, treat any error like an eof */
-
-  if (sts & 1) sts = iosb.sts;
-  if (sts == SS$_TIMEOUT) sts |= 1;
-  if (!(sts & 1)) return  -1;                  // EOF
-
-  /* Concat any fetched data to string */
-
-  for (i=0; i<iosb.len; i++) keystr[len++] = buf[i];
-  for (i=0; i<iosb.termlen; i++) keystr[len++] = (&iosb.termchr)[i];
-  keystr[len] = 0;
-
-  if(len==0) len = -3; // pollingch
-  return len;
-}
-
-int Readch(void)
-{ if (keyp>=keylen) {
-    keylen = readkeyseq(keybuf, 1);
-    keyp = 0;
-  }
-  return keybuf[keyp++];
-}
-
-int pollReadch(void)
-{ if (keyp>=keylen) {
-    keylen = readkeyseq(keybuf, 0); // Read what is available
-    keyp = 0;
-  }
-  if(keylen==-3 || keylen==-1) return keylen; // pollingch or endstreamch
-  return keybuf[keyp++];
-}
-
-int intflag(void)
-{ return 0;
-}
-#endif
-
-#if defined(forLinux)||defined(forCYGWIN32)||defined(forSPARC)||\
-    defined(forGP2X)||defined(forLinuxAMD64)||defined(forARM)
+#if defined(forLinux)||defined(forCYGWIN)||defined(forSPARC)||\
+  defined(forGP2X)||defined(forLinuxAMD64)||defined(forARM)||\
+  defined(forLinux64)||defined(forLinuxSDL)||defined(forLinuxGL)||\
+  defined(forRaspi)||defined(forRaspiSDL)||defined(forRaspiGL)||\
+  defined(forLinuxiSH)
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -320,8 +173,8 @@ int intflag(void)
 extern int getch(void);
 
 int Readch()
-//{ int ch=getch();
-{ int ch=getchar();  // Itanium version
+{ //int ch=getch();
+  int ch=getchar();   // Itanium version
   if(ch==3) { /* ctrl-C */
     raise(SIGINT);
   }
@@ -490,14 +343,14 @@ int fread(char *buf, size_t size, size_t len, FILEPT fp) {
 	if(!rc) {
           DWORD err = GetLastError();
 	  /*
-          PRINTFD("fread: ReadFile, err=%" FormD "\n", (DWORD)err);
+          PRINTFD("fread: ReadFile, err=%ld\n", (long)(DWORD)err);
 	  */
           return -1;
 	}
 	/*
-	PRINTFD("fread trying to read from fd=%" FormD "\n", (DWORD)fp);
-	PRINTFD("fread trying to read %" FormD " bytes, ", (DWORD)(size*len));
-	PRINTFD("got %" FormD "\n", n);
+	PRINTFD("fread trying to read from fd=%ld\n", (long)(DWORD)fp);
+	PRINTFD("fread trying to read %ld bytes, ", (long)(DWORD)(size*len));
+	PRINTFD("got %ld\n", (long)n);
 	*/
 	return n;
 }

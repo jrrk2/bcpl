@@ -22,6 +22,9 @@ LET start() = VALOF
   //binwrch(27); writes("%@") // Return to ISO-2022 mode
   //binwrch(27); writes("%G") // Enter RTF-8 mode
 
+  writef("*#uUnicode hex 2200 prints as: '*#2200'*n")
+  writef("%%# in writef can also be used: '%#'*n", #x2200)
+
   writef("char constant %x4*n", '*#12FE')
   writef("Using string escapes: **#00a9: *#00a9*n")
   writef("Using string escapes: **#2260: *#2260*n")

@@ -1,9 +1,59 @@
-// This is the BCPL syntax analyser
+// This is the BCPL compiler front end used with several
+// codegenerators including those for 32- and 64-bit Cintcode.
 
-// Implemented by Martin Richards (c) 5 October 2010
-
+// Implemented by Martin Richards (c) 6 Aug 2014
 
 /* Change history
+
+0810/14
+Slightly modified the translation of switchon commands to use
+the OCODE operators RES and Rstack. This change was made to simplify
+the optimisation of Sial.
+
+06/08/14
+Added floating point numbers and the operators FIX FLOAT #ABS #* #/ #+
+#- #= #~= #< #> #<= #>=. This version of the compiler generates
+Cintcode that runs under the standard Cintcode interpreter (which was
+modified for xbcpl in 2010), and it is compatible with procode.
+bcplcgsial.b, sial-sasm.b have been modified appropriately, but
+sial-386.b and sial-arm.b will need modification. This version allows
+32-bit manifest floating point constants when running under 32-bit
+Cintcode and 64-bit floating point when running unser 64-bit Cintcode.
+It uses the standard IEEE floating point formats.
+
+19/04/14
+Systematically changed mult to mul, plus to add and minus to sub.
+
+30/04/14
+Do not increment line number on *p for compatiblity with emacs.
+
+05/02/14
+Allow // comments in multi-line string constants.
+
+08/01/14
+Added $~tag ... $>tag conditional compilation feature to allow
+code to be included if a conditional tag is not set..
+
+03/12/13
+Added the compiler option OPT/K to set conditional compilation
+options. The argument is a string of option names consisting of
+letters, digits, underlines and dots separated by plus signs or
+indeed any characters not allowing in option names.
+
+13/05/13
+This is a version of the BCPL compiler front end is used by many
+variants of the compiler including those that generate 32- or
+64-cintcode.  It is designed to run on both 32- and 64-bit
+systems. The options t32 and t64 specify the bit lenth of the BCPL
+word in the target system. The default is the same as the current
+system.  On 64-bit systems numerical constants are compiles to full
+precision, but on 32-bit systems they are truncated to 32 bits then
+sign extended to 64 bits. 64-bit Cintcode has one new instruction (MW)
+that modifies the operand of the next W type instruction (KW, LLPW,
+LW, LPW, SPW, APW and AW). It does this by setting the senior 32-bits
+of the new 64-bit MW register. This is added to the operand of any W
+type instruction and is cleared after use.
+
 18/01/11
 If VER and XREF are both specified, verification output is opened
 using findappend. 
@@ -207,17 +257,21 @@ GET "bcplfecg"
 LET default_hdrs() = VALOF // Changed MR 12/07/09
 { LET hdrs = rootnode!rtn_hdrsvar // Typically "BCPLHDRS" or "POSHDRS" or 0
   IF hdrs RESULTIS hdrs
-  RESULTIS "BCPLHDRS"
+  // The following is only executed if cintsys or cintsys64 fails to set
+  // the hdrs field in the rootnode.
+  TEST t64
+  THEN RESULTIS "BCPL64HDRS"
+  ELSE RESULTIS "BCPLHDRS"
 }
- 
+
 GLOBAL {
 // Globals used in LEX
 chbuf:feg
-decval; getstreams; charv
+decval; exponent; getstreams; charv
 hdrs  // MR 10/7/04
 
 workvec
-readnumber; rdstrch
+readdecimal; readnumber; rdstrch
 token; wordnode; ch
 rdtag; performget
 lex; dsw; declsyswords; nlpending
@@ -231,7 +285,7 @@ rdblockbody;  rdsect
 rnamelist; rname
 rdef; rcom
 rdcdefs
-formtree; synerr//; opname
+formtree; synerr; opname
 rexplist; rdseq
 mk1; mk2; mk3
 mk4; mk5; mk6; mk7
@@ -250,16 +304,28 @@ c_escape    = 27
 c_space     = 32
 }
 
+LET floatingchk() BE
+{ TEST t64
+  THEN UNLESS ON64 DO
+         synerr("64-bit floating point requires 64-bit cintcode")
+  ELSE IF ON64 DO
+         synerr("32-bit floating point requires 32-bit cintcode")
+}
+ 
 LET start() = VALOF
 { LET treesize = 0
   AND argv = VEC 50
   AND argform = "FROM/A,TO/K,VER/K,SIZE/K/N,TREE/S,NONAMES/S,*
                 *D1/S,D2/S,OENDER/S,EQCASES/S,BIN/S,XREF/S,GDEFS/S,HDRS/K,*
-                *GB2312/S,UTF8/S,SAVESIZE/K/N,HARD/S"
+                *GB2312/S,UTF8/S,SAVESIZE/K/N,HARD/S,*
+                *T32/S,T64/S,OPT/K"
   LET stdout = output()
   LET objline1vec = VEC 256/bytesperword
+  LET optstringvec = VEC 256/bytesperword
   objline1 := objline1vec
   objline1%0 := 0
+  optstring := optstringvec
+  optstring%0 := 0
   errmax   := 10
   errcount := 0
   fin_p, fin_l := level(), fin
@@ -274,7 +340,7 @@ LET start() = VALOF
   sysprint := stdout
   selectoutput(sysprint)
  
-  writef("*nBCPL (24 July 2012)*n")
+  writef("*nBCPL (10 Oct 2014) with simple floating point*n")
 
   // Allocate vector for source file names
   sourcefileupb := 1000
@@ -291,6 +357,23 @@ LET start() = VALOF
                                       errcount := 1
                                       GOTO fin
                                     }
+
+  bigender := (!"AAAAAAA" & 255) = 'A'    // =TRUE if on a bigender m/c
+
+  // Set the current system wordlength flag
+  // ON64 is defined in libhdr.b
+  // Set the target system wordlength flag
+  t64 := ON64                             // Set the target word length
+  IF argv!18 & argv!19 DO                 // T32/S and T64/S
+    writef("Both T32 and T64 specified -- T64 assumed*n")
+  IF argv!18 DO t64 := FALSE              // T32/S
+  IF argv!19 DO t64 := TRUE               // T64/S
+  wordbytelen := t64 -> 8, 4              // Set the target word length in bytes
+  IF argv!20 DO                           // OPT/K
+  { LET s = argv!20
+    FOR i = 0 TO s%0 DO optstring%i := s%i
+//writef("*nopt=%s*n", optstring)
+  }
   treesize := 200_000
   IF argv!3 DO treesize := !argv!3        // SIZE/K/N
   IF treesize<10_000 DO treesize := 10_000
@@ -300,11 +383,12 @@ LET start() = VALOF
   savespacesize := 3
 
   // Code generator options 
-
   naming := TRUE
   debug := 0
-  bigender := (!"AAA" & 255) = 'A' // =TRUE if running on a bigender
-  hdrs := rootnode!rtn_hdrsvar     // Default HDRS for the current system
+
+  // This must be done after T64 is properly set
+  hdrs := default_hdrs()                  // Set the default HDRS
+
   IF argv!5 DO naming   := FALSE          // NONAMES/S
   IF argv!6 DO debug    := debug+1        // D1/S
   IF argv!7 DO debug    := debug+2        // D2/S
@@ -320,9 +404,12 @@ LET start() = VALOF
   encoding := defaultencoding
   IF argv!16 DO savespacesize := !(argv!16) // SAVESIZE/K/N
   hard := argv!17                         // HARD/S
-
+                                          // t32/S is 18
+                                          // t64/S is 19
   // Added 5/10/2010
   IF eqcases DO lookupword := eqlookupword
+
+//writef("BCPL hdrs = %s*n", hdrs)
 
   { // Feature added by MR 17/01/06
     // If file objline1 can be found, its first line will be written
@@ -334,6 +421,8 @@ LET start() = VALOF
 
     UNLESS line1stream DO
       line1stream := pathfindinput("objline1", hdrs)
+    UNLESS line1stream IF rootnode!rtn_rootvar DO
+      line1stream := pathfindinput("g/objline1", rootnode!rtn_rootvar)
     
     IF line1stream DO
     { // Copy first line of objline1 into string objline1
@@ -355,7 +444,6 @@ LET start() = VALOF
   sourcefileno  := 0
 
   IF sourcestream=0 DO { writef("Trouble with file %s*n", argv!0)
-//abort(1000)
                          IF hard DO abort(1000)
                          errcount := 1
                          GOTO fin
@@ -469,7 +557,6 @@ fin:
   UNLESS sysprint=stdout DO endstream(sysprint)
 
   selectoutput(stdout)
-//abort(7777)
   RESULTIS errcount=0 -> 0, 20
 }
 
@@ -525,7 +612,7 @@ AND wrn(n) BE
 } REPEAT
 
 // ************* End of  OCODE I/O Routines *******************
-  
+
 LET lex() BE
 { nlpending := FALSE
  
@@ -534,15 +621,19 @@ LET lex() BE
  SWITCHON ch INTO
  
     { DEFAULT:
+              // The following gets around a
+              // bug on the Itanium
+              IF ch=endstreamch GOTO endstr
+
             { LET badch = ch
               ch := '*s'
               synerr("Illegal character %x2", badch)
             }
 
-      CASE '*n':
+      CASE '*n':  // Newline character
                lineno := lineno + 1
-      CASE '*p':
                nlpending := TRUE  // IGNORABLE CHARACTERS
+      CASE '*p':  // Newpage character - do not increment lineno
       CASE '*c':
       CASE '*t':
       CASE '*s':
@@ -551,8 +642,9 @@ LET lex() BE
 
       CASE '0':CASE '1':CASE '2':CASE '3':CASE '4':
       CASE '5':CASE '6':CASE '7':CASE '8':CASE '9':
-              token := s_number
-              decval := readnumber(10, 100)
+              readdecimal()
+              // token is either s_number or s_fnum
+              // and decval and exponent are both set
               RETURN
  
       CASE 'a':CASE 'b':CASE 'c':CASE 'd':CASE 'e':
@@ -569,38 +661,52 @@ LET lex() BE
       CASE 'Z':
               token := lookupword(rdtag(ch))
               IF token=s_get DO { performget(); LOOP  }
+              IF token=s_bitsperbcplword DO
+              { token := s_number
+                decval := t64->64,32
+                RETURN
+              }
               RETURN
  
       CASE '$':
               rch()
-              IF ch='$' | ch='<' | ch='>' DO
+              IF ch='$' | ch='<' | ch='>' | ch='~' DO
               { LET k = ch
+//sawritef("*nprocessing $%c*n", ch)
                 token := lookupword(rdtag('<'))
+//sawritef("charv=%s token=%n*n", charv, token)
                 // token = s_true             if the tag is set
-                //      = s_false or s_name  otherwise
+                //       = s_false or s_name  otherwise
  
                 // $>tag   marks the end of a conditional
                 //         skipping section
                 IF k='>' DO
                 { IF skiptag=wordnode DO
-                      skiptag := 0   // Matching $>tag found
+                    skiptag := 0   // Matching $>tag found
                   LOOP
                 }
  
-                UNLESS skiptag=0 LOOP
+                IF skiptag LOOP
 
                 // Only process $<tag and $$tag if not skipping
  
-                // $$tag  complements the value of a tag
                 IF k='$' DO
-                { h1!wordnode := token=s_true -> s_false, s_true
+                { // $$tag  complements the value of a tag
+                  h1!wordnode := token=s_true -> s_false, s_true
                   LOOP
                 }
  
-                // $<tag
-                IF token=s_true LOOP      // Don't skip if set
+                IF k='<' DO
+                { // $<tag
+                  IF token=s_true LOOP // Option set so don't skip
+                }
 
-                // tag is false so skip until matching $>tag or EOF
+                IF k='~' DO
+                { // $~tag
+                  UNLESS token=s_true LOOP // Option not set so don't skip
+                }
+
+                // Skip tokens until matching $>tag, EOF or end of section
                 skiptag := wordnode
                 UNTIL skiptag=0 | token=s_dot | token=s_eof DO lex()
                 skiptag := 0
@@ -637,15 +743,38 @@ LET lex() BE
                 decval := readnumber(16, 100)
                 RETURN
               }
-              token := s_mthap
-              RETURN
- 
+              IF ch='(' DO
+              { token := s_mthap
+                RETURN
+              }
+              UNLESS ch<32 DO
+              { lex()
+                SWITCHON token INTO
+                { DEFAULT:      ENDCASE
+
+                  CASE s_abs:      token := s_fabs;      RETURN
+
+                  CASE s_mul :     token := s_fmul;      RETURN
+                  CASE s_div:      token := s_fdiv;      RETURN
+                  CASE s_add:      token := s_fadd;      RETURN
+                  CASE s_sub:      token := s_fsub;      RETURN
+
+                  CASE s_eq:       token := s_feq;       RETURN
+                  CASE s_ne:       token := s_fne;       RETURN
+                  CASE s_ls:       token := s_fls;       RETURN
+                  CASE s_le:       token := s_fle;       RETURN
+                  CASE s_gr:       token := s_fgr;       RETURN
+                  CASE s_ge:       token := s_fge;       RETURN
+                }
+              }
+              synerr("'#' out of context")
+
       CASE '[': token := s_sbra;      BREAK
       CASE ']': token := s_sket;      BREAK
       CASE '(': token := s_lparen;    BREAK
       CASE ')': token := s_rparen;    BREAK 
       CASE '?': token := s_query;     BREAK
-      CASE '+': token := s_plus;      BREAK
+      CASE '+': token := s_add;       BREAK
       CASE ',': token := s_comma;     BREAK
       CASE ';': token := s_semicolon; BREAK
       CASE '@': token := s_lv;        BREAK
@@ -653,7 +782,7 @@ LET lex() BE
       CASE '=': token := s_eq;        BREAK
       CASE '!': token := s_vecap;     BREAK
       CASE '%': token := s_byteap;    BREAK
-      CASE '**':token := s_mult;      BREAK
+      CASE '**':token := s_mul;       BREAK
       CASE '|': token := s_logor;     BREAK
       CASE '.': token := s_dot;       BREAK
 
@@ -662,7 +791,9 @@ LET lex() BE
               rch()
               IF ch='\' DO { token := s_logand; BREAK }
               IF ch='/' DO
-              { rch() REPEATUNTIL ch='*n' | ch=endstreamch
+              { rch() REPEATUNTIL ch='*n' |
+                                  //ch='*p' | // Do not increment lineno
+                                  ch=endstreamch
                 LOOP
               }
  
@@ -716,7 +847,7 @@ LET lex() BE
  
       CASE '-': rch()
               IF ch='>' DO { token := s_cond; BREAK  }
-              token := s_minus
+              token := s_sub
               RETURN
  
       CASE ':': rch()
@@ -834,8 +965,8 @@ LET lex() BE
               UNLESS ch='*'' DO synerr("Bad character constant")
               BREAK
  
- 
-      CASE endstreamch:
+ endstr:
+      //CASE endstreamch: // Commented out because of an Itanium bug
               IF getstreams DO
               { // Return from a 'GET' stream
                 LET p = getstreams
@@ -911,6 +1042,7 @@ AND declsyswords() BE
 { dsw("AND", s_and)
   dsw("ABS", s_abs)
   dsw("BE", s_be)
+  dsw("BITSPERBCPLWORD", s_bitsperbcplword)
   dsw("BREAK", s_break)
   dsw("BY", s_by)
   dsw("CASE", s_case)
@@ -921,8 +1053,10 @@ AND declsyswords() BE
   dsw("ELSE", s_else)
   dsw("ENDCASE", s_endcase)
   dsw("FALSE", s_false)
-  dsw("FOR", s_for)
   dsw("FINISH", s_finish)
+  dsw("FIX", s_fix)
+  dsw("FLOAT", s_float)
+  dsw("FOR", s_for)
   dsw("GOTO", s_goto)
   dsw("GE", s_ge)
   dsw("GR", s_gr)
@@ -990,6 +1124,48 @@ AND wrchbuf() BE
 }
  
  
+AND rdoptstring() = VALOF
+{ LET pos = 1 // The position of the next optstring
+              // character to consider
+  LET optstringlen = optstring%0
+  LET optch = ?
+
+  { // Get next option name, if any
+    LET len = 1
+    charv%0, charv%1 := 1, '<'
+ 
+    // Skip characters before option name
+    WHILE pos<=optstringlen DO
+    { optch := optstring%pos
+      IF 'a'<=optch<='z' | 'A'<=optch<='Z' |
+         '0'<=optch<='9' | optch='.' | optch='_' BREAK
+      pos := pos+1
+    }
+
+    // Copy option name, if any, into charv
+    WHILE pos<=optstringlen DO
+    { optch := optstring%pos
+      UNLESS 'a'<=optch<='z' | 'A'<=optch<='Z' |
+             '0'<=optch<='9' | optch='.' | optch='_' BREAK
+      // Copy next option name character into charv, if room
+      len := len+1
+      IF len<=255 DO charv%0, charv%len := len, optch
+      pos := pos+1
+    }
+
+    IF len<=1 BREAK // No more option names
+
+    // Declare option name
+    token := lookupword(charv)
+    h1!wordnode := s_true
+
+//sawritef("Option name: ", wordnode, h1!wordnode)
+//FOR i = 2 TO charv%0 DO sawrch(charv%i)
+//sawritef(" declared*n")
+
+  } REPEAT    // Read next option name, if any
+}
+
 AND rdtag(ch1) = VALOF
 { LET len = 1
   ///IF eqcases & 'a'<=ch1<='z' DO ch1 := ch1 + 'A' - 'a'
@@ -1079,7 +1255,79 @@ AND performget() BE
   lineno := (sourcefileno<<20) + 1
   rch()
 }
- 
+
+AND readdecimal() BE
+{ // Read an integer or floating point constant
+  // setting token to s_number or s_fnum
+  // It sets decval to the integer or mantissa
+  // and exponent to the exponent is a floating point
+  // constant was found
+  LET zcount = 0    // Number of consecutive zeroes
+  LET pos = 0       // Number of digits after '.'
+
+  token := s_number // Until '.' or 'e' encountered
+  decval, exponent := 0, 0
+
+  UNLESS '0'<=ch<='9' DO synerr("Bad number")
+
+  // Ignore leading zeroes
+  WHILE ch='0' DO rch()
+
+  WHILE '0'<=ch<='9' | ch='_' | ch='.' DO
+  { //writef("ch=%c zcount=%n pos=%n token=%n decval=%i4 exponent=%n*n",
+    //        ch, zcount, pos, token, decval, exponent)
+    SWITCHON ch INTO
+    { DEFAULT: BREAK
+
+      CASE '1': CASE '2': CASE '3': CASE '4': 
+      CASE '5': CASE '6': CASE '7': CASE '8': CASE '9':
+        IF token=s_fnum DO pos := pos+1
+        // Be careful with overflow
+        { IF decval>maxint/10 GOTO digitzero
+          decval := 10*decval
+          UNLESS zcount BREAK
+          zcount := zcount-1
+        } REPEAT
+        IF decval > maxint - (ch - '0') ENDCASE
+        decval := decval + ch - '0'
+        ENDCASE
+
+      CASE '0':
+        IF token=s_fnum DO pos := pos+1
+digitzero:
+        zcount := zcount+1
+      CASE '_':
+        ENDCASE
+
+      CASE '.': 
+        IF token=s_fnum DO synerr("Bad floating point constant")
+        token := s_fnum
+        ENDCASE
+    }
+    rch()
+  }
+  IF ch='e' | ch='E' DO
+  { LET expneg = FALSE
+    token := s_fnum
+    rch()
+    IF ch='-' DO { expneg := TRUE; rch() }
+    WHILE '0'<=ch<='9' | ch='_' DO
+    { UNLESS ch='_' DO exponent := 10*exponent + ch-'0'
+      rch()
+    }
+    IF expneg DO exponent := -exponent
+  }
+  IF token=s_number DO
+  { // Deal with trailing zeroes
+    WHILE zcount DO decval, zcount := 10*decval, zcount-1
+    RETURN
+  }
+  // Correct the exponent
+  exponent := exponent + zcount - pos
+  //writef("token=%n decval=%i4 exponent=%n*n",
+  //        token, decval, exponent)
+}
+
 AND readnumber(radix, digs) = VALOF
 // Read a binary, octal, decimal or hexadecimal unsigned number
 // with between 1 and digs digits. Underlines are allowed.
@@ -1111,7 +1359,7 @@ AND rdstrch() = VALOF
   // Set result2=TRUE if *# character code was found, otherwise FALSE
   LET k = ch
 
-  IF k='*n' | k='*p' DO
+  IF k='*n' DO
   { lineno := lineno+1
     synerr("Unescaped newline character")
   }
@@ -1125,10 +1373,28 @@ AND rdstrch() = VALOF
       CASE '*c':
       CASE '*p':
       CASE '*s':
-      CASE '*t': WHILE ch='*n' | ch='*c' | ch='*p' | ch='*s' | ch='*t' DO
-                 { IF ch='*n' DO lineno := lineno+1
-                   rch()
-                 }
+      CASE '*t':
+      CASE  '/': // Ignore white space until the next asterisk.
+                 // Comments starting with '//' are treated as
+                 // white space, but those starting with '/*'
+                 // are not.
+                 { WHILE ch='*n' | ch='*c' | ch='*p' | ch='*s' | ch='*t' DO
+                   { IF //ch='*p' |  // Do not increment lineno
+                        ch='*n' DO lineno := lineno+1
+                     rch()
+                   }
+                   IF ch='/' DO
+                   { rch()
+                     IF ch='/' DO
+                     { // Skip over a '//' comment
+                       rch() REPEATUNTIL ch='*n' |
+                                         ch='*p' |
+                                         ch=endstreamch
+                       LOOP
+                     }
+                   }
+                   BREAK
+                 } REPEAT
                  IF ch='**' DO { rch(); LOOP  }
 
       DEFAULT:   synerr("Bad string or character constant, ch=%n", ch)
@@ -1246,7 +1512,8 @@ AND formtree() =  VALOF
 
   nametablesize := 541
 
-  charv      := newvec(256/bytesperword)     
+  charv      := newvec(256/bytesperword)
+  charv%0 := 0
   nametable  := newvec(nametablesize) 
   FOR i = 0 TO nametablesize DO nametable!i := 0
   skiptag := 0
@@ -1256,12 +1523,53 @@ AND formtree() =  VALOF
  
   token, decval := 0, 0
 
+  rdoptstring()
+
   lex()
 //sawritef("formtree: token=%n cis=%n*n", token, cis)
   IF token=s_query DO            // For debugging lex.
-  { lex()
-    writef("token =%i3 ln=%i5 %12t  decval = %i8   charv = %s*n",
-            token, lineno&#xFFFFF, opname(token), decval,        charv)
+  { LET ln, name = ?, ?
+    lex()
+    ln := lineno & #xFFFFF
+    name := opname(token)
+
+    SWITCHON token INTO
+    { DEFAULT:
+        writef("token =%i3 ln=%i5 %12t  *n",   token, ln, name)
+        ENDCASE
+
+      CASE s_name:
+        writef("token =%i3 ln=%i5 %12t  %s*n", token, ln, name, @h3!wordnode)
+        ENDCASE  
+
+      CASE s_number:
+        writef("token =%i3 ln=%i5 %12t  %n*n", token, ln, name, decval)
+        ENDCASE  
+
+      CASE s_fnum:
+        writef("token =%i3 ln=%i5 %12t  %ne%n*n", token, ln, name,
+                decval, exponent)
+        ENDCASE  
+
+      CASE s_string:
+      { LET s = @h2!wordnode
+        writef("token =%i3 ln=%i5 %12t *"", token, ln, name)
+        FOR i = 1 TO s%0 DO
+        { LET ch = s%i
+          SWITCHON ch INTO
+          { DEFAULT:     wrch(ch);    LOOP
+
+            CASE '*n': writes("**n"); LOOP
+            CASE '*s': writes("**s"); LOOP
+            CASE '*p': writes("**p"); LOOP
+            CASE '*t': writes("**t"); LOOP
+          }
+        }
+        writes("*"*n")
+        ENDCASE
+      }  
+    }
+
     IF token=s_eof RESULTIS 0
   } REPEAT
 
@@ -1440,6 +1748,13 @@ LET rbexp() = VALOF
                      lex()
                      RESULTIS a
 
+      CASE s_fnum:   UNLESS -128<=exponent<=127 DO
+                       synerr("Exponent of floating point constant out of range")
+                     floatingchk()
+                     a := mk3(s_number, sys(Sys_flt, fl_mk, decval, exponent))
+                     lex()
+                     RESULTIS a
+
       CASE s_slct: { LET len, sh, offset = 0, 0, 0  // Inserted 11/7/01
 
                      // Allow   SLCT offset
@@ -1470,17 +1785,24 @@ LET rbexp() = VALOF
                      RESULTIS mk2(s_valof, rcom())
  
       CASE s_vecap:  op := s_rv
+      CASE s_float:
+      CASE s_fix:
       CASE s_lv:
       CASE s_rv:     RESULTIS mk2(op, rnexp(7))
  
-      CASE s_plus:   RESULTIS rnexp(5)
+      CASE s_fadd:
+      CASE s_add:    RESULTIS rnexp(5)
  
-      CASE s_minus:  a := rnexp(5)
+      CASE s_sub:    a := rnexp(5)
                      TEST h1!a=s_number THEN h2!a := - h2!a
                                         ELSE a := mk2(s_neg, a)
                      RESULTIS a
+      CASE s_fsub:   a := rnexp(5)
+                     a := mk2(s_fneg, a)
+                     RESULTIS a
  
-      CASE s_abs:    RESULTIS mk2(s_abs, rnexp(5))
+      CASE s_fabs:
+      CASE s_abs:    RESULTIS mk2(op, rnexp(5))
  
       CASE s_not:    RESULTIS mk2(s_not, rnexp(3))
  
@@ -1536,18 +1858,26 @@ AND rexp(n) = VALOF
 
          CASE s_vecap:  p := 8; ENDCASE
          CASE s_byteap: p := 8; ENDCASE // Changed from 7 on 16 Dec 1999
-         CASE s_mult:
+         CASE s_fmul:
+         CASE s_fdiv:
+         CASE s_mul:
          CASE s_div:
          CASE s_rem:    p := 6; ENDCASE
-         CASE s_plus:
-         CASE s_minus:  p := 5; ENDCASE
+
+         CASE s_fadd:
+         CASE s_fsub:
+         CASE s_add:
+         CASE s_sub:    p := 5; ENDCASE
  
+         CASE s_feq:CASE s_fle:CASE s_fls:
+         CASE s_fne:CASE s_fge:CASE s_fgr:
          CASE s_eq:CASE s_le:CASE s_ls:
          CASE s_ne:CASE s_ge:CASE s_gr:
                         IF n>=4 RESULTIS a
                         b := rnexp(4)
                         a := mk3(op, a, b)
-                        WHILE  s_eq<=token<=s_ge DO
+                        WHILE  s_eq<=token<=s_ge |
+                               s_feq<=token<=s_fge DO
                         { LET c = b
                            op := token
                            b := rnexp(4)
@@ -1635,10 +1965,12 @@ LET rbcom() = VALOF
   SWITCHON token INTO
   { DEFAULT: RESULTIS 0
  
-    CASE s_name:CASE s_number:CASE s_string:CASE s_lparen:
+    CASE s_name:CASE s_number:CASE s_fnum:
+    CASE s_string:CASE s_lparen:
     CASE s_true:CASE s_false:CASE s_lv:CASE s_rv:CASE s_vecap:
     CASE s_slct:        // Inserted 11/7/01
-    CASE s_plus:CASE s_minus:CASE s_abs:CASE s_not:
+    CASE s_add:CASE s_sub:CASE s_abs:CASE s_not:
+    CASE s_fadd:CASE s_fsub:CASE s_fabs:CASE s_fix:CASE s_float:
     CASE s_table:CASE s_valof:CASE s_query:
             // All tokens that can start an expression.
             a := rexplist()
@@ -1770,16 +2102,16 @@ LET plist(x, n, d) BE
 
   IF x=0 DO { writes("Nil"); RETURN  }
  
-   SWITCHON h1!x INTO
-   { CASE s_number:
+  SWITCHON h1!x INTO
+  { CASE s_number:
                  { LET val = h2!x
                    TEST -1000000<=val<=1000000
                    THEN writef("NUM: %n", val)
                    ELSE writef("NUM: %x8", val)
                    RETURN
                  }
- 
-      CASE s_name:   writes(x+2);          RETURN
+
+    CASE s_name:   writef("NAME: %s", x+2);           RETURN
  
     CASE s_string:
                 { LET s = x+1
@@ -1809,7 +2141,9 @@ LET plist(x, n, d) BE
  
       CASE s_needs:CASE s_section:CASE s_vecap:CASE s_byteap:CASE s_fnap:
       CASE s_of:  // Inserted 11/7/01
-      CASE s_mult:CASE s_div:CASE s_rem:CASE s_plus:CASE s_minus:
+      CASE s_fmul:CASE s_fdiv:CASE s_fadd:CASE s_fsub:
+      CASE s_mul:CASE s_div:CASE s_rem:CASE s_add:CASE s_sub:
+      CASE s_feq:CASE s_fne:CASE s_fls:CASE s_fgr:CASE s_fle:CASE s_fge:
       CASE s_eq:CASE s_ne:CASE s_ls:CASE s_gr:CASE s_le:CASE s_ge:
       CASE s_lshift:CASE s_rshift:CASE s_logand:CASE s_logor:
       CASE s_eqv:CASE s_neqv:CASE s_comma:
@@ -1832,6 +2166,7 @@ LET plist(x, n, d) BE
  
       CASE s_valof:CASE s_lv:CASE s_rv:CASE s_neg:CASE s_not:
       CASE s_table:CASE s_abs:
+      CASE s_fabs:CASE s_fneg:CASE s_fix:CASE s_float:
                      size := 2;            ENDCASE
  
       CASE s_goto:CASE s_resultis:CASE s_repeat:CASE s_default:
@@ -1862,10 +2197,10 @@ LET plist(x, n, d) BE
      writef("[%n]", lno)
    }
    FOR i = 2 TO size DO { newline()
-                           FOR j=0 TO n-1 DO writes( v!j )
-                           writes("**-")
-                           v!n := i=size->"  ","! "
-                           plist(h1!(x+i-1), n+1, d)
+                          FOR j=0 TO n-1 DO writes( v!j )
+                          writes("**-")
+                          v!n := i=size->"  ","! "
+                          plist(h1!(x+i-1), n+1, d)
                         }
 }
  
@@ -1893,64 +2228,115 @@ AND opname(op) = VALOF SWITCHON op INTO
   CASE s_else:        RESULTIS "ELSE"
   CASE s_eof:         RESULTIS "EOF"
   CASE s_endcase:     RESULTIS "ENDCASE"
+  CASE s_endfor:      RESULTIS "ENDFOR"
+  CASE s_endproc:     RESULTIS "ENDPROC"
+  CASE s_entry:       RESULTIS "ENTRY"
   CASE s_eq:          RESULTIS "EQ"
   CASE s_eqv:         RESULTIS "EQV"
+  CASE s_fabs:        RESULTIS "FABS"
+  CASE s_fadd:        RESULTIS "FADD"
   CASE s_false:       RESULTIS "FALSE"
+  CASE s_fdiv:        RESULTIS "FDIV"
+  CASE s_feq:         RESULTIS "FEQ"
+  CASE s_fge:         RESULTIS "FGE"
+  CASE s_fgr:         RESULTIS "FGR"
   CASE s_finish:      RESULTIS "FINISH"
+  CASE s_fix:         RESULTIS "FIX"
+  CASE s_fle:         RESULTIS "FLE"
+  CASE s_float:       RESULTIS "FLOAT"
+  CASE s_fls:         RESULTIS "FLS"
+  CASE s_fltop:       RESULTIS "FLTOP"
   CASE s_fnap:        RESULTIS "FNAP"
+  CASE s_fnrn:        RESULTIS "FNRN"
   CASE s_fndef:       RESULTIS "FNDEF"
+  CASE s_fne:         RESULTIS "FNE"
+  CASE s_fneg:        RESULTIS "FNEG"
+  CASE s_fnum:        RESULTIS "FNUM"
+  CASE s_fmul:        RESULTIS "FMUL"
+  CASE s_fsub:        RESULTIS "FSUB"
+
   CASE s_for:         RESULTIS "FOR"
   CASE s_ge:          RESULTIS "GE"
   CASE s_get:         RESULTIS "GET"
+  CASE s_getbyte:     RESULTIS "GETBYTE"
   CASE s_global:      RESULTIS "GLOBAL"
   CASE s_goto:        RESULTIS "GOTO"
   CASE s_gr:          RESULTIS "GR"
   CASE s_if:          RESULTIS "IF"
   CASE s_into:        RESULTIS "INTO"
+  CASE s_itemn:       RESULTIS "ITEMN"
+  CASE s_jf:          RESULTIS "JF"
+  CASE s_jt:          RESULTIS "JT"
+  CASE s_jump:        RESULTIS "JUMP"
+  CASE s_lab:         RESULTIS "LAB"
   CASE s_le:          RESULTIS "LE"
   CASE s_let:         RESULTIS "LET"
+  CASE s_lf:          RESULTIS "LF"
+  CASE s_lg:          RESULTIS "LG"
+  CASE s_ll:          RESULTIS "LL"
+  CASE s_llg:         RESULTIS "LLG"
+  CASE s_lll:         RESULTIS "LLl"
+  CASE s_llp:         RESULTIS "LLP"
+  CASE s_ln:          RESULTIS "LN"
   CASE s_logand:      RESULTIS "LOGAND"
   CASE s_logor:       RESULTIS "LOGOR"
   CASE s_loop:        RESULTIS "LOOP"
+  CASE s_lp:          RESULTIS "LP"
   CASE s_lparen:      RESULTIS "LPAREN"
   CASE s_ls:          RESULTIS "LS"
   CASE s_lsect:       RESULTIS "LSECT"
   CASE s_lshift:      RESULTIS "LSHIFT"
+  CASE s_lstr:        RESULTIS "LSTR"
   CASE s_lv:          RESULTIS "LV"
   CASE s_manifest:    RESULTIS "MANIFEST"
   CASE s_mthap:       RESULTIS "MTHAP"
-  CASE s_minus:       RESULTIS "MINUS"
-  CASE s_mult:        RESULTIS "MULT"
+  CASE s_mul:        RESULTIS "MUL"
   CASE s_name:        RESULTIS "NAME"
   CASE s_ne:          RESULTIS "NE"
   CASE s_needs:       RESULTIS "NEEDS"
   CASE s_neg:         RESULTIS "NEG"
   CASE s_neqv:        RESULTIS "NEQV"
+  CASE s_none:        RESULTIS "NONE"
   CASE s_not:         RESULTIS "NOT"
   CASE s_number:      RESULTIS "NUMBER"
   CASE s_of:          RESULTIS "OF"
-  CASE s_plus:        RESULTIS "PLUS"
+  CASE s_add:         RESULTIS "ADD"
+  CASE s_putbyte:     RESULTIS "PUTBYTE"
   CASE s_query:       RESULTIS "QUERY"
   CASE s_rem:         RESULTIS "REM"
   CASE s_repeat:      RESULTIS "REPEAT"
   CASE s_repeatuntil: RESULTIS "REPEATUNTIL"
   CASE s_repeatwhile: RESULTIS "REPEATWHILE"
+  CASE s_res:         RESULTIS "RES"
   CASE s_resultis:    RESULTIS "RESULTIS"
   CASE s_return:      RESULTIS "RETURN"
   CASE s_rparen:      RESULTIS "RPAREN"
-  CASE s_rshift:      RESULTIS "RSHIFT"
   CASE s_rsect:       RESULTIS "RSECT"
+  CASE s_rshift:      RESULTIS "RSHIFT"
+  CASE s_rstack:      RESULTIS "RSTACK"
   CASE s_rtap:        RESULTIS "RTAP"
   CASE s_rtdef:       RESULTIS "RTDEF"
+  CASE s_rtrn:        RESULTIS "RTRN"
   CASE s_rv:          RESULTIS "RV"
+  CASE s_save:        RESULTIS "SAVE"
   CASE s_sbra:        RESULTIS "SBRA"
   CASE s_section:     RESULTIS "SECTION"
   CASE s_semicolon:   RESULTIS "SEMICOLON"
   CASE s_seq:         RESULTIS "SEQ"
+  CASE s_sg:          RESULTIS "SG"
   CASE s_sket:        RESULTIS "SKET"
   CASE s_skip:        RESULTIS "SKIP"
+  CASE s_sl:          RESULTIS "SL"
+  CASE s_slct:        RESULTIS "SLCT"
+  CASE s_selld:       RESULTIS "SELLD"
+  CASE s_selst:       RESULTIS "SELST"
+  CASE s_sp:          RESULTIS "SP"
+  CASE s_stack:       RESULTIS "STACK"
   CASE s_static:      RESULTIS "STATIC"
+  CASE s_stind:       RESULTIS "STIND"
+  CASE s_store:       RESULTIS "STORE"
   CASE s_string:      RESULTIS "STRING"
+  CASE s_sub:         RESULTIS "SUB"
   CASE s_switchon:    RESULTIS "SWITCHON"
   CASE s_table:       RESULTIS "TABLE"
   CASE s_test:        RESULTIS "TEST"
@@ -1966,24 +2352,44 @@ AND opname(op) = VALOF SWITCHON op INTO
   CASE s_while:       RESULTIS "WHILE"
 }
 
+AND flopname(flop) = VALOF SWITCHON flop INTO
+{ DEFAULT:            writef("*nopname = %n*n", flop)
+                      abort(999)
+                      RESULTIS "Flop %n"
+
+  CASE fl_mk:         RESULTIS "MK"
+  CASE fl_float:      RESULTIS "FLOAT"
+  CASE fl_fix:        RESULTIS "FIX"
+  CASE fl_neg:        RESULTIS "NEG"
+  CASE fl_abs:        RESULTIS "ABS"
+  CASE fl_mul:        RESULTIS "MUL"
+  CASE fl_div:        RESULTIS "DIV"
+  CASE fl_add:        RESULTIS "ADD"
+  CASE fl_sub:        RESULTIS "SUB"
+  CASE fl_eq:         RESULTIS "EQ"
+  CASE fl_ne:         RESULTIS "NE"
+  CASE fl_ls:         RESULTIS "LS"
+  CASE fl_gr:         RESULTIS "GR"
+  CASE fl_le:         RESULTIS "LE"
+  CASE fl_ge:         RESULTIS "GE"
+}
+
 //.
 
 //SECTION "TRN"
 
-//    TRNHDR
- 
 //GET "libhdr"
 //GET "bcplfecg"
  
 GLOBAL  {
 trnext:trng
-trans; declnames; decldyn
+trans; destlabel; declnames; decldyn
 declstat; checkdistinct; addname; cellwithname
 transdef; scanlabel
 decllabels; undeclare
 jumpcond; transswitch; transfor
 assign; load; fnbody; loadlv; loadlist
-isconst evalconst; transname; xref
+isconst; evalconst; transname; xref
 nextlab; labnumber
 newblk
 dvec; dvece; dvecp; dvect
@@ -1992,7 +2398,7 @@ context; comline; procname
 resultlab; defaultlab; endcaselab
 looplab; breaklab; ssp; vecssp
 gdeflist; gdefcount
-outstring; out1; out2
+outstring; out1; out2; out3; out4
 }
 
 LET nextlab() = VALOF
@@ -2073,12 +2479,13 @@ LET trans(x, next) BE
 // next<0  compile x followed by RTRN
 // next>0  compile x followed by JUMP next
 // next=0  compile x only
-{ LET sw = FALSE
+{ LET op, sw = ?, FALSE
 
   IF x=0 DO { trnext(next); RETURN }
- 
-  SWITCHON h1!x INTO
-  { DEFAULT: trnerr("Compiler error in Trans"); RETURN
+  op := h1!x
+
+  SWITCHON op INTO
+  { DEFAULT: trnerr("Compiler error in Trans, op = %s", opname(op)); RETURN
  
     CASE s_let:
     { LET cc = casecount
@@ -2110,7 +2517,6 @@ LET trans(x, next) BE
     CASE s_manifest:
     { LET cc = casecount
       LET e, s = dvece, ssp
-      AND op = h1!x
       AND y, n = h2!x, 0
       LET prevk = -1
          
@@ -2181,6 +2587,20 @@ LET trans(x, next) BE
     CASE s_unless: sw := TRUE
     CASE s_if:
       context, comline := x, h4!x
+
+      { // Optimise IF exp BREAK/LOOP/ENDCASE, if possible.
+        LET bodyop = h1!(h3!x)
+        LET destlab = destlabel(bodyop)
+        // destlab is the destination label if the body
+        // was BREAK, LOOP or ENDCASE. Otherwise it is zero.
+        IF destlab>0 DO
+        { jumpcond(h2!x, ~sw, destlab)
+          trnext(next)
+//sawritef("IF exp BREAK/LOOP/ENDCASE optimised*n")
+          RETURN
+        }
+      }
+
       TEST next>0 THEN { jumpcond(h2!x, sw, next)
                          trans(h3!x, next)
                        }
@@ -2208,17 +2628,15 @@ LET trans(x, next) BE
  
     CASE s_loop:
       context, comline := x, h2!x
-      IF looplab<0 DO trnerr("Illegal use of LOOP")
-      IF looplab=0 DO looplab := nextlab()
-      out2(s_jump, looplab)
+      destlabel(s_loop)
+      IF looplab>0 DO out2(s_jump, looplab)
       RETURN
- 
+
     CASE s_break:
       context, comline := x, h2!x
-      IF breaklab=-2 DO trnerr("Illegal use of BREAK")
+      destlabel(s_break)
       IF breaklab=-1 DO { out1(s_rtrn); RETURN }
-      IF breaklab= 0 DO breaklab := nextlab()
-      out2(s_jump, breaklab)
+      IF breaklab> 0 DO out2(s_jump, breaklab)
       RETURN
  
     CASE s_return:
@@ -2323,7 +2741,7 @@ LET trans(x, next) BE
  
     CASE s_endcase:
       context, comline := x, h2!x
-      IF endcaselab=-2 DO trnerr("Illegal use of ENDCASE")
+      destlabel(s_endcase)
       IF endcaselab=-1 DO out1(s_rtrn)
       // endcaselab is never equal to 0
       IF endcaselab>0  DO out2(s_jump, endcaselab)
@@ -2340,45 +2758,64 @@ LET trans(x, next) BE
     CASE s_seq:
       trans(h2!x, 0)
       x := h3!x
-   }
+  }
 } REPEAT
+
+AND destlabel(op) = VALOF SWITCHON op INTO
+{ DEFAULT: RESULTIS 0
+
+  CASE s_loop:
+      IF looplab<0 DO trnerr("Illegal use of LOOP")
+      IF looplab=0 DO looplab := nextlab()
+      RESULTIS looplab
+
+  CASE s_break:
+      IF breaklab=-2 DO trnerr("Illegal use of BREAK")
+      IF breaklab= 0 DO breaklab := nextlab()
+      RESULTIS breaklab
+
+  CASE s_endcase:
+      IF endcaselab=-2 DO trnerr("Illegal use of ENDCASE")
+      // endcaselab is never equal to 0
+      RESULTIS endcaselab
+}
 
 LET declnames(x) BE UNLESS x=0 SWITCHON h1!x INTO
  
-{  DEFAULT:        trnerr("Compiler error in Declnames")
-                   RETURN
+{ DEFAULT:        trnerr("Compiler error in Declnames")
+                  RETURN
  
-    CASE s_vecdef:
-    CASE s_valdef: context, comline := x, h4!x
-                   decldyn(h2!x)
-                   RETURN
+  CASE s_vecdef:
+  CASE s_valdef: context, comline := x, h4!x
+                 decldyn(h2!x)
+                 RETURN
  
-    CASE s_rtdef:
-    CASE s_fndef:  context, comline := x, h6!x
-                   h5!x := nextlab()
-                   declstat(h2!x, h5!x)
-                   RETURN
+  CASE s_rtdef:
+  CASE s_fndef:  context, comline := x, h6!x
+                 h5!x := nextlab()
+                 declstat(h2!x, h5!x)
+                 RETURN
  
-    CASE s_and:    declnames(h2!x)
-                   declnames(h3!x)
+  CASE s_and:    declnames(h2!x)
+                 declnames(h3!x)
 }
  
 AND decldyn(x) BE UNLESS x=0 DO
  
 { IF h1!x=s_name  DO { addname(x, s_local, ssp)
-                         //IF xrefing DO xref(x, "P:", ssp, h1!context)
-                         ssp := ssp + 1
-                         RETURN
-                      }
+                       //IF xrefing DO xref(x, "P:", ssp, h1!context)
+                       ssp := ssp + 1
+                       RETURN
+                     }
  
-   IF h1!x=s_comma DO { addname(h2!x, s_local, ssp)
-                         //IF xrefing DO xref(h2!x, "P:", ssp, h1!context)
-                         ssp := ssp + 1
-                         decldyn(h3!x)
-                         RETURN
-                      }
+  IF h1!x=s_comma DO { addname(h2!x, s_local, ssp)
+                       //IF xrefing DO xref(h2!x, "P:", ssp, h1!context)
+                       ssp := ssp + 1
+                       decldyn(h3!x)
+                       RETURN
+                     }
  
-   trnerr("Compiler error in Decldyn")
+  trnerr("Compiler error in Decldyn")
 }
  
 AND declstat(x, lab) BE
@@ -2578,17 +3015,28 @@ AND transswitch(x, next) BE
   endcaselab := next=0 -> nextlab(), next
  
   context, comline := x, h4!x
-  out2(s_jump, l)
+
+  load(h2!x)  // Evaluate the switch expression
+//  out2(s_jump, l)
+  out2(s_res, l) // Make a jump to the end of the switch
+                 // with the switch expression in<res>
+  ssp := ssp-1
+
+  // Compile the switch body collecting the case label data
   trans(h3!x, endcaselab)
  
   context, comline := x, h4!x
-  out2(s_lab, l)
-  load(h2!x)
+  out2(s_lab, l) // The switch value is on the top of the stack
+  out2(s_rstack, ssp) // Load <res> onto the top of the stack
+  ssp := ssp+1
+
+//  load(h2!x)  // Evaluate the switch expression
 
   dlab := defaultlab>0 -> defaultlab,
           endcaselab>0 -> endcaselab,
           nextlab()
 
+  // The switch expression value is on the top of the stack
   out2(s_switchon, casecount); out1(dlab) 
   UNTIL caselist=0 DO { out2(h2!caselist, h3!caselist)
                         caselist := h1!caselist
@@ -2656,7 +3104,7 @@ AND transfor(x, next) BE
   out2(s_lab, m)
   trans(h6!x, 0)
   UNLESS looplab=0 DO out2(s_lab, looplab)
-  out2(s_lp, s); out2(s_ln, step); out1(s_plus); out2(s_sp, s)
+  out2(s_lp, s); out2(s_ln, step); out1(s_add); out2(s_sp, s)
   out2(s_lp,s); out2(k,n); out1(step>=0 -> s_le, s_ge)
   out2(s_jt, m)
  
@@ -2690,7 +3138,7 @@ LET load(x) BE
                       LET sh  = slct>>16 & 255
                       LET offset = slct & #xFFFF
                       load(h3!x)
-                      IF offset DO { out2(s_ln, offset); out1(s_plus) }
+                      IF offset DO { out2(s_ln, offset); out1(s_add) }
                       out1(s_rv)
                       IF sh DO { out2(s_ln, sh); out1(s_rshift) }
                       IF len>0 & len+sh<32 DO    // Assume a 32 bit m/c
@@ -2703,29 +3151,33 @@ LET load(x) BE
 
     CASE s_byteap:    op:=s_getbyte
 
-    CASE s_div: CASE s_rem: CASE s_minus:
+    CASE s_fdiv: CASE s_fsub:
+    CASE s_div: CASE s_rem: CASE s_sub:
+    CASE s_fls: CASE s_fgr: CASE s_fle: CASE s_fge:
     CASE s_ls: CASE s_gr: CASE s_le: CASE s_ge:
     CASE s_lshift: CASE s_rshift:
                       load(h2!x); load(h3!x); out1(op)
                       ssp := ssp - 1
                       RETURN
  
-    CASE s_vecap: CASE s_mult: CASE s_plus: CASE s_eq: CASE s_ne:
+    CASE s_fmul: CASE s_fadd: CASE s_feq: CASE s_fne:
+    CASE s_vecap: CASE s_mul: CASE s_add: CASE s_eq: CASE s_ne:
     CASE s_logand: CASE s_logor: CASE s_eqv: CASE s_neqv:
          { LET a, b = h2!x, h3!x
            TEST h1!a=s_name |
                 h1!a=s_number THEN { load(b); load(a) }
                               ELSE { load(a); load(b) }
-           TEST op=s_vecap THEN out2(s_plus, s_rv)
+           TEST op=s_vecap THEN out2(s_add, s_rv)
                            ELSE out1(op)
            ssp := ssp - 1
            RETURN
          }
  
-    CASE s_neg: CASE s_not: CASE s_rv: CASE s_abs:
-                      load(h2!x)
-                      out1(op)
-                      RETURN
+    CASE s_float:CASE s_fix:CASE s_fneg:
+    CASE s_neg: CASE s_not: CASE s_rv: CASE s_abs: CASE s_fabs:
+      load(h2!x)
+      out1(op)
+      RETURN
  
     CASE s_true: CASE s_false: CASE s_query:
                       out1(op)
@@ -2837,7 +3289,7 @@ AND loadlv(x) BE
                     IF h1!a=s_name DO a, b := h3!x, h2!x
                     load(a)
                     load(b)
-                    out1(s_plus)
+                    out1(s_add)
                     ssp := ssp - 1
                     RETURN
                   }
@@ -2860,27 +3312,53 @@ LET isconst(x) = VALOF
         { LET c = cellwithname(x)
           RESULTIS h2!c=s_manifest
         }
- 
+
     CASE s_number:
     CASE s_slct:
     CASE s_true:
     CASE s_false:  RESULTIS TRUE
  
+    CASE s_fneg:
+    CASE s_fabs:
+    CASE s_float:
+    CASE s_fix:
     CASE s_neg:
     CASE s_abs:
     CASE s_not:    RESULTIS isconst(h2!x)
        
-    CASE s_mult:
+    CASE s_fmul:
+    CASE s_fdiv:
+    CASE s_fadd:
+    CASE s_fsub:
+    CASE s_feq:
+    CASE s_fne:
+    CASE s_fls:
+    CASE s_fgr:
+    CASE s_fle:
+    CASE s_fge:
+
+    CASE s_mul:
     CASE s_div:
     CASE s_rem:
-    CASE s_plus:
-    CASE s_minus:
+    CASE s_add:
+    CASE s_sub:
     CASE s_lshift:
     CASE s_rshift:
     CASE s_logor:
     CASE s_logand:
     CASE s_eqv:
-    CASE s_neqv:   IF isconst(h2!x) & isconst(h3!x) RESULTIS TRUE
+    CASE s_neqv:
+    CASE s_eq:
+    CASE s_ne:
+    CASE s_ls:
+    CASE s_gr:
+    CASE s_le:
+    CASE s_ge:
+                   IF isconst(h2!x) & isconst(h3!x) RESULTIS TRUE
+
+    CASE s_cond:   IF isconst(h2!x) &
+                      isconst(h3!x) &
+                      isconst(h4!x) RESULTIS TRUE
 
     DEFAULT:       RESULTIS FALSE
 
@@ -2920,22 +3398,46 @@ LET evalconst(x) = VALOF
                    RESULTIS len<<24 | sh<<16 | offset
                  }
 
+    CASE s_fneg:
+    CASE s_fabs:
+    CASE s_fix:
+    CASE s_float:  floatingchk()
     CASE s_neg:
     CASE s_abs:
     CASE s_not:    a := evalconst(h2!x)
                    ENDCASE
        
-    CASE s_mult:
+    CASE s_fmul:
+    CASE s_fdiv:
+    CASE s_fadd:
+    CASE s_fsub:
+    CASE s_feq:
+    CASE s_fne:
+    CASE s_fls:
+    CASE s_fgr:
+    CASE s_fle:
+    CASE s_fge:  floatingchk()
+
+    CASE s_mul:
     CASE s_div:
     CASE s_rem:
-    CASE s_plus:
-    CASE s_minus:
+    CASE s_add:
+    CASE s_sub:
     CASE s_lshift:
     CASE s_rshift:
     CASE s_logor:
     CASE s_logand:
     CASE s_eqv:
-    CASE s_neqv:   a, b := evalconst(h2!x), evalconst(h3!x)
+    CASE s_neqv:
+    CASE s_eq:
+    CASE s_ne:
+    CASE s_ls:
+    CASE s_gr:
+    CASE s_le:
+    CASE s_ge:
+
+    CASE s_cond:
+                   a, b := evalconst(h2!x), evalconst(h3!x)
                    ENDCASE
 
     DEFAULT:
@@ -2946,9 +3448,26 @@ LET evalconst(x) = VALOF
     CASE s_abs:    RESULTIS ABS a
     CASE s_not:    RESULTIS NOT a
        
-    CASE s_mult:   RESULTIS a   *    b
-    CASE s_plus:   RESULTIS a   +    b
-    CASE s_minus:  RESULTIS a   -    b
+    CASE s_fneg:   RESULTIS sys(Sys_flt, fl_neg, a)
+    CASE s_fabs:   RESULTIS sys(Sys_flt, fl_abs, a)
+    CASE s_fix:    RESULTIS sys(Sys_flt, fl_fix, a)
+    CASE s_float:  RESULTIS sys(Sys_flt, fl_float, a)
+       
+    CASE s_fmul:   RESULTIS sys(Sys_flt, fl_mul, a,  b)
+    CASE s_fdiv:   RESULTIS sys(Sys_flt, fl_div, a,  b)
+    CASE s_fadd:   RESULTIS sys(Sys_flt, fl_add, a,  b)
+    CASE s_fsub:   RESULTIS sys(Sys_flt, fl_sub, a,  b)
+
+    CASE s_feq:    RESULTIS sys(Sys_flt, fl_eq, a,  b)
+    CASE s_fne:    RESULTIS sys(Sys_flt, fl_ne, a,  b)
+    CASE s_fls:    RESULTIS sys(Sys_flt, fl_ls, a,  b)
+    CASE s_fgr:    RESULTIS sys(Sys_flt, fl_gr, a,  b)
+    CASE s_fle:    RESULTIS sys(Sys_flt, fl_le, a,  b)
+    CASE s_fge:    RESULTIS sys(Sys_flt, fl_ge, a,  b)
+
+    CASE s_mul:    RESULTIS a   *    b
+    CASE s_add:    RESULTIS a   +    b
+    CASE s_sub:    RESULTIS a   -    b
     CASE s_lshift: RESULTIS a   <<   b
     CASE s_rshift: RESULTIS a   >>   b
     CASE s_logor:  RESULTIS a   |    b
@@ -2957,11 +3476,19 @@ LET evalconst(x) = VALOF
     CASE s_neqv:   RESULTIS a  NEQV  b
     CASE s_div:    UNLESS b=0 RESULTIS a   /    b
     CASE s_rem:    UNLESS b=0 RESULTIS a  REM   b
-       
-    DEFAULT:
+    CASE s_eq:     RESULTIS a = b
+    CASE s_ne:     RESULTIS a ~= b
+    CASE s_ls:     RESULTIS a < b
+    CASE s_gr:     RESULTIS a > b
+    CASE s_le:     RESULTIS a <= b
+    CASE s_ge:     RESULTIS a >= b
+
+    CASE s_cond:   RESULTIS a -> b, evalconst(h4!x)
+   
+    DEFAULT:       ENDCASE
   }
 
-  trnerr("Error in manifest expression")
+  trnerr("Error in manifest expression, op = %s", opname(h1!x))
   RESULTIS 0
 }
 
@@ -3019,7 +3546,7 @@ AND assign(x, y) BE
                    { load(h3!x)
                      IF offset DO
                      { out2(s_ln, offset)
-                       out1(s_plus)
+                       out1(s_add)
                      }
                      out1(s_rv)
                      out1(s_neqv)
@@ -3032,7 +3559,7 @@ AND assign(x, y) BE
                      load(h3!x)
                      IF offset DO
                      { out2(s_ln, offset)
-                       out1(s_plus)
+                       out1(s_add)
                      }
                      out1(s_rv)
                      out1(s_neqv)
@@ -3043,7 +3570,7 @@ AND assign(x, y) BE
                    load(h3!x)
                    IF offset DO
                    { out2(s_ln, offset)
-                     out1(s_plus)
+                     out1(s_add)
                    }
                    out1(s_stind)
 //writef("store in x!%n*n", offset)
@@ -3139,11 +3666,11 @@ AND xref(x, kstr, n, op) BE
 AND prctxt(x) BE IF x DO 
 { LET op = h1!x
   SWITCHON op INTO
-  { DEFAULT:  prctxte(x, 4, 0); RETURN
+  { DEFAULT:  prctxte(x, 7, 0); RETURN
 
     CASE s_fndef:
          writef("LET ")
-         prctxte(h2!x, 5, 0)
+         prctxte(h2!x, 7, 0)
          wrch('(')
          prctxte(h3!x, 7, 0)
          writef(")=..")
@@ -3151,7 +3678,7 @@ AND prctxt(x) BE IF x DO
 
     CASE s_rtdef:
          writef("LET ")
-         prctxte(h2!x, 5, 0)
+         prctxte(h2!x, 7, 0)
          wrch('(')
          prctxte(h3!x, 7, 0)
          writef(")BE..")
@@ -3159,29 +3686,29 @@ AND prctxt(x) BE IF x DO
 
     CASE s_valdef:
          writef("LET ")
-         prctxte(h2!x, 5, 0)
+         prctxte(h2!x, 6, 0)
          writef("=")
-         prctxte(h3!x, 5, 0)
+         prctxte(h3!x, 6, 0)
          RETURN
 
     CASE s_vecdef:
          writef("LET ")
-         prctxte(h2!x, 5, 0)
+         prctxte(h2!x, 6, 0)
          writef("=VEC ")
-         prctxte(h3!x, 5, 0)
+         prctxte(h3!x, 6, 0)
          RETURN
 
     CASE s_constdef:
-         prctxte(h3!x, 5, 0)
+         prctxte(h3!x, 6, 0)
          writef("=")
-         prctxte(h4!x, 5, 0)
+         prctxte(h4!x, 6, 0)
          RETURN
 
     CASE s_let:
          writef("LET ")
-         prctxtd(h2!x, 2)
+         prctxtd(h2!x, 6)
          writef("; ")
-         prctxtc(h3!x, 2)
+         prctxtc(h3!x, 6)
          RETURN
  
     CASE s_static:    writef("STATIC..");    RETURN
@@ -3189,27 +3716,27 @@ AND prctxt(x) BE IF x DO
     CASE s_manifest:  writef("MANIFEST..");  RETURN
 
     CASE s_ass:
-         prctxte(h2!x, 4, 0)
+         prctxte(h2!x, 6, 0)
          writef(":=")
-         prctxte(h3!x, 4, 0)
+         prctxte(h3!x, 6, 0)
          RETURN
  
     CASE s_rtap:
-         prctxte(h2!x, 2, 12)
+         prctxte(h2!x, 6, 12)
          writef("(")
-         prctxte(h3!x, 3, 0)
+         prctxte(h3!x, 6, 0)
          writef(")")
          RETURN
  
     CASE s_goto:
          writef("GOTO ")
-         prctxte(h2!x, 4, 0)
+         prctxte(h2!x, 6, 0)
          RETURN
  
     CASE s_colon:
-         prctxte(h2!x, 2, 0)
+         prctxte(h2!x, 6, 0)
          writef(":")
-         prctxt(h3!x, 3)
+         prctxt(h3!x, 6)
          RETURN
  
     CASE s_unless:
@@ -3221,19 +3748,19 @@ AND prctxt(x) BE IF x DO
                 op=s_until->"UNTIL ",
                 "WHILE "
                )
-         prctxte(h2!x, 4, 0)
+         prctxte(h2!x, 6, 0)
          writef(" DO ")
-         prctxtc(h3!x, 3)
+         prctxtc(h3!x, 6)
          RETURN
 
  
     CASE s_test:
          writef("TEST ")
-         prctxte(h2!x, 4, 0)
+         prctxte(h2!x, 6, 0)
          writef(" THEN ")
-         prctxtc(h3!x, 2)
+         prctxtc(h3!x, 6)
          writef(" ELSE ")
-         prctxtc(h4!x, 2)
+         prctxtc(h4!x, 6)
          RETURN
  
     CASE s_loop:
@@ -3258,24 +3785,24 @@ AND prctxt(x) BE IF x DO
  
     CASE s_resultis:
          writef("RESULTIS ")
-         prctxte(h2!x, 4, 0)
+         prctxte(h2!x, 6, 0)
          RETURN
  
     CASE s_repeatwhile:
     CASE s_repeatuntil:
-         prctxtc(h2!x, 4)
+         prctxtc(h2!x, 6)
          writef(op=s_repeatwhile -> " REPEATWHILE ", " REPEATUNTIL ")
-         prctxte(h3!x, 4, 0)
+         prctxte(h3!x, 6, 0)
          RETURN
  
     CASE s_repeat:
-         prctxtc(h2!x, 4)
+         prctxtc(h2!x, 6)
          writef(" REPEAT")
          RETURN
  
     CASE s_case:
          writef("CASE ")
-         prctxte(h2!x, 4, 0)
+         prctxte(h2!x, 6, 0)
          writef(":.. ")
          RETURN
  
@@ -3289,25 +3816,25 @@ AND prctxt(x) BE IF x DO
  
     CASE s_switchon:
          writef("SWITCHON ")
-         prctxte(h2!x, 4, 0)
+         prctxte(h2!x, 6, 0)
          writef(" INTO..")
          RETURN
  
     CASE s_for:
          writef("FOR ")
-         prctxte(h2!x, 4, 0)
+         prctxte(h2!x, 6, 0)
          writef("=")
-         prctxte(h3!x, 4, 0)
+         prctxte(h3!x, 6, 0)
          writef(" TO ")
-         prctxte(h4!x, 4, 0)
-         IF h5!x DO { writef(" BY "); prctxte(h5!x, 4, 0) }
+         prctxte(h4!x, 6, 0)
+         IF h5!x DO { writef(" BY "); prctxte(h5!x, 6, 0) }
          writef(" DO..")
          RETURN
  
     CASE s_seq:
-         prctxtc(h2!x, 4)
+         prctxtc(h2!x, 6)
          writef(";")
-         prctxtc(h3!x, 4)
+         prctxtc(h3!x, 6)
          RETURN
   }
 }
@@ -3405,9 +3932,15 @@ AND prctxte(x, d, prec) BE IF x DO
 
   SWITCHON op INTO
   { DEFAULT: ENDCASE
-    CASE s_mult: CASE s_div: CASE s_rem:
+    CASE s_mul: CASE s_div: CASE s_rem:
          prctxte(h2!x, d-1, 9)
-         writef(op=s_mult->"**", op=s_div->"/", " MOD ")
+         writef(op=s_mul->"**", op=s_div->"/", " MOD ")
+         prctxte(h3!x, d-1, 9)
+         RETURN
+
+    CASE s_fmul: CASE s_fdiv:
+         prctxte(h2!x, d-1, 9)
+         writef(op=s_mul->"#**", "#/")
          prctxte(h3!x, d-1, 9)
          RETURN
   }
@@ -3416,19 +3949,25 @@ AND prctxte(x, d, prec) BE IF x DO
 
   SWITCHON op INTO
   { DEFAULT: ENDCASE
-    CASE s_plus:
-    CASE s_minus:
+    CASE s_add:
+    CASE s_sub:
          prctxte(h2!x, d-1, 8)
-         writef(op=s_plus->"+","-")
+         writef(op=s_add->"+","-")
          prctxte(h3!x, d-1, 8)
          RETURN
 
-    CASE s_neg:
-    CASE s_abs:
-         writef(op=s_neg->"-","ABS ")
+    CASE s_fadd:
+    CASE s_fsub:
          prctxte(h2!x, d-1, 8)
+         writef(op=s_fadd->"#+","#-")
+         prctxte(h3!x, d-1, 8)
          RETURN
 
+    CASE s_fneg:
+    CASE s_fabs:
+         writef(op=s_fneg->"#-","#ABS ")
+         prctxte(h2!x, d-1, 8)
+         RETURN
   }
 
   IF prec>=8 DO { wrch('('); prctxte(x, d, 0); wrch(')'); RETURN }
@@ -3440,14 +3979,34 @@ AND prctxte(x, d, prec) BE IF x DO
          writef(op=s_eq->"=","~=")
          prctxte(h3!x, d-1, 7)
          RETURN
+
+    CASE s_feq: CASE s_fne:
+         prctxte(h2!x, d-1, 7)
+         writef(op=s_feq->"#=","#~=")
+         prctxte(h3!x, d-1, 7)
+         RETURN
+
     CASE s_ls: CASE s_gr:
          prctxte(h2!x, d-1, 7)
          writef(op=s_ls->"<",">")
          prctxte(h3!x, d-1, 7)
          RETURN
+
+    CASE s_fls: CASE s_fgr:
+         prctxte(h2!x, d-1, 7)
+         writef(op=s_fls->"#<","#>")
+         prctxte(h3!x, d-1, 7)
+         RETURN
+
     CASE s_le: CASE s_ge:
          prctxte(h2!x, d-1, 7)
          writef(op=s_le->"<=",">=")
+         prctxte(h3!x, d-1, 7)
+         RETURN
+
+    CASE s_fle: CASE s_fge:
+         prctxte(h2!x, d-1, 7)
+         writef(op=s_fle->"#<=","#>=")
          prctxte(h3!x, d-1, 7)
          RETURN
   }
@@ -3549,5 +4108,9 @@ AND prctxte(x, d, prec) BE IF x DO
 AND out1(x) BE wrn(x)
  
 AND out2(x, y) BE { out1(x); out1(y) }
+ 
+AND out3(x, y, z) BE { out1(x); out1(y); out1(z) }
+ 
+AND out4(x, y, z, t) BE { out1(x); out1(y); out1(z); out1(t) }
  
 AND outstring(s) BE FOR i = 0 TO s%0 DO out1(s%i)

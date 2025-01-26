@@ -3,6 +3,12 @@ This is a compiler and interpreter for the language VSPL
 implemented in BCPL
 
 (c) Martin Richards 20 March 2003
+
+History
+
+07/08/2021
+Updated
+
 */
 
 
@@ -85,7 +91,7 @@ LET start() = VALOF
   treevec, labv, refv, mem := 0, 0, 0, 0
   progstream, tostream := 0, 0
    
-  writef("*nVSPL (26 Apl 2012) BCPL Version*n")
+  writef("*nVSPL (7 Aug 2021) BCPL Version*n")
  
   IF rdargs(argform, argv, 50)=0 DO fatalerr("Bad arguments*n")
 
@@ -161,7 +167,7 @@ LET start() = VALOF
       rv!0 := 0        // result register
       rv!1 := stack    // p pointer
       rv!2 := stack+2  // sp
-      rv!3 := codev    // pc
+      rv!3 := codev    // pc (=100)
       rv!4 := maxint   // count
 
       sv!0, sv!1, sv!2 := 0, 0, 0
@@ -204,7 +210,24 @@ LET lex() BE
                 }
                 token := Num
                 RETURN
- 
+
+    CASE '#':   lexval := 0  // Added 9/08/2021
+                { rch()
+		  IF  '0'<=ch<='9' DO
+                  { lexval := (lexval<<4) + ch - '0'
+		    LOOP
+                  }
+		  IF  'A'<=ch<='F' DO
+                  { lexval := (lexval<<4) + ch - 'A' + 10
+		    LOOP
+                  }
+		  IF  'a'<=ch<='f' DO
+                  { lexval := (lexval<<4) + ch - 'a' + 10
+		    LOOP
+                  }
+                  token := Num
+                  RETURN
+		} REPEAT
     CASE 'a':CASE 'b':CASE 'c':CASE 'd':CASE 'e':
     CASE 'f':CASE 'g':CASE 'h':CASE 'i':CASE 'j':
     CASE 'k':CASE 'l':CASE 'm':CASE 'n':CASE 'o':
@@ -692,16 +715,22 @@ LET rcom() = VALOF
                  a := rexp(0)
  
                  IF token=Assign DO
-                 { UNLESS h1!a=Name | h1!a=Vecap | h1!a=Ind DO
+                 { // a is the LHS of an assignment and so must have
+		   // be one of the following forms.
+		   UNLESS h1!a=Name | h1!a=Vecap | h1!a=Ind DO
                      synerr("Bad assigment statement")
                    RESULTIS mk4(Assign, a, rnexp(0), ln)
                  }
  
                  IF h1!a=Fnap DO
-                 { h1!a := Rtap
+                 { // If a is syntactically a function call turn it into
+		   // a routine call.
+		   h1!a := Rtap
                    RESULTIS a
                  }
- 
+
+                 // If the command was not an assignment or a routine call
+		 // it can only be a sys or printf command.
                  UNLESS h1!a=Sys | h1!a=Printf DO
                    synerr("Error in command")
                  RESULTIS a
@@ -872,6 +901,7 @@ AND trprog(x) BE
   comline, procname, labnumber := 1, 0, 1
   ssp := 2
 
+  // Place the three initial instructions starting at codep (=100)
   outfl(Laddr, 1); ssp := ssp+1  // 1 = lab number of start
   outfn(Fnap, 3);  ssp := ssp-1
   outf(Halt)
@@ -928,22 +958,23 @@ LET trcom(x, next) BE
              assign(h2!x, h3!x)
              trnext(next)
              RETURN
- 
+
+// Note that if a function is called it sets res but this value is ignored
     CASE Rtap:
            { LET s = ssp
              comline := h4!x
              ssp := ssp+3
              outfn(Stack, ssp)
-             loadlist(h3!x)
-             load(h2!x)
-             outfn(Rtap, s+1)
+             loadlist(h3!x)      // Load the arguments
+             load(h2!x)          // Load the function entry address
+             outfn(Rtap, s+1)    // s+1 is the p pointer increment
              ssp := s
              trnext(next)
              RETURN
            }
  
-    CASE Printf:
-    CASE Sys:
+    CASE Printf:  // Printf does not set res
+    CASE Sys:     // Sys may set res, but this is ignore if called as a command
            { LET s = ssp
              LET op = h1!x
              comline := h3!x
@@ -1254,24 +1285,27 @@ LET load(x) BE
     CASE Valof: { LET rl = resultlab
                   resultlab := nextlab()
                   trcom(h2!x, 0)
+		  // Note that resultis set res then jumps to resultlab
                   outlab(resultlab)
                   outfn(Stack, ssp)
                   outf(Lres); ssp := ssp+1
                   resultlab := rl
                   RETURN
                 }
- 
+
+// Note that if a routine is called res is not set so the result is undefined.
     CASE Fnap:  { LET s = ssp
-                  ssp := ssp+3
+                  ssp := ssp+3      // Leave space for old p, ret addr, entry addr
                   outfn(Stack, ssp)
-                  loadlist(h3!x)
-                  load(h2!x)
+                  loadlist(h3!x)    // Load the arguments
+                  load(h2!x)        // Load the entry address
                   outfn(Fnap, s+1)
-                  outf(Lres); ssp := s+1
+                  outf(Lres); ssp := s+1 // Cause res to be loaded onto the stack
                   RETURN
                 }
-    CASE Printf:
-    CASE Sys:
+
+    CASE Printf: // Printf does note set res, so the value is undefined
+    CASE Sys:    // Sys may set res causing the result to be defined
            { LET s = ssp
              LET op = h1!x
              comline := h3!x
@@ -1484,55 +1518,82 @@ AND interpret(regs, mem) = VALOF
       CASE Ll:      sp := sp+1; sp!0 := mem!(!pc); pc := pc+1; LOOP
       CASE Sp:      pp!(!pc) := sp!0; sp := sp-1;  pc := pc+1; LOOP
       CASE Sl:      mem!(!pc):= sp!0; sp := sp-1;  pc := pc+1; LOOP
+      CASE Lres:    sp := sp+1; sp!0 := res;                   LOOP
+      CASE Ind:     sp!0 :=  mem!(sp!0);                       LOOP
+      CASE Neg:     sp!0 :=  -  sp!0;                          LOOP
+      CASE Not:     sp!0 := NOT sp!0;                          LOOP
+      CASE Stind:   sp := sp-2; mem!(sp!2) := sp!1;            LOOP
+      CASE Vecap:   sp := sp-1; sp!0 := mem!(sp!0 + sp!1);     LOOP
+      CASE Mul:     sp := sp-1; sp!0 := sp!0  *  sp!1;         LOOP
+      CASE Div:     sp := sp-1; sp!0 := sp!0  /  sp!1;         LOOP
+      CASE Mod:     sp := sp-1; sp!0 := sp!0 MOD sp!1;         LOOP
+      CASE Add:     sp := sp-1; sp!0 := sp!0  +  sp!1;         LOOP
+      CASE Sub:     sp := sp-1; sp!0 := sp!0  -  sp!1;         LOOP
+      CASE Eq:      sp := sp-1; sp!0 := sp!0  =  sp!1;         LOOP
+      CASE Ne:      sp := sp-1; sp!0 := sp!0 ~=  sp!1;         LOOP
+      CASE Le:      sp := sp-1; sp!0 := sp!0 <=  sp!1;         LOOP
+      CASE Ge:      sp := sp-1; sp!0 := sp!0 >=  sp!1;         LOOP
+      CASE Lt:      sp := sp-1; sp!0 := sp!0  <  sp!1;         LOOP
+      CASE Gt:      sp := sp-1; sp!0 := sp!0  >  sp!1;         LOOP
+      CASE Lsh:     sp := sp-1; sp!0 := sp!0 <<  sp!1;         LOOP
+      CASE Rsh:     sp := sp-1; sp!0 := sp!0 >>  sp!1;         LOOP
+      CASE And:     sp := sp-1; sp!0 := sp!0  &  sp!1;         LOOP
+      CASE Or:      sp := sp-1; sp!0 := sp!0  |  sp!1;         LOOP
+      CASE Xor:     sp := sp-1; sp!0 := sp!0 XOR sp!1;         LOOP
+      CASE Jt:      sp := sp-1; pc := sp!1->!pc+mem,pc+1;      LOOP
+      CASE Jf:      sp := sp-1; pc := sp!1->pc+1,!pc+mem;      LOOP
+      CASE Resultis:sp := sp-1; res := sp!1
+      CASE Jump:    pc := !pc+mem;                             LOOP
+      CASE Stack:   sp := pp + !pc; pc := pc+1;                LOOP
 
-      CASE Rtap:
-      CASE Fnap:  { LET opp, retaddr = pp, pc+1
-                    pp, pc := pp+!pc, sp!0+mem
-                    pp!0, pp!1, pp!2 := opp-mem, retaddr-mem, pc-mem
-                    sp := pp+2
+
+      CASE Fnrn:  { LET npp, npc = pp!0+mem, pp!1+mem
+                    res := sp!0  // Place the function result in res
+                    sp := pp-1
+                    pp, pc := npp, npc
                     LOOP
                   }
 
-      CASE Lres:    sp := sp+1; sp!0 := res;                LOOP
-
-      CASE Fnrn:    res := sp!0
       CASE Rtrn:  { LET npp, npc = pp!0+mem, pp!1+mem
                     sp := pp-1
                     pp, pc := npp, npc
                     LOOP
                   }
-      CASE Ind:     sp!0 :=  mem!(sp!0);                   LOOP
-      CASE Neg:     sp!0 :=  -  sp!0;                      LOOP
-      CASE Not:     sp!0 := NOT sp!0;                      LOOP
-      CASE Stind:   sp := sp-2; mem!(sp!2) := sp!1;        LOOP
-      CASE Vecap:   sp := sp-1; sp!0 := mem!(sp!0 + sp!1); LOOP
-      CASE Mul:     sp := sp-1; sp!0 := sp!0  *  sp!1;     LOOP
-      CASE Div:     sp := sp-1; sp!0 := sp!0  /  sp!1;     LOOP
-      CASE Mod:     sp := sp-1; sp!0 := sp!0 REM sp!1;     LOOP
-      CASE Add:     sp := sp-1; sp!0 := sp!0  +  sp!1;     LOOP
-      CASE Sub:     sp := sp-1; sp!0 := sp!0  -  sp!1;     LOOP
-      CASE Eq:      sp := sp-1; sp!0 := sp!0  =  sp!1;     LOOP
-      CASE Ne:      sp := sp-1; sp!0 := sp!0 ~=  sp!1;     LOOP
-      CASE Le:      sp := sp-1; sp!0 := sp!0 <=  sp!1;     LOOP
-      CASE Ge:      sp := sp-1; sp!0 := sp!0 >=  sp!1;     LOOP
-      CASE Lt:      sp := sp-1; sp!0 := sp!0  <  sp!1;     LOOP
-      CASE Gt:      sp := sp-1; sp!0 := sp!0  >  sp!1;     LOOP
-      CASE Lsh:     sp := sp-1; sp!0 := sp!0 <<  sp!1;     LOOP
-      CASE Rsh:     sp := sp-1; sp!0 := sp!0 >>  sp!1;     LOOP
-      CASE And:     sp := sp-1; sp!0 := sp!0  &  sp!1;     LOOP
-      CASE Or:      sp := sp-1; sp!0 := sp!0  |  sp!1;     LOOP
-      CASE Xor:     sp := sp-1; sp!0 := sp!0 XOR sp!1;     LOOP
-      CASE Jt:      sp := sp-1; pc := sp!1->!pc+mem,pc+1;  LOOP
-      CASE Jf:      sp := sp-1; pc := sp!1->pc+1,!pc+mem;  LOOP
-      CASE Resultis:sp := sp-1; res := sp!1
-      CASE Jump:    pc := !pc+mem;                         LOOP
-      CASE Stack:   sp := pp + !pc; pc := pc+1;            LOOP
-      CASE Printf:  sp := pp + !pc - 1
-                    pc := pc+1
-                    printf(mem, sp!1, sp+2)
+
+      CASE Rtap:
+      CASE Fnap:  { LET opp, retaddr = pp, pc+1
+                    pp, pc := pp+!pc, sp!0+mem
+		    // The first three words of a stack frame hold:
+		    // the old p pointer,
+		    // the return address, and
+		    // the function entry address.
+		    // The word before the entry address hold a pointer to
+		    // the name of the function.
+                    pp!0, pp!1, pp!2 := opp-mem, retaddr-mem, pc-mem
+                    sp := pp+2
                     LOOP
-      CASE Sys:     sp := pp + !pc - 1
-                    pc := pc+1
+                  }
+
+      CASE Printf:  // !pc is the position in the current stack frame of
+                    // the printf arguments
+                    sp := pp + !pc - 1 // The value of ss on return
+                    pc := pc+1         // The return address
+		    //sawritef("Printf: pp=%n sp=%n args %n %n %n*n",
+		    //          pp-mem, sp-mem, sp!1, sp!2, sp!3)
+		    //abort(1012)
+                    printf(mem, sp!1, sp+2) // mem, format, args
+		    //abort(1013)
+                    LOOP
+
+      CASE Sys:     // !pc is the position in the current stack frame of
+                    // the sys arguments
+                    sp := pp + !pc - 1 // The value of ss on return
+                    pc := pc+1         // The return address
+      //sawritef("Sys*n")
+      //sawritef("Sys: args %n %n pp=%n sp=%n*n",
+      //          sp!1, sp!2, pp-mem, sp-mem)
+      //abort(1011)
+      //LOOP
                     SWITCHON sp!1 INTO
                     { DEFAULT: writef("*nBad sys(%n,...) call*n", sp!1)
                                retcode  := 2;               BREAK   
@@ -1548,9 +1609,10 @@ AND interpret(regs, mem) = VALOF
   RESULTIS retcode
 }
 
-AND printf(mem, form, p) BE
-{ LET fmt = form+mem
+AND printf(mem, formatstr, p) BE
+{ LET fmt = formatstr + mem
   LET i = 0
+  // The possible substitution items are: % <digits> followed by d, s, x or c 
 
   { LET k = fmt%i
     i := i+1
@@ -1567,6 +1629,7 @@ AND printf(mem, form, p) BE
         CASE 'd': writed  (!p,     n); p := p+1; LOOP
         CASE 's': wrs     (mem+!p, n); p := p+1; LOOP
         CASE 'x': writehex(!p,     n); p := p+1; LOOP
+        CASE 'c': wrch    (!p);        p := p+1; LOOP
       }
     }
     wrch(k)

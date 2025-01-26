@@ -10,7 +10,7 @@ GET "libhdr"
 
 LET start() = VALOF
 { LET tostream, precise = 0, FALSE
-  LET days, msecs = 0, 0
+  LET days, msecs, dummy = 0, 0, 0
   LET argv = VEC 50
   LET v = VEC 14
 

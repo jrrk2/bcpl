@@ -50,9 +50,9 @@ GLOBAL {
 }
 
 // Insert the graphics library
-MANIFEST { graphicsgbase=400 }
+//MANIFEST { g_grbase=450 }
 
-GET "graphics"
+GET "graphics.h"
 GET "graphics.b"
 
 LET start() = VALOF
@@ -86,7 +86,7 @@ LET start() = VALOF
 
   sawritef("*nConverting %s to %s (%nx%n)*n", fromname, toname, xsize, ysize)
 
-  UNLESS opengraphics(xsize, ysize) DO
+  UNLESS opengraphics(xsize, ysize, mode8bit) DO
   { writef("Unable to open the graphics library*n")
     GOTO fin
   }
@@ -111,11 +111,11 @@ AND colour(ch) = VALOF SWITCHON ch INTO
   CASE 'B': RESULTIS col_black-10
   CASE 'S': RESULTIS col_black-20
 
-  CASE 'M': RESULTIS col_r
-  CASE 'N': RESULTIS col_g
-  CASE 'G': RESULTIS col_b+20
-  CASE 'E': RESULTIS col_b
-  CASE 'C': RESULTIS col_rb
+  CASE 'M': RESULTIS col_red
+  CASE 'N': RESULTIS col_green
+  CASE 'G': RESULTIS col_blue+20
+  CASE 'E': RESULTIS col_blue
+  CASE 'C': RESULTIS col_majenta
 }
 
 AND scangraphdata(name, firstpass) BE
@@ -130,6 +130,18 @@ AND scangraphdata(name, firstpass) BE
   }
 
   selectinput(fromstream)
+
+  // Process statements of the form:
+  // #T text
+  // #B rt mt weight
+  // #S rt mt weight
+  // #M rt mt weight
+  // #A rt note amp
+  // #N rt mt weight notestr
+  // #+ oer oem erate
+  // #- oer oem erate
+  // #E oer oem erate
+  
 
   { LET ch = rdch()
 sw:
@@ -159,12 +171,12 @@ sw:
               { ch := rdch()
                 IF ch='*n' | ch=endstreamch BREAK
                 UNLESS firstpass DO
-                { plotch(ch)
+                { drawch(ch)
 //sawritef("#T ch='%c'*n", ch)
                 }
               } REPEAT
 
-              plotch('*n')
+              drawch('*n')
               GOTO sw
 
             CASE 'B':  // #B rt mt weight
@@ -186,7 +198,8 @@ sw:
                              IF mt>maxmt DO maxmt := mt
                            }
                    }
-               ELSE { wrpixel33(rtscale(rt), mtscale(mt), colour(ch))
+               ELSE { currcolour := colour(ch)
+	              drawpoint33(rtscale(rt), mtscale(mt))
                     }
                LOOP
                         
@@ -206,7 +219,8 @@ sw:
                    }
                ELSE { amp := amp/50
                       IF amp>255 DO amp := 255
-                      wrpixel33(rtscale(rt), notescale(note), amp)
+		      currcolour := amp
+                      drawpoint33(rtscale(rt), notescale(note))
                     }
                LOOP
             }
@@ -229,7 +243,8 @@ sw:
                    }
                ELSE { LET x  = rtscale(rt)
                       LET y  = mtscale(mt)
-                      wrpixel33(x,  y, colour(ch))
+		      currcolour := colour(ch)
+                      drawpoint33(x,  y)
                     }
                LOOP
                         
@@ -255,9 +270,14 @@ sw:
                            }
                    }
                ELSE { LET r,m = rtscale(oer), mtscale(oem)
-                      //wrpixel33(r, m+20, colour('E'))
-                      IF ch='+' DO wrpixel33(r, m+30, colour(ch))
-                      IF ch='-' DO wrpixel33(r, m+10, colour(ch))
+	              //currcolour := colour('E')
+                      //drawpoint33(r, m+20)
+                      IF ch='+' DO { currcolour := colour(ch)
+		                     drawpoint33(r, m+30)
+				   }
+                      IF ch='-' DO { currcolour := colour(ch)
+                                     drawpoint33(r, m+10)
+				   }
                     }
                LOOP
           }
@@ -285,35 +305,37 @@ AND mtscale1(mt) = muldiv(mt-minmt, ysize, mtrange)
 AND notescale(note) = (ysize*note)/127
 
 AND drawgraph(xsize, ysize) BE
-{ FOR x = 0 TO xsize-1 DO
-  { wrpixel(x, 0, 255)
-    wrpixel(x, 1, 255)
-    wrpixel(x, ysize-1, 255)
-    wrpixel(x, ysize-2, 255)
+{ currcolour := col_black
+  FOR x = 0 TO xsize-1 DO
+  { drawpoint(x, 0)
+    drawpoint(x, 1)
+    drawpoint(x, ysize-1)
+    drawpoint(x, ysize-2)
   }
   FOR y = 0 TO ysize-1 DO
-  { wrpixel(0, y, 255)
-    wrpixel(1, y, 255)
-    wrpixel(xsize-1, y, 255)
-    wrpixel(xsize-2, y, 255)
+  { drawpoint(0, y)
+    drawpoint(1, y)
+    drawpoint(xsize-1, y)
+    drawpoint(xsize-2, y)
   }
 
-  plotx, ploty, plotcolour := 10, 260, colour('+'); plotch('+')
-  plotx, ploty, plotcolour := 10, 240, colour('-'); plotch('-')
-  plotx, ploty, plotcolour := 10, 220, colour('B'); plotch('B')
-  plotx, ploty, plotcolour := 10, 200, colour('S'); plotch('S')
-  plotx, ploty, plotcolour := 10, 180, colour('M'); plotch('M')
-  plotx, ploty, plotcolour := 10, 160, colour('N'); plotch('N')
-  plotx, ploty, plotcolour := 10, 140, colour('G'); plotch('G')
-  plotx, ploty, plotcolour := 10, 120, colour('E'); plotch('E')
-  plotx, ploty, plotcolour := 10, 100, colour('C'); plotch('C')
+  moveto(10, 260); currcolour := colour('+'); drawch('+')
+  moveto(10, 240); currcolour := colour('-'); drawch('-')
+  moveto(10, 220); currcolour := colour('B'); drawch('B')
+  moveto(10, 200); currcolour := colour('S'); drawch('S')
+  moveto(10, 180); currcolour := colour('M'); drawch('M')
+  moveto(10, 160); currcolour := colour('N'); drawch('N')
+  moveto(10, 140); currcolour := colour('G'); drawch('G')
+  moveto(10, 120); currcolour := colour('E'); drawch('E')
+  moveto(10, 100); currcolour := colour('C'); drawch('C')
 
   FOR x = 0 TO xsize DO
-  { wrpixel33(x, 1, 255*x/xsize)
-    wrpixel33(x, 4, 255*x/xsize)
+  { currcolour := 255*x/xsize
+    drawpoint33(x, 1)
+    drawpoint33(x, 4)
   }
 
-  plotcolour := col_r
+  currcolour := col_red
   moveto(10, ysize-20)
 
   scangraphdata(fromname, TRUE)
@@ -323,19 +345,19 @@ AND drawgraph(xsize, ysize) BE
   rtrange := maxrt - minrt
   mtrange := maxmt - minmt
 
-  plotcolour := col_r
+  currcolour := col_red
   moveto(10, ysize-20)
 
   scangraphdata(fromname, FALSE)
 //abort(1000)
 
-  IF title DO plotstr(title)
+  IF title DO drawstr(title)
 
   //FOR c = 32 TO 127 DO
-  //{ IF c='A' | c='a' | c='0' DO plotch('*n')
-  //  plotch(c)
+  //{ IF c='A' | c='a' | c='0' DO drawch('*n')
+  //  drawch(c)
   //}
-  //plotstr("*nHello World*nLast line*n")
+  //plostr("*nHello World*nLast line*n")
 
   wrgraph(toname) //canvas, pixeldatasize, xsize, ysize)
 }

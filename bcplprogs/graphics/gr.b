@@ -1,6 +1,6 @@
 SECTION "GRAPHICS"
 
-// This test the graphics features of the BCPL Cintcode system
+// This tests the graphics features of the BCPL Cintcode system
 // only available under Windows CE -- Now obsolete
 
 GET "libhdr"

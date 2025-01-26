@@ -1,9 +1,18 @@
-// Test line numbers in error messages
-LET start() = VALOF
-{
-  ENDCASE // Should be line 4
+GET "libhdr"
 
-
-  BREAK   // Should be line 7
-  a := b  // Should be line 8
+LET start() = VALOF
+{ writef("Test conversion from 64 to 32 bit floating point*n")
+  writef("It should only be run under 64 bit BCPL*n")
+  writef("The current system is %n bit*n*n", BITSPERBCPLWORD)
+  tst(0.0)
+  tst(1.0)
+  tst(-1.0)
+  tst(1.2345)
+  tst(-1.2345)
+  RESULTIS 0
+}
+
+AND tst(x) BE
+{ LET x32 = sys(Sys_flt, fl_64to32, x)
+  writef("%64b*n%64b*n*n", x, x32)
 }

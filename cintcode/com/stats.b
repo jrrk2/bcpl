@@ -1,7 +1,12 @@
 // (c) M. Richards  Copyright 16 August 2000
 
 /*
-1/12/2005
+History
+
+06/01/2020
+Updated to deal with FLTOP, MW, SELLD and SELST.
+
+01/12/2005
 Changed to use 11 character section and function names.
 Changed argument format to: "TO/K,STATS/S,PROFILE/S,ANALYSIS/S,HELP/S"
 The default TO stream for the options STATS, PROFILE and ANALYSIS are
@@ -30,59 +35,72 @@ Updated to use sys(Sys_setcount, maxint) to select the slow interpreter
 **
 ** stats stats                 Send instruction frequencies
 **                             to file STATS (by default),
-**                             or
+**
 ** stats profile               Send detailed profile info to file
 **                             to file PROFILE (by default),
-**                             or
+**
 ** stats analysis              Generate statistical analysis
 **                             to file ANALYSIS (by default).
 **
-** Only one of the STATS, PROFILE or ANALYSIS may be used at a time,
+** Only one of the ON, STATS, PROFILE or ANALYSIS may be used at a time,
 ** and TO may only be used with STATS, PROFILE and ANALYSIS.
 */
 
 SECTION "STATS"
 
 GET "libhdr"
+GET "bcplfecg.h"
 
 MANIFEST { disupb=26; typeupb=8  }
 
 GLOBAL {
-s_lpdis:200;   d_lpdis:230
-s_spdis:201;   d_spdis:231
-s_grds:202;    d_grds:232
-s_gwrs:203;    d_gwrs:233
-s_kdis:204;    d_kdis:234
-s_rfdis:205;   d_rfdis:235
-s_rbdis:206;   d_rbdis:236
-s_idis:207;    d_idis:237
-s_lndis:208;   d_lndis:238
-s_lmdis:209;   d_lmdis:239
+s_lpdis:ug;   d_lpdis
+s_spdis;   d_spdis
+s_grds;    d_grds
+s_gwrs;    d_gwrs
+s_kdis;    d_kdis
+s_rfdis;   d_rfdis
+s_rbdis;   d_rbdis
+s_idis;    d_idis
+s_lndis;   d_lndis
+s_lmdis;   d_lmdis
 
-s_gvecap:210;  d_gvecap:240
-s_pvecap:211;  d_pvecap:241
-s_gbyt:212;    d_gbyt:242
-s_pbyt:213;    d_pbyt:243
-s_adds:214;    d_adds:244
-s_subs:215;    d_subs:245
-s_eops:216;    d_eops:246
-s_fv:217;      d_fv:247
-s_fcount:218;  d_fcount:248
-s_cj:219;      d_cj:249
-s_cj0:220;     d_cj0:250
-s_swb:221;     d_swb:251
-s_swl:222;     d_swl:252
-s_ftype:223;   d_ftype:253
-s_rtn:224;     d_rtn:254
+s_gvecap;  d_gvecap
+s_pvecap;  d_pvecap
+s_gbyt;    d_gbyt
+s_pbyt;    d_pbyt
+s_adds;    d_adds
+s_subs;    d_subs
+s_eops;    d_eops
+s_fv;      d_fv
+s_fcount;  d_fcount
+s_cj;      d_cj
+s_cj0;     d_cj0
+s_swb;     d_swb
+s_swl;     d_swl
+s_ftype;   d_ftype
+s_rtn;     d_rtn
 
-tostream:260
-fcode:270
-freq:271
-pc:272
+tostream
+fcode
+freq
+pc
 
-stats: 280
-profile:281
-analysis:282
+stats
+profile
+analysis
+
+wrfcode
+flopname
+sfname
+prinstr
+gb
+gsb
+gsh
+gh
+gw
+instrtype
+
 }
 
 LET start() = VALOF
@@ -116,27 +134,28 @@ LET start() = VALOF
 
     w("preload bcpl             Preload the program to study.*n")
     w("stats on                 Enable statistics gathering for*n")
-    w("                           just the next command.*n*n")
+    w("                         just the next CLI command after*n")
+    w("                         clearing the tally vector.*n*n")
 
     w("bcpl com/bcpl.b to junk  Execute the command to study.*n*n")
 
     w("interpreter              Select the fast interpreter,*n")
-    w("                           since stats automatically selects*n")
-    w("                           the slow one.*n*n")
+    w("                         since stats automatically selects*n")
+    w("                         the slow one.*n*n")
 
     w("stats stats              Send instruction frequencies*n")
-    w("                           to file: STATS.*n")
-    w("                         or*n")
+    w("                         to file: STATS.*n*n")
+
     w("stats profile            Send detailed profile information*n")
-    w("                           to file: PROFILE.*n")
-    w("                         or*n")
+    w("                         to file: PROFILE.*n*n")
+
     w("stats analysis           Generate statistical analysis*n")
-    w("                           to file: ANALYSIS.*n*n")
+    w("                         to file: ANALYSIS.*n*n")
 
     w("Only one of ON, STATS, PROFILE or ANALYSIS may be specified.*n*n")
 
     w("The TO option can be used to override the default*n")
-    w("destination for the STATS, PROFILE and ANALYSIS options.*n")
+    w("destination for the STATS, PROFILE and ANALYSIS options.*n*n")
 
     RESULTIS 0
   }
@@ -214,7 +233,7 @@ AND statsout(base, tallyv, upb) BE
       freq  := tallyv!i
 
       IF profile DO
-      { writef("+%i5:%i6 ", i-cursect, tallyv!i)
+      { writef("%i7  +%i5:%i6 ", i, i-cursect, tallyv!i)
         prinstr(pc, basebyte+cursect)
         newline()
       }
@@ -254,7 +273,7 @@ AND wrfcode(f) BE
 { LET s = VALOF SWITCHON f&31 INTO
   { DEFAULT:
     CASE  0: RESULTIS "     -     K   LLP     L    LP    SP    AP     A"
-    CASE  1: RESULTIS "     -    KH  LLPH    LH   LPH   SPH   APH    AH"
+    CASE  1: RESULTIS " FLTOP    KH  LLPH    LH   LPH   SPH   APH    AH"
     CASE  2: RESULTIS "   BRK    KW  LLPW    LW   LPW   SPW   APW    AW"
     CASE  3: RESULTIS "    K3   K3G  K3G1  K3GH   LP3   SP3   AP3  L0P3"
     CASE  4: RESULTIS "    K4   K4G  K4G1  K4GH   LP4   SP4   AP4  L0P4"
@@ -283,16 +302,66 @@ AND wrfcode(f) BE
     CASE 27: RESULTIS "  FHOP   LL$  LLL$   RTN  GOTO    J$ ST0P3  L3P4"
     CASE 28: RESULTIS "   JEQ   JNE   JLS   JGR   JLE   JGE ST0P4  L4P3"
     CASE 29: RESULTIS "  JEQ$  JNE$  JLS$  JGR$  JLE$  JGE$ ST1P3  L4P4"
-    CASE 30: RESULTIS "  JEQ0  JNE0  JLS0  JGR0  JLE0  JGE0 ST1P4     -"
-    CASE 31: RESULTIS " JEQ0$ JNE0$ JLS0$ JGR0$ JLE0$ JGE0$     -     -"
+    CASE 30: RESULTIS "  JEQ0  JNE0  JLS0  JGR0  JLE0  JGE0 ST1P4 SELLD"
+    CASE 31: RESULTIS " JEQ0$ JNE0$ JLS0$ JGR0$ JLE0$ JGE0$    MW SELST"
   }
   LET n = f>>5 & 7
   FOR i = 6*n+1 TO 6*(n+1) DO wrch(s%i)
 }
 
+AND flopname(flop) = VALOF SWITCHON flop INTO
+{ DEFAULT:            sawritef("*nUnknown flopname = %n*n", flop)
+                      abort(999)
+                      RESULTIS "Flop %n"
+
+  CASE fl_mk:         RESULTIS "MK"
+  CASE fl_float:      RESULTIS "FLOAT"
+  CASE fl_fix:        RESULTIS "FIX"
+  CASE fl_neg:        RESULTIS "NEG"
+  CASE fl_abs:        RESULTIS "ABS"
+  CASE fl_mul:        RESULTIS "MUL"
+  CASE fl_mod:        RESULTIS "MOD"
+  CASE fl_div:        RESULTIS "DIV"
+  CASE fl_add:        RESULTIS "ADD"
+  CASE fl_sub:        RESULTIS "SUB"
+  CASE fl_eq:         RESULTIS "EQ"
+  CASE fl_ne:         RESULTIS "NE"
+  CASE fl_ls:         RESULTIS "LS"
+  CASE fl_gr:         RESULTIS "GR"
+  CASE fl_le:         RESULTIS "LE"
+  CASE fl_ge:         RESULTIS "GE"
+}
+
+AND sfname(sfop) = VALOF SWITCHON sfop INTO
+{ DEFAULT:       writef("sfname: bad sfop = %n*n", sfop)
+                 RESULTIS "UNKNOWN"
+
+  CASE sf_none:   RESULTIS "NONE"
+  CASE sf_vecap:  RESULTIS "VECAP"
+  CASE sf_fmul:   RESULTIS "FMUL"
+  CASE sf_fdiv:   RESULTIS "FDIV"
+  CASE sf_fmod:   RESULTIS "FMOD"
+  CASE sf_fadd:   RESULTIS "FADD"
+  CASE sf_fsub:   RESULTIS "FSUB"
+  CASE sf_mul:    RESULTIS "MUL"
+  CASE sf_div:    RESULTIS "DIV"
+  CASE sf_mod:    RESULTIS "MOD"
+  CASE sf_add:    RESULTIS "ADD"
+  CASE sf_sub:    RESULTIS "SUB"
+  CASE sf_lshift: RESULTIS "LSHIFT"
+  CASE sf_rshift: RESULTIS "RSHIFT"
+  CASE sf_logand: RESULTIS "LOGAND"
+  CASE sf_logor:  RESULTIS "LOGOR"
+  CASE sf_eqv:    RESULTIS "EQV"
+  CASE sf_xor:    RESULTIS "XOR"
+}
+
 AND prinstr(pc, cursect) BE
 { LET a = 0
+//abort(1001)
   wrfcode(0%pc)
+//  newline()
+//  abort(1000)
   SWITCHON instrtype(0%pc) INTO
   { DEFAULT:
     CASE '0':                                      RETURN
@@ -302,6 +371,25 @@ AND prinstr(pc, cursect) BE
     CASE 'R': a  := pc+1 + gsb(pc+1) - cursect;    ENDCASE
     CASE 'I': pc := pc+1 + 2*gb(pc+1) & #xFFFFFFFE
               a  := pc + gsh(pc) - cursect;        ENDCASE
+
+    CASE 'B': // SWB n dlab
+    CASE 'L': // SWL n dlab
+              pc := (pc+2) & -2 // The next 16 bit aligned address
+	      writef(" %n", gh(pc))                     // Number of cases
+	      writef(" %n", pc+2 + gsh(pc+2) - cursect) // Default address
+              RETURN
+
+    CASE 'F': // FLTOP fop
+              writef(" %s", flopname(gb(pc+1)))
+	      RETURN
+
+    CASE 'X': // SELLD len sh
+              writef(" %n %n", gb(pc+1), gb(pc+2))
+	      RETURN
+
+    CASE 'Y': // SELST sfop len sh
+              writef(" %s %n %n", sfname(gb(pc+1)), gb(pc+2), gb(pc+3))
+	      RETURN
   }
   writef(" %n", a)
 }
@@ -329,15 +417,28 @@ AND gw(pc) = VALOF
   RESULTIS w
 }
 
-AND instrtype(f) = "?0000000000RI10000000000000RIRI*
+AND instrtype(f) = "F0000000000RI10000000000000RIRI*
                   *124111111111111111110000RIRIRIRI*
                   *12411111111111111111000000RIRIRI*
                   *1242222222222222222200000000RIRI*
                   *124000000000000000BL00000000RIRI*
                   *12400000000000000000000000RIRIRI*
-                  *1240000000000020000000000000000?*
-                  *124000000000012000000000000000??"%f
+                  *12400000000000200000000000000004*
+                  *124000000000012000000000000000XY"%f
 
+// Note that f=0 => 255, op zero is an undefined instruction
+// ?   Undefined op, no longer used since all ops 
+// F   FLTOP fop
+// 0   Op with no operands
+// 1   Op with a one byte operand
+// 2   Op with a two byte operand
+// 4   Op with a four byte operand
+// R   Op with a one byte relative address
+// I   Op with a one byte indirect relative address
+// B   SWB
+// L   SWL
+// X   SELLD len sh
+// Y   SELST sfop len sh
 
 
 

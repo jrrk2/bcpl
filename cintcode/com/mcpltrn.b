@@ -91,18 +91,19 @@ s_pand=82;     s_jump=82
 s_por=83;      s_dlab=83
                s_dw=84
 s_inc1=85;     s_db=85
-s_inc4=86;     s_dl=86
+//s_inc4=86;
+               s_dl=86
 s_dec1=87;     s_ds=87
-s_dec4=88
+//s_dec4=88
 
 s_inc1b=90
-s_inc4b=91
+//s_inc4b=91
 s_dec1b=92
-s_dec4b=93
+//s_dec4b=93
 s_inc1a=94
-s_inc4a=95
+//s_inc4a=95
 s_dec1a=96
-s_dec4a=97
+//s_dec4a=97
 
 s_let=100
 s_scope=101
@@ -279,7 +280,7 @@ AND translate(x) BE
    {  LET vid = h2!x
       comline := h4!x
       out1(s_module)
-      outstring(@h3!vid)
+      outstring(@h2!vid)
       x:=h3!x
    }
 
@@ -707,13 +708,13 @@ AND tablabs(x) BE UNTIL x=0 SWITCHON h1!x INTO
              x := h2!x; LOOP
 
    CASE s_inc1a:
-   CASE s_inc4a:
+   //CASE s_inc4a:
    CASE s_dec1a:
-   CASE s_dec4a:
+   //CASE s_dec4a:
    CASE s_inc1b:
-   CASE s_inc4b:
+   //CASE s_inc4b:
    CASE s_dec1b:
-   CASE s_dec4b:
+   //CASE s_dec4b:
 
    CASE s_neg:
    CASE s_bitnot:
@@ -788,13 +789,13 @@ AND expsize(x) = VALOF
       CASE s_comma:  res := res + expsize(h3!x)
 
       CASE s_inc1a:
-      CASE s_inc4a:
+      //CASE s_inc4a:
       CASE s_dec1a:
-      CASE s_dec4a:
+      //CASE s_dec4a:
       CASE s_inc1b:
-      CASE s_inc4b:
+      //CASE s_inc4b:
       CASE s_dec1b:
-      CASE s_dec4b:
+      //CASE s_dec4b:
 
       CASE s_neg:
       CASE s_bitnot:
@@ -958,13 +959,13 @@ AND decldyn(x) BE UNTIL x=0 SWITCHON h1!x INTO
              x := h2!x; LOOP
 
    CASE s_inc1a:
-   CASE s_inc4a:
+   //CASE s_inc4a:
    CASE s_dec1a:
-   CASE s_dec4a:
+   //CASE s_dec4a:
    CASE s_inc1b:
-   CASE s_inc4b:
+   //CASE s_inc4b:
    CASE s_dec1b:
-   CASE s_dec4b:
+   //CASE s_dec4b:
 
    CASE s_neg:
    CASE s_bitnot:
@@ -1001,12 +1002,12 @@ AND transfun(x) BE
    outline()
 
    TEST -2<=h3!t<=0 THEN {  out2(s_fun, h5!x)
-                            outstring(@h3!procname)
+                            outstring(@h2!procname)
                          }
                     ELSE {  // t -> [link, vid, type, lab]
                             out2(s_cfun, h5!x)
-                            outstring(@h3!procname)
-                            outstring(h3!t+2)
+                            outstring(@h2!procname)
+                            outstring(h3!t+1)
                          }
 
    numbargs := maxpatlen(h3!x)
@@ -1464,7 +1465,7 @@ LET trans(x) BE
          {  LET t = findid(fe, extlist)
             UNLESS t=0 | h3!t=0 DO
             {  out2(s_callc, s)
-               outstring(h3!t+2)
+               outstring(h3!t+1)
                ssp := s
                RETURN
             }
@@ -1907,13 +1908,13 @@ LET load(x) BE
                        RETURN
 
       CASE s_inc1a:
-      CASE s_inc4a:
+      //CASE s_inc4a:
       CASE s_dec1a:
-      CASE s_dec4a:
+      //CASE s_dec4a:
       CASE s_inc1b:
-      CASE s_inc4b:
+      //CASE s_inc4b:
       CASE s_dec1b:
-      CASE s_dec4b:
+      //CASE s_dec4b:
                        loadlv(h2!x)
                        out1(op)
                        RETURN
@@ -2299,7 +2300,7 @@ AND preplhsop(op, x, y) BE
 
 // transvid may load or store so the caller must update ssp.
 AND transvid(id, locproc, g, s, f, x) BE
-{  LET name = @h3!id
+{  LET name = @h2!id
    LET c = findid(id, loclist)
 
    UNLESS c=0 DO {  // c -> [link, vid, n, i]
@@ -2366,7 +2367,11 @@ AND out2(x, y) BE {  out1(x); out1(y) }
 
 AND out3(x, y, z) BE {  out1(x); out1(y); out1(z) }
 
-AND outstring(s) BE FOR i = 0 TO s%0 DO out1(s%i)
+AND outstring(s) BE
+{ //abort(1001)
+  FOR i = 0 TO s%0 DO out1(s%i)
+  //abort(1002)
+}
 
 AND outline() BE out3(s_line, comline>>24, comline&#xFFFFF)
 

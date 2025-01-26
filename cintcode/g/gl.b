@@ -1,39 +1,76 @@
 /*
 ############### UNDER DEVELOPMENT #####################
 
-This library provides some functions that interface with the OpenGL
-Graphics library that should work with both OpenGL ES using EGL and
-the full version of OpenGL using SDL. The intention is for BCPL
-programs to work without change under either version of OpenGL.
+This library provides functions that interface with the OpenGL
+Graphics library. Most of the OpenGL functions provided by this
+library are invoked by calls of the form:
 
-This will be compiled with one of the following conditional
-compilation options set.
+res := sys(Sys_gl, fno, a1, a2, a3, a4,...)
 
-  OpenGL       for the full OpenGL library used with SDL
-  OpenGLES     for OpenGL ES in the Raspberry Pi
+provided by the function glfn defined in cintcode/sysc/glfn.c
 
-Implemented by Martin Richards (c) Jan 2014
+These do not involve code in this file, but OpenGL constants such as
+GL_ARRAY_BUFFER or GL_VERTEX_SHADER used in these calls are declared
+in the file g/glmanifests.h created by the program
+sysc/mkglmanifests.c to ensure that the constants have the values
+required by OpenGL.
+
+All these calls work with both OpenGL ES and most versions of
+OpenGL.
+
+This file contains functions such as mkwindow that use non OpenGL
+libraries such as SDL, glut or EGL. Hopefully, the user will not need
+to know which of these support libraries are being used.
+
+The calls of sys(Sys_gl, fno,...) allow many OpenGL functions to be
+called. To add another OpenGL function the following steps are
+required.
+
+1) Add a manifest declaration, such as gl_GenTextures, to g/gl.h and
+   a corressponding #define in sysc/cintsys.h.
+2) Insert a suitable case in the switch in sysc/glfn.c. For instance
+   case gl_GenTextures: // (n, textures)
+   { glGenTextures((GLsizei)a[1]. (GLuint *)(&W[a[2]]));
+     return -1;
+   }
+3) If new a new OpenGL constants are needed  needed, add a line
+   such as
+        w("GL_TEXTURE_2D=%n*n", GL_TEXTURE_2D
+   to sysc/mkglmanifests-h.c. This file is compiled and run when
+   needed to create a new version of g/glmanifests.h. 
+
+Implemented by Martin Richards (c) May 2020
 
 Change history:
 
-26/08/12
-Initial implementation.
+01/05/2020
+This file is undergoing major redevelopment.
+
+23/04/18
+Changed load model to use the new .mdl format.
+Extensively changed to use the FLT feature.
 
 15/07/13
 Started adding OpenGL functions.
 
+26/08/12
+Initial implementation.
 
-This library provide the BCPL interface to the OpenGL features. Even
-if OpenGL is called from EGL and not SDL, the SDL features will be
-available providing access to keyboard, mouse and joy stick events,
-and possibly sound features.
+This library allows the BCPL user to perform OpenGL operations and
+access keboard, mouse and joystick events. In due course sound
+features will probably be added. The initial implementation assume
+that 32-bit BCPL with the FLT feature is being used. The interface
+with OpenGL makes extensive use of 32-bit floating point.
 
-This library should be included as a separate section for programs
-that need it. Such programs typically have the following structure.
+This library should be included as a separate section.  Such programs
+typically have the following structure.
 
 GET "libhdr"
 MANIFEST { g_glbase=nnn  }  // Only used if the default setting of 450 in
                             // libhdr is not suitable.
+                            // Note that sdl.h also has 450 as the default
+                            // value, so GET "gl.h" and "sdl.h" should
+                            // not occur together.
 GET "gl.h"
 GET "gl.b"                  // Insert the library source code
 .
@@ -41,382 +78,412 @@ GET "libhdr"
 MANIFEST { g_glbase=nnn  }  // Only used if the default setting of 450 in
                             // libhdr is not suitable.
 GET "gl.h"
-Rest of the program
- 
+<Rest of the program>
+
+This function defines the following functions.
+
+glInit()
+glMkScreen(titla, xsize, ysize)
+glSetPerspective(mat4, FLT fovy, FLT aspect, FLT n, FLT f)
+glRadius2(FLT x, FLT y)
+glRadius3(FLT x, FLT y,FLT z)
+getevent()
+loadmodel(filename, modelv)
+//push32(v, i, upb, val)
+//put32(v, i, val)
+//get32(v, i)
+//push16(v, i, upb, val)
+//put16(v, i, val)
+//get16(v, i)
+
+glMainEventLoop()
+
+
 */
 
 LET glInit() = VALOF
-{ LET mes = VEC 256/bytesperword
-  mes%0 := 0
+{ // Return TRUE if OpenGL is successfully initialised.
+  LET n = sys(Sys_gl, gl_Init)
+  //writef("gl_Init returned %n*n", n)
+  UNLESS n DO
+  { LET mes = VEC 256/bytesperword
+    mes%0 := 0
 
-  UNLESS sys(Sys_gl, GL_Init) DO
-  { //sys(Sys_gl, GL_getError, mes)
-    sawritef("*nglInit unable to initialise OpenGL: %s*n", mes)
-    RESULTIS FALSE
+    //sys(Sys_gl, gl_GetError, mes)
+    //sawritef("*nglInit unable to initialise OpenGL: %s*n", mes)
   }
 
-  // Successful
-  RESULTIS TRUE
+  RESULTIS n
 }
 
 AND glMkScreen(title, xsize, ysize) = VALOF
-{ // Create an OpenGL window with given title and size
+{ // Create an OpenGL window and GL context with given title
+  // and size. If successful it returns the x size of the
+  // window and sets result2 to the y size. It also displays
+  // the window as a pale blue rectangle of the specified
+  // size with its title.
+  // On failure it reurns 0.
+  
+  LET ok = ?
   LET mes = VEC 256/bytesperword
   mes%0 := 0
 
-  //writef("glMkScreen: Creating an OpenGL window*n")
+  //writef("glMkScreen: Creating an OpenGL window %n x %n*n", xsize, ysize)
 
   screenxsize, screenysize := xsize, ysize
 
-  //writef("MkScreen: calling sys(Sys_gl, GL_MkScreen, %s, %n %n)*n",
+  //writef("MkScreen: calling sys(Sys_gl, gl_MkScreen, %s, %n %n)*n",
   //        title, xsize, ysize)
 
-  screenxsize := sys(Sys_gl, GL_MkScreen, title, xsize, ysize)
+  screenxsize := sys(Sys_gl, gl_MkScreen, title, xsize, ysize)
   screenysize := result2
+  screenaspect := FLOAT screenxsize / FLOAT screenysize
 
-  writef("GL_MkScreen: returned screen size %n x %n*n",
-         screenxsize, screenysize)
+  //writef("gl_MkScreen: returned screen size %n x %n aspect %8.6f*n",
+  //       screenxsize, screenysize, screenaspect)
 
   UNLESS screenxsize>0 DO
-  { //sys(Sys_gl, GL_GetError, mes)
-    writef("Unable to create an OpenGL screen: *n", mes)
+  { sys(Sys_gl, gl_GetError, mes)
+    writef("Unable to create an OpenGL screen: %s*n", mes)
     RESULTIS 0
   }
+
+  // Normally when a pixel is written it overrides the the colour
+  // at that pixel position even if its alpha value is not 1.0.
+  // However we can tell OpenGL the blend the colour of the new
+  // pixel with the previous colour at that position.
+  sys(Sys_gl, gl_BlendFunc, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+  sys(Sys_gl, gl_Enable, GL_BLEND)
 
   result2 := screenysize
   RESULTIS screenxsize
 }
 
-AND glClose() BE
-{ sys(Sys_gl, GL_Quit)
+// The follow function has been change to make its arguments in the
+// order as for gluPerspective in the glu library. This is an incompatible
+// change but only affects g/gl.b, raspi/{gltiger.b gltst.b} and
+// genome/dnaplot.b.
+AND glSetPerspective(mat4, FLT fovy, FLT aspect, FLT n, FLT f) BE
+//AND glSetPerspective(mat4, FLT aspect, FLT fov, FLT n, FLT f) BE
+{ // This sets the 4x4 matrix to transform coordinates in a specified
+  // frustum to coordinates of normalised screen aces with the z axis
+  // passing through the centre of the window.
+  // fov is the field of view specified as the distance at z=1 between
+  // the centre of the screen and the upper edge of the window.
+  // ie fovy = height/(2*n)
+  // aspect = width/height ie width = height*aspect
+  // n and f are the distances to the near and far clipping plane.
+  // The matrix we require is
+  //   ( 2*n/width           0             0               0 )
+  //   (         0  2*n/height             0               0 )
+  //   (         0           0  -(f+n)/(f-n)  -(2*f*n)/(f-n) )
+  //   (         0           0            -1              0  )
+  // It is calculated as follows.
+  LET FLT fv = 2.0 / fovy
+
+  setvec(mat4, 16,  fv/aspect, 0.0,           0.0,  0.0,   // Column 1
+                   0.0,         fv,           0.0,  0.0,   // Column 2
+                   0.0,        0.0,   (f+n)/(n-f), -1.0,   // Column 3
+                   0.0,        0.0, (2*f*n)/(n-f),  0.0)   // Column 4
 }
 
-AND glMkProg() = VALOF
-{ //writef("glMkProg: entered*n")
-  RESULTIS sys(Sys_gl, GL_MkProg)
+AND glRadius2(FLT x, FLT y) = sys(Sys_flt, fl_sqrt, x*x + y*y)
+
+AND glRadius3(FLT x, FLT y, FLT z) = sys(Sys_flt, fl_sqrt, x*x + y*y + z*z)
+
+AND tok2str(tok) = VALOF SWITCHON tok INTO
+{ DEFAULT:      RESULTIS "?"
+
+  CASE s_vs:    RESULTIS "vs"
+  CASE s_x:     RESULTIS "x"
+  CASE s_y:     RESULTIS "y"
+  CASE s_z:     RESULTIS "z"
+  CASE s_r:     RESULTIS "r"
+  CASE s_g:     RESULTIS "g"
+  CASE s_b:     RESULTIS "b"
+  CASE s_k:     RESULTIS "k"
+  CASE s_d:     RESULTIS "d"
+
+  CASE s_is:    RESULTIS "is"
+  CASE s_i:     RESULTIS "i"
+
+  CASE s_ds:    RESULTIS "ds"
+  CASE s_t:     RESULTIS "t"
+  
+  CASE s_num:   RESULTIS "num"
+  CASE s_eof:   RESULTIS "eof"
 }
 
-AND glCompileVshader(prog, cstr)  = VALOF
-{ // Create and compile the vertex shader whose source is
-  // in the C string cstr
-  //writef("glCompileVshader: entered, prog=%n cstr=%n*n", prog, cstr)
-  sys(Sys_gl, GL_CompileVshader, prog, cstr)
-  RESULTIS -1
+AND getevent() = sys(Sys_gl, gl_pollevent, @eventtype)
+
+AND error(mes, a, b, c) BE
+{ // For error found by loadmodel.
+  writef("ERROR near line %n: ", lineno)
+  writef(mes, a, b, c)
+  newline()
+  abort(999)
 }
 
-AND glCompileFshader(prog, cstr)  = VALOF
-{ // Create and compile the fragment shader whose source is
-  // in the C string cstr
-  //writef("glCompileFshader: entered, prog=%n cstr=%n*n", prog, cstr)
-  sys(Sys_gl, GL_CompileFshader, prog, cstr)
-  RESULTIS -1
-}
- 
-AND glLinkProg(prog) = VALOF
-{ //writef("glLinkProg(%n): entered*n", prog)
-  RESULTIS sys(Sys_gl, GL_LinkProgram, prog)
-}
- 
-AND glBindAttribLocation(prog, loc, name) = VALOF
-{ // Specify attribute location before linking.
-  //writef("glBindAttribLocation(%n, %n, %s): entered*n", prog, loc, name)
-  RESULTIS sys(Sys_gl, GL_BindAttribLocation, prog, loc, name)
-}
- 
-AND glGetAttribLocation(prog, name) = VALOF
-{ // Get attribute location after linking.
-  //writef("glGetAttribLocation(%n, %s): entered*n", prog, name)
-  RESULTIS sys(Sys_gl, GL_GetAttribLocation, prog, name)
-}
- 
-AND glGetUniformLocation(prog, name) = VALOF
-{ // Get uniform location after linking
-  //writef("glGetUniformLocation(%n, %s): entered*n", prog, name)
-  RESULTIS sys(Sys_gl, GL_GetUniformLocation, prog, name)
-}
- 
-AND glLoadModel(prog, name)  = VALOF
-{ //writef("glLoadModel: %n %s entered*n", prog, name)
-  RESULTIS -1
+AND rdnum() = VALOF
+{ LET res = lexval
+  UNLESS token=s_num DO error("Number expected")
+  lex()
+  RESULTIS res
 }
 
-AND glUseProgram(prog) = VALOF
-{ //writef("glUseProgram: %n entered*n", prog)
-  RESULTIS  sys(Sys_gl, GL_UseProgram, prog)
-}
- 
-AND sc3(x) = glF2N(    1_000, x)// #*    1000.0)
-AND sc6(x) = glF2N(1_000_000, x)// #* 1000000.0)
-
-
-AND glUniform1f(loc, x) = VALOF
-{ //writef("gl.b: glUniform1f: loc=%6i x=%8.3d*n",
-  //       loc, sc3(x))
-  sys(Sys_gl, GL_Uniform1f, loc, x)
-//abort(1000)
-  RESULTIS -1
-}
- 
-AND glUniform2f(loc, x, y) = VALOF
-{ //writef("gl.b: glUniform2f: loc=%6i x=%8.3d y=%8.3d*n",
-  //        loc, sc3(x), sc3(y))
-  sys(Sys_gl, GL_Uniform2f, loc, x, y)
-//abort(1000)
-  RESULTIS -1
-}
- 
-AND glUniform3f(loc, x, y, z) = VALOF
-{ //writef("gl.b: glUniform3f: loc=%6i x=%8.3d y=%8.3d z=%8.3d*n",
-  //       loc, sc3(x), sc3(y), sc3(z))
-  sys(Sys_gl, GL_Uniform3f, loc, x, y, z)
-//abort(1000)
-  RESULTIS -1
-}
- 
-AND glUniform4f(loc, x, y, z, w) = VALOF
-{ //writef("gl.b: glUniform4f: loc=%6i x=%8.3d y=%8.3d z=%8.3d w=%8.3d*n",
-  //       loc, sc3(x), sc3(y), sc3(z), sc3(w))
-  sys(Sys_gl, GL_Uniform4f, loc, x, y, z, w)
-//abort(1000)
-  RESULTIS -1
-}
- 
-AND glDeleteShader(shader) = VALOF
-{ //writef("glDeleteShader: %n entered*n", shader)
-  RESULTIS -1
-}
- 
-AND glSwapBuffers() = VALOF
-{ //writef("glSwapBuffers: entered*n")
-  RESULTIS sys(Sys_gl, GL_SwapBuffers)
-}
- 
-AND glCos(angle) = VALOF
-{ // angle is fixed point in degrees with 6 decimal after
-  // the decimal point. The result is a float.
-  LET radians = sys(Sys_flt, fl_N2F,
-                    muldiv(angle, 3_141593, 1_000000),
-                    180_000000)
-  RESULTIS sys(Sys_flt, fl_cos, radians)
-}
-
-AND glSin(angle) = VALOF
-{ // angle is fixed point in degrees with 6 decimal after
-  // the decimal point. The result is a float.
-  LET radians = sys(Sys_flt, fl_N2F,
-                    muldiv(angle, 3_141593, 1_000000),
-                    180_000000)
-  RESULTIS sys(Sys_flt, fl_sin, radians)
-}
-
-AND glSetIdent4(v) BE
-{ glSetvecN2F(v, 16, 1,
-              1, 0, 0, 0,
-              0, 1, 0, 0,
-              0, 0, 1, 0,
-              0, 0, 0, 1)
-}
-
-AND glSetvec(v, n,
-             n0,n1,n2,n3,n4,n5,n6,n7,n8,n9,n10,n11,n12,n13,n14,n15) BE
-{ LET p = @n0
-//writef("glSetvec: entered*n")
-  FOR i = 0 TO n-1 DO v!i := p!i
-}
-
-// Used to set colours, points, mat3 and mat4, etc
-AND glSetvecN2F(v, n, scale,
-                n0,n1,n2,n3,n4,n5,n6,n7,n8,n9,n10,n11,n12,n13,n14,n15) BE
-{ LET p = @n0
-//writef("glSetvecN2F: entered*n")
-  FOR i = 0 TO n-1 DO
-    v!i := sys(Sys_flt, fl_N2F, scale, p!i)
-}
-
-AND glSetvecF2N(v, n, scale,
-                f0,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14,f15) BE
-{ LET p = @f0
-//writef("glSetvecF2N: entered*n")
-  FOR i = 0 TO n-1 DO
-    v!i := sys(Sys_flt, fl_F2N, scale, p!i)
-}
-
-AND glSetPerspective(mat4, aspect, fov, n, f) BE
-{ // The field of view is given as a field of view at unit distance
-  // ie field of view is 45 degrees if fov=2.0
-  // aspect = width/height of screen in pixels
-  LET fv = 2.0 #/ fov
-
-  mat4!00 := fv #/ aspect // Column 1
-  mat4!01 := 0.0
-  mat4!02 := 0.0
-  mat4!03 := 0.0
-
-  mat4!04 := 0.0          // Column 2
-  mat4!05 := fv
-  mat4!06 := 0.0
-  mat4!07 := 0.0
-
-  mat4!08 := 0.0         // Column 3
-  mat4!09 := 0.0
-  mat4!10 := (f #+ n) #/ (n #- f)
-  mat4!11 := #-1.0
-
-  mat4!12 := 0.0         // Column 4
-  mat4!13 := 0.0
-  mat4!14 := (2.0 #* f #* n) #/ (n #- f)
-  mat4!15 := 0.0
-}
-
-AND glRadius2(x, y) = VALOF
-{ LET a = sys(Sys_flt, fl_mul, x, x)
-  a := sys(Sys_flt, fl_add, a, sys(Sys_flt, fl_mul, y, y))
-  RESULTIS sys(Sys_flt, fl_sqrt, a)
-}
-
-AND glRadius3(x, y, z) = VALOF
-{ LET a = sys(Sys_flt, fl_mul, x, x)
-  a := sys(Sys_flt, fl_add, a, sys(Sys_flt, fl_mul, y, y))
-  a := sys(Sys_flt, fl_add, a, sys(Sys_flt, fl_mul, z, z))
-  RESULTIS sys(Sys_flt, fl_sqrt, a)
-}
-
-// glN2F(1_000, 1_234) => 1.234
-AND glN2F(scale, n) = sys(Sys_flt, fl_N2F, scale, n)
-
-// glF2N(1_000, 1.234) => 1_234
-AND glF2N(scale, x) = sys(Sys_flt, fl_F2N, scale, x)
-
-// glN2Fv converts n scaled fixed point numbers in v to floating
-//AND glN2Fv(v, n, scale) BE
-//  FOR i = 0 TO n-1 DO v!i := sys(Sys_flt, fl_N2F, scale, v!i)
-
-// glF2Nv converts n floating point numbers to scaled fixed point.
-//AND glF2Nv(v, n, scale) BE
-//  FOR i = 0 TO n-1 DO v!i := sys(Sys_flt, fl_F2N, v!i, scale)
-
-AND glMat4mul(a, b, c) BE
-{ // Perform c := a*b, where a and b are 4x4 floating point matrices
-  // a,b and c need not be distinct.
-//writef("glMat4mul: calling GL_M4mulM4 %n %n %n*n", a, b, c)
-  sys(Sys_gl, GL_M4mulM4, a, b, c)
-}
-
-AND glMat4mulV(a, b, c) BE
-{ // Perform c := a*b, where a is a 4x4 floating point matrix
-  // and b and c are 4 element vectors. b and c need not be distinct.
-//writef("glMat4mulV: calling GL_M4mulV %n %n %n*n", a, b, c)
-  sys(Sys_gl, GL_M4mulV, a, b, c)
-}
-
-AND glUniformMatrix4fv(loc, prog, matrix) BE
-{ //writef("glUniformmatrix4fv: entered*n")
-  sys(Sys_gl, GL_UniformMatrix4fv, loc, prog, matrix)
-}
-
-AND glClearColour(r, g, b, a) BE
-{ sys(Sys_gl, GL_ClearColour, r,g,b,a)
-}
-
-AND glClearBuffer() BE
-{ sys(Sys_gl, GL_ClearBuffer)
-}
-
-AND getevent() = VALOF
-{ //writef("gl: Calling sys(Sys_sdl, GL_pollevent...)*n")
-  RESULTIS sys(Sys_gl, GL_pollevent, @eventtype)
+AND rdflt32() = VALOF
+{ LET x = rdnum()
+  IF ON64 RESULTIS sys(Sys_flt, fl_64to32, x)
+  RESULTIS x
 }
 
 AND loadmodel(filename, modelv) = VALOF
-{ // This function reads a .mdl file specifying the vertices and
-  // indices of a model. It returns TRUE if successful.
-  // It updates
-  // modelv!0 to point to the vertex data
-  // modelv!1 to the number of values in the vertex data
-  // modelv!2 to point to the index data packed as 16-bit values
-  // modelv!3 to the number of 16-bit values in the index data.
+{ // This function reads a .mdl file specifying the vertices,
+  // indices and display items of a model.
+  // modelv is a vector with 6 elements to hold the details of
+  //          the model being read. It returns modelv if successful,
+  //          and if so it sets the following
+  // modelv!0 will be a vector of floating point numbers representing
+  //          vertices consisting of: x,y,z, r,g,b, k and d giving
+  //          the location, colour and k and d values of each vertex.
+  // nodelv!1 will be the upb of modelv!0
+  // modelv!2 will be the index vector of vertex numbers
+  // nodelv!3 will be the upb of modelv!2
+  // modelv!4 will be the vector holding display triplets of the
+  //          form [m, n, i] where
+  //          m is the mode of primitive eg 5 = Triangles.
+  //          n is the number of index elements to use.
+  //          i is a position in the index vector
+  // modelv!5 will be the upb of modelv!4
+  
+  // Syntax of .mdl files
 
+  // vs n         n is the upb of vertex vector
+  //              the elements are 32 bit floats.
+  //              The first vertex is at subscript position zero.
+  // x n          n is the x coordinate in a vertex
+  // y n          n is the y coordinate in a vertex
+  // z n          n is the z coordinate in a vertex
+  // r n          n is the red component in a vertex
+  // g n          n is the green component in a vertex
+  // b n          n is the blue component in a vertex
+  // k n          n is the k value in a vertex
+  // d n          n is the d value in a vertex
+
+  // is n         n is the upb of index vector of 32-bit integers.
+  // i n          n is an index vector element
+
+  // ds n         n is the upb of the display vector.
+  // t mode n p   set a display triplet
+  //              where mode   is 0   points
+  //                              1   seperate lines
+  //                              2   line loop
+  //                              3   line strip
+  //                              4   triangles
+  //                              5   triangle strip
+  //                              6   triangle fan
+  //                    n     is the number of index values belonging
+  //                          to this display item. For example if two
+  //                          triangles are being drawn n will be 6.
+  //              and   p     is a subscript of the first index value
+  //                          belonging this display item.
+  // z            end of file
+  
   LET res = TRUE
+  LET n = 0
   LET stdin = input()
   LET instream = findinput(filename)
-  LET scale = 1_000 // The default scale
-                    // It is the scaled fixed point value representing 1.000
-  LET vdata = TRUE  // Initially reading vertex data by default
-  // Declare self expanding vectors for the
-  LET vvec, vp, vupb = 0, -1, -1 // vertices and
-  LET ivec, ip, iupb = 0, -1, -1 // indices.
+
+  LET curr_r, curr_g, curr_b = -1, -1, -1 // Initially unset
+  LET curr_k, curr_d = -1, -1             // Initially unset
+
+  // Declare variables for the vertex, index and display vectors.
+  LET vv, vvupb = 0, 0  // vertices, each vertex is [x,y,z, r,g,b, k,d]
+  // The first vertex item will start at subscript position 0.
+  // Vertices are numbered by consective integers starting at zero.
+  LET iv, ivupb = 0, 0  // index vector. If triangles are being modelled
+                        // three indices are used to identif the vertices.
+  LET dv, dvupb = 0, 0  // display items, each item is [mode, n, i]
+                        // mode specifies the kind of objects being draw
+			// n    id the number of objects to draw
+			// i    identifies the first vertex of the first
+			//      object to draw.
+  LET vpos = 0          // first free position in the Vertex vector.
+  LET ipos = 0          // first free position in the Index vector.
+  LET dpos = 0          // first free position in the Display items vector.
+
+  lineno := 1 // The first line has lineno=1
 
   UNLESS instream DO
-  { writef("Trouble with file %s*n", filename)
+  { error("Trouble with file %s", filename)
     RESULTIS FALSE
   }
 
   selectinput(instream)
 
   ch := rdch()
-  lineno := 1 // The first line has lineno=1
 
 nxt:
+//sawritef("loadmodel: about to call lex()*n"); checkpos(ch)
   lex()
 
-  SWITCHON token INTO
-  { DEAFAULT:  writef("line %n: Bad model file*n", lineno)
-               res := FALSE
-               GOTO ret
+  UNTIL token=s_eof SWITCHON token INTO
+  { DEFAULT:  writef("line %n: Bad model file*n", lineno)
+              res := FALSE
+              GOTO ret
 
-    CASE s_scale:         // s scale
+    CASE s_vs:  // Set vupb and allocate space
+                // This is a vector of floating point numbers to hold the
+		// vertex items [x,y,z, r,g,b, k,d]
       lex()
-      UNLESS token = s_num DO
-      { writef("Line %n: Bad Scale statement*n", lineno)
-        res := FALSE
-        GOTO ret
+      n := FIX rdnum()
+      vvupb := n//+32 // Why as 32 ?????
+      //writef("vs: %n*n", n)
+//abort(1009)
+      vv := getvec(vvupb)
+      UNLESS vv DO
+      { writef("Unable to allocate v with upb=%n*n", vvupb)
+        res := 0
+	GOTO ret
       }
-      scale := lexval
-      GOTO nxt
+      FOR i = 0 TO vvupb DO vv!i := 0
+      LOOP
+ 
+    CASE s_x: // These are all floating point elements of
+    CASE s_y: // a vertex
+    CASE s_z:
+    CASE s_r:
+    CASE s_g:
+    CASE s_b:
+    CASE s_k:
+    CASE s_d:
+      lex()
+      
+      IF vv=0 DO
+      { writef("Vertex given before the vertex vector is allocated*n")
+        abort(999)
+	res := 0
+	GOTO ret
+      }
+      
+      IF vpos>vvupb DO
+      { writef("Too much data for the vertex vector, vpos=%n vvupb=%n*n",
+                vpos, vvupb)
+        abort(999)
+	res := 0
+	GOTO ret
+      }
 
-    CASE s_vertex:
-      vdata := TRUE
-      GOTO nxt
+      vv!vpos := rdflt32()
+      vpos := vpos+1
+      LOOP
+      
+    CASE s_is:          // Set ivupb and allocate space
+      lex()
+      ivupb := FIX rdnum()
+      // The index vector will hold 32-bit integers
+      iv := getvec(ivupb)
+      UNLESS iv DO
+      { writef("Unable to allocate iv with upb=%n*n", ivupb)
+        abort(999)
+	res := FALSE
+	GOTO ret
+      }
+      FOR i = 0 TO ivupb DO iv!i := 0
+//abort(1000)
+      LOOP
 
-    CASE s_index:
-      vdata := FALSE
-      GOTO nxt
+    CASE s_ds:          // Set dvupb and allocate its vector
+      lex()
+      dvupb := FIX rdnum()
+      dv := getvec(dvupb) // dv is a vector of BCPLWORDS
+                          // Typically quite small.
+      UNLESS dv DO
+      { writef("Unable to allocate dv with upb=%n*n", dvupb)
+	res := FALSE
+	GOTO ret
+      }
+      FOR i = 0 TO dvupb DO dv!i := 0 // Clear the display vector for safety
+//abort(1000)
+      LOOP
 
-    CASE s_num:
-      TEST vdata
-      THEN pushf(@vvec, glN2F(scale, lexval))
-      ELSE pushi(@ivec, lexval)
-      GOTO nxt
+    CASE s_t:          // Set a display vector triplet
+      UNLESS dv DO
+      { writef("Display item given before the display vector is allocated*n")
+        abort(999)
+        res := FALSE
+	GOTO ret
+      }
+      IF dpos+2 > dvupb DO
+      { error("Too many dvec items, dpos=%n dvupb=%n*n", dpos, dvupb)
+        abort(999)
+        res := FALSE
+	GOTO ret
+      }
+      lex()
+      dv!(dpos+0) := FIX rdnum()         // mode
+      dv!(dpos+1) := FIX rdnum()         // n
+      dv!(dpos+2) := FIX rdnum()         // offset
+
+      dpos := dpos+3
+      LOOP
+
+    CASE s_i:       // An index vector value
+      lex()
+      
+      UNLESS iv DO
+      { writef("Index value given before the index vector is allocate*n")
+        abort(999)
+        res := FALSE
+	GOTO ret
+      }
+
+      IF ipos>ivupb DO
+      { writef("Too many index values, ipos=%n ivupb=%n*n", ipos, ivupb)
+        abort(999)
+        res := FALSE
+	GOTO ret
+      }
+
+      iv!ipos := FIX rdnum()
+      ipos := ipos+1
+      LOOP
 
     CASE s_eof:
+      token := s_eof
       ENDCASE
   }
 
-  modelv!0, modelv!1 := vvec, vp+1
-  modelv!2, modelv!3 := ivec, ip+1
-
-//writef("Model %s*n", filename, vp+1, ip+1)
-//writef("VertexData= %i7 VertexDataSize= %i4*n", vvec, vp+1)
-//writef("IndexData = %i7 IndexDataSize = %i4*n", ivec, ip+1)
-
+  UNLESS vv & iv & dv DO
+  { error("One or more of v, ivec or dvec is missing")
+    res := FALSE
+    GOTO ret
+  }
+   
+  modelv!0, modelv!1 := vv, vpos-1   // Vertex vector and its upb
+  modelv!2, modelv!3 := iv, ipos-1   // Index vector and its upb
+  modelv!4, modelv!5 := dv, dpos-1   // Display vector and its upb
+ 
 ret:
   IF instream DO endstream(instream)
   selectinput(stdin)
   RESULTIS res
 }
 
-AND lex() BE
-{ LET neg = FALSE
+AND checkfor(tok, mess) BE UNLESS token=tok DO
+{ writef("ERROR: %s token=%s tok=%s", mess, tok2str(token), tok2str(tok))
+  lex()
+}
 
-  SWITCHON ch INTO
+AND lex() BE
+{ SWITCHON ch INTO
   { DEFAULT:
-      writef("line %n: Bad character '%c' in model file*n", lineno, ch)
+      error("line %n: Bad character '%c' in model file", lineno, ch)
       ch := rdch()
       LOOP
 
-    CASE 'z':            // A debugging aid
     CASE endstreamch:
-      token := s_eof
+      token := s_eof     // marks the end of file.
       RETURN
 
     CASE '/': // Skip over comments
@@ -430,127 +497,204 @@ AND lex() BE
       ch := rdch()
       LOOP
 
-    CASE 's':
-      token := s_scale
-      ch := rdch()
-      RETURN
-
     CASE 'v':
-      token := s_vertex
+      ch := rdch()
+      UNLESS ch='s' DO
+      { writef("Bad vs directive*n")
+        abort(999)
+      }
+      token := s_vs
       ch := rdch()
       RETURN
 
-    CASE 'i':
-      token := s_index
-      ch := rdch()
-      RETURN
-
-    CASE '-':
-      neg := TRUE
-    CASE '+':
-      ch := rdch()
-
+    CASE 'x': token := s_x; ch := rdch(); RETURN
+    CASE 'y': token := s_y; ch := rdch(); RETURN
+    CASE 'z': token := s_z; ch := rdch(); RETURN
+    CASE 'r': token := s_r; ch := rdch(); RETURN
+    CASE 'g': token := s_g; ch := rdch(); RETURN
+    CASE 'b': token := s_b; ch := rdch(); RETURN
+    CASE 'k': token := s_k; ch := rdch(); RETURN
+    CASE 'd': ch := rdch()
+              TEST ch='s' THEN { token := s_ds; ch := rdch() }
+	                  ELSE { token := s_d }
+	      RETURN 
+    CASE 'i': ch := rdch()
+              TEST ch='s' THEN { token := s_is; ch := rdch() }
+	                  ELSE { token := s_i }
+	      RETURN 
+    CASE 't': token := s_t; ch := rdch(); RETURN
+     
+    CASE '-': CASE '+':
     CASE '0': CASE '1': CASE '2': CASE '3': CASE '4': 
     CASE '5': CASE '6': CASE '7': CASE '8': CASE '9':
-      lexval := 0
-      WHILE '0'<=ch<='9' DO
-      { lexval := 10*lexval + ch - '0'
-        ch := rdch()
+      unrdch()
+
+      lexval := readflt()
+      IF result2 DO
+      { error("Bad floating point number")
+        abort(999)
       }
-      IF neg DO lexval := - lexval
+      // Re-read the terminating character
+      ch := rdch()
       token := s_num
       RETURN
   }
 } REPEAT
 
-AND pushf(v, val) BE
-{ // v is a self expanding vector of 32-bit values
-  // v -> [data, p, upb]
-  // Initially data=0, p=-1 and upb=-1
-  // If p>=0 data!p holds the latest value pushed into v
-  // When necessary, a new larger vector data is allocated
-  // initialised with the content of the previous vector.
-  LET data, p, upb = v!0, v!1, v!2
+//AND push32(v, i, upb, val) = VALOF
+//{ // v is a vector of 32 bit elements
+//  // i is a subscript into this vector
+//  //writef("push32: i=%n upb=%n val=%10.3f ON64=%n*n", i, upb, val, ON64)
+//  IF i > upb DO
+//  { error("Unable to push a 32-bit value, upb=%n", upb)
+//    RESULTIS i+1
+//  }
+//  TEST ON64 THEN put32(v, i, val)
+//            ELSE v!i := val
+//  //writef("push32: i=%n val=%10.3f*n", i, get32(v, i))
+//  RESULTIS i+1
+//}
 
-  IF p=upb DO
-  { // We must expand the vector
-    LET newupb = (upb+10)*3/2
-    LET newdata = getvec(newupb)
-    UNLESS newdata DO
-    { writef("More memory needed*n")
-      abort(999)
+//AND put32(v, i, val) BE
+//{ // v is a vector of 32 bit elements
+//  // i is a subscript into this vector
+//  LET w = 0
+//  LET p = 4*i // Byte position relative to v, 4 bytes per 32 bit word
+//  LET a, b, c, d = val&255, (val>>8) & 255, (val>>16) & 255, (val>>24) & 255
+//  (@w)%0 := 1
+//  TEST (w & 1) = 0
+//  THEN v%p, v%(p+1), v%(p+2), v%(p+3) := d, c, b, a // Big ender m/c 
+//  ELSE v%p, v%(p+1), v%(p+2), v%(p+3) := a, b, c, d // Little ender m/c 
+//}
+
+//AND get32(v, i) = VALOF
+//{ // v is a vector of 32 bit elements
+//  // i is a subscript into this vector
+//  LET w = 1
+//  LET p = 4*i // Byte position relative to v, 4 bytes per 32 bit word
+//  LET a, b, c, d = v%p, v%(p+1), v%(p+2), v%(p+3)
+//  TEST (w & 1) = 0
+//  THEN RESULTIS (a<<24) + (b<<16) + (c<<8) +  d // Big ender m/c 
+//  ELSE RESULTIS (d<<24) + (c<<16) + (b<<8) +  a // Little ender m/c 
+//}
+
+//AND push16(v, i, upb, val) = VALOF
+//{ // v is a vector of 16 bit elements
+//  // i is a subscript into this vector
+//  IF i > upb DO
+//  { error("Unable to push a 16-bit value, upb=%n", upb)
+//    RESULTIS i+1
+//  }
+//  put16(v, i, val)
+//  RESULTIS i+1
+//}
+
+//AND put16(v, i, val) BE
+//{ // v is a vector of 16 bit elements
+//  // i is a subscript into this vector
+//  LET w = 0
+//  LET p = 2*i // Byte position relative to v
+//  LET a, b = val&255, (val>>8) & 255
+//  (@w)%0 := 1
+//  TEST (w & 1) = 0
+//  THEN v%p, v%(p+1) := b, a // Big ender m/c 
+//  ELSE v%p, v%(p+1) := a, b // Little ender m/c 
+//}
+
+//AND get16(v, i) = VALOF
+//{ // v is a vector of 16 bit elements
+//  // i is a subscript into this vector
+//  LET w = 1
+//  LET p = 2*i // Byte position relative to v
+//  LET a, b = v%p, v%(p+1)
+//  (@w)%0 := 1
+//  TEST (w & 1) = 0
+//  THEN RESULTIS (a<<8) + b // Big ender m/c 
+//  ELSE RESULTIS (b<<8) + a // Little ender m/c 
+//}
+
+
+
+//############################################
+
+AND drawstring(x, y, s) BE
+{ moveto(x, y)
+  FOR i = 1 TO s%0 DO drawch(s%i)
+}
+
+AND plotf(x, y, form, a, b, c, d, e, f, g, h) BE
+{ // This is like writef but writes to position (x,y)
+  // on the screen.
+  LET oldwrch = wrch
+  LET s = VEC 256/bytesperword
+  plotfstr := s
+  plotfstr%0 := 0
+  wrch := plotwrch
+  writef(form, a, b, c, d, e, f, g, h)
+  wrch := oldwrch
+  drawstring(x, y, plotfstr)
+}
+
+AND plotwrch(ch) BE
+{ LET strlen = plotfstr%0 + 1
+  plotfstr%strlen := ch
+  plotfstr%0 := strlen 
+}
+
+
+AND initsdl1() = VALOF
+{ 
+  leftxv, rightxv := 0, 0
+
+
+  currx,   curry := 0, 0
+  miny, maxy := 0, 0
+  // Successful
+  RESULTIS TRUE
+}
+
+AND pxlrgba(r, g, b, a) = ((a<<8 | b)<<8 | g)<<8 | r // #Xaabbggrr
+
+
+AND closesdl1() BE
+{ IF leftxv  DO freevec(leftxv)
+  IF rightxv DO freevec(rightxv)
+}
+
+AND setcolour(col) BE currcolour := col
+
+AND setcolourkey(col) BE colourkey := col // Pixels of this colour are not
+                                          // written.
+
+AND moveto(x, y)   BE currx, curry := x, y
+AND moveby(dx, dy) BE moveto(currx+dx, curry+dy)
+
+AND drawto(x1, y1) BE
+{ LET x, y = currx, curry
+  LET x0, y0 = x, y
+  // Draw a line from (x0,y0) to (x1,y1) using currcolour.
+  // Leave (currx,curry) - (x1,y1).
+  // This function used Bresenham's algorithm to draw a 2D line.
+  LET dx  = ABS(x1-x0)
+  AND dy  = ABS(y1-y0)
+  LET sx  = x0 < x1 -> 1, -1
+  LET sy  = y0 < y1 -> 1, -1
+  LET err = dx-dy
+  LET e2  = ?
+
+  { drawpoint(x, y)
+    IF x=x1 & y=y1 DO
+    { currx, curry := x, y
+      RETURN
     }
-    FOR i = 0 TO upb DO newdata!i := data!i
-    FOR i = upb+1 TO newupb DO newdata!i := 0
-    IF data DO freevec(data)
-    v!0, v!2 := newdata, newupb
-    data := newdata
-  }
-  p := p+1
-  data!p, v!1 := val, p
-  //writef("pushf: %i3 %x8*n", p, val)
+    e2 := 2*err
+    IF e2 > -dy DO err, x := err-dy, x+sx
+    IF e2 <  dx DO err, y := err+dx, y+sy
+  } REPEAT
 }
 
-AND pushi(v, val) BE
-{ // v is a self expanding vector of 16-bit values
-  // v -> [data, p, upb]
-  // Initially data=0, p=-1 and upb=-1
-  // data has room for upb+1 16-bit values
-  // If p>=0 get16(data,p) holds the latest 16-bit value pushed into v
-  // When necessary, a new larger vector data is allocated
-  // initialised with the content of the previous vector.
-  LET data, p, upb = v!0, v!1, v!2
+AND drawby(dx, dy) BE drawto(currx+dx, curry+dy)
 
-  IF p=upb DO
-  { // We must expand the vector
-    LET newupb = (upb+10)*3/2 | 1 // Ensure that it is odd
-    LET wupb = newupb/2
-    LET newdata = getvec(wupb)
-    UNLESS newdata DO
-    { writef("More memory needed*n")
-      abort(999)
-    }
-    FOR i = 0 TO p/2 DO newdata!i := data!i
-    FOR i = p/2+1 TO newupb/2 DO newdata!i := 0
-    IF data DO freevec(data)
-    v!0, v!2 := newdata, newupb
-    data := newdata
-  }
-  p := p+1
-  v!1 := p
-  put16(data, p, val)
-  //writef("pushi: %i3 %i4*n", p, val)
-}
-
-AND get16(v, i) = VALOF
-{ LET w = 0
-  LET p = 2*i
-  LET a, b = v%p, v%(p+1)
-  (@w)%0 := 1
-  TEST (w & 1) = 0
-  THEN RESULTIS (a<<8) + b // Big ender m/c 
-  ELSE RESULTIS (b<<8) + a // Little ender m/c 
-}
-
-AND put16(v, i, val) BE
-{ LET w = 0
-  LET p = 2*i
-  LET a, b = val&255, (val>>8) & 255
-  (@w)%0 := 1
-  TEST (w & 1) = 0
-  THEN v%p, v%(p+1) := b, a // Big ender m/c 
-  ELSE v%p, v%(p+1) := a, b // Little ender m/c 
-}
-
-AND glVertexData(loc, n, stride, data) BE
-  sys(Sys_gl, GL_VertexData, loc, n, stride, data)
-
-AND glDrawTriangles(n, indexv) BE
-  // n = number of index values (3 index values per triangle)
-  // indexv is a vector of unsigned 16-bit integers
-  sys(Sys_gl, GL_DrawTriangles, n, indexv)
-
-/*
 AND drawch(ch) BE TEST ch='*n'
 THEN { currx, curry := 10, curry-14
      }
@@ -560,114 +704,113 @@ ELSE { FOR line = 0 TO 11 DO
      }
 
 AND write_ch_slice(x, y, ch, line) BE
-{ // Writes the horizontal slice of the given character.
-  // Character are 8x12
+{ // Writes the horizontal slice of the given 8x12 character.
   LET cx, cy = currx, curry
   LET i = (ch&#x7F) - '*s'
   // 3*i = subscript of the character in the following table.
   LET charbase = TABLE // Still under development !!!
-         #X00000000, #X00000000, #X00000000, // space
-         #X18181818, #X18180018, #X18000000, // !
-         #X66666600, #X00000000, #X00000000, // "
-         #X6666FFFF, #X66FFFF66, #X66000000, // #
-         #X7EFFD8FE, #X7F1B1BFF, #X7E000000, // $
-         #X06666C0C, #X18303666, #X60000000, // %
-         #X3078C8C8, #X7276DCCC, #X76000000, // &
-         #X18181800, #X00000000, #X00000000, // '
-         #X18306060, #X60606030, #X18000000, // (
-         #X180C0606, #X0606060C, #X18000000, // )
-         #X00009254, #X38FE3854, #X92000000, // *
-         #X00000018, #X187E7E18, #X18000000, // +
-         #X00000000, #X00001818, #X08100000, // ,
-         #X00000000, #X007E7E00, #X00000000, // -
-         #X00000000, #X00000018, #X18000000, // .
-         #X06060C0C, #X18183030, #X60600000, // /
-         #X386CC6C6, #XC6C6C66C, #X38000000, // 0
-         #X18387818, #X18181818, #X18000000, // 1
-         #X3C7E6206, #X0C18307E, #X7E000000, // 2
-         #X3C6E4606, #X1C06466E, #X3C000000, // 3
-         #X1C3C3C6C, #XCCFFFF0C, #X0C000000, // 4
-         #X7E7E6060, #X7C0E466E, #X3C000000, // 5
-         #X3C7E6060, #X7C66667E, #X3C000000, // 6
-         #X7E7E0606, #X0C183060, #X40000000, // 7
-         #X3C666666, #X3C666666, #X3C000000, // 8
-         #X3C666666, #X3E060666, #X3C000000, // 9
-         #X00001818, #X00001818, #X00000000, // :
-         #X00001818, #X00001818, #X08100000, // ;
-         #X00060C18, #X30603018, #X0C060000, // <
-         #X00000000, #X7C007C00, #X00000000, // =
-         #X00603018, #X0C060C18, #X30600000, // >
-         #X3C7E0606, #X0C181800, #X18180000, // ?
-         #X7E819DA5, #XA5A59F80, #X7F000000, // @
-         #X3C7EC3C3, #XFFFFC3C3, #XC3000000, // A
-         #XFEFFC3FE, #XFEC3C3FF, #XFE000000, // B
-         #X3E7FC3C0, #XC0C0C37F, #X3E000000, // C
-         #XFCFEC3C3, #XC3C3C3FE, #XFC000000, // D
-         #XFFFFC0FC, #XFCC0C0FF, #XFF000000, // E
-         #XFFFFC0FC, #XFCC0C0C0, #XC0000000, // F
-         #X3E7FE1C0, #XCFCFE3FF, #X7E000000, // G
-         #XC3C3C3FF, #XFFC3C3C3, #XC3000000, // H
-         #X18181818, #X18181818, #X18000000, // I
-         #X7F7F0C0C, #X0C0CCCFC, #X78000000, // J
-         #XC2C6CCD8, #XF0F8CCC6, #XC2000000, // K
-         #XC0C0C0C0, #XC0C0C0FE, #XFE000000, // L
-         #X81C3E7FF, #XDBC3C3C3, #XC3000000, // M
-         #X83C3E3F3, #XDBCFC7C3, #XC1000000, // N
-         #X7EFFC3C3, #XC3C3C3FF, #X7E000000, // O
-         #XFEFFC3C3, #XFFFEC0C0, #XC0000000, // P
-         #X7EFFC3C3, #XDBCFC7FE, #X7D000000, // Q
-         #XFEFFC3C3, #XFFFECCC6, #XC3000000, // R
-         #X7EC3C0C0, #X7E0303C3, #X7E000000, // S
-         #XFFFF1818, #X18181818, #X18000000, // T
-         #XC3C3C3C3, #XC3C3C37E, #X3C000000, // U
-         #X81C3C366, #X663C3C18, #X18000000, // V
-         #XC3C3C3C3, #XDBFFE7C3, #X81000000, // W
-         #XC3C3663C, #X183C66C3, #XC3000000, // X
-         #XC3C36666, #X3C3C1818, #X18000000, // Y
-         #XFFFF060C, #X183060FF, #XFF000000, // Z
-         #X78786060, #X60606060, #X78780000, // [
-         #X60603030, #X18180C0C, #X06060000, // \
-         #X1E1E0606, #X06060606, #X1E1E0000, // ]
-         #X10284400, #X00000000, #X00000000, // ^
-         #X00000000, #X00000000, #X00FFFF00, // _
-         #X30180C00, #X00000000, #X00000000, // `
-         #X00007AFE, #XC6C6C6FE, #X7B000000, // a
-         #XC0C0DCFE, #XC6C6C6FE, #XDC000000, // b
-         #X00007CFE, #XC6C0C6FE, #X7C000000, // c
-         #X060676FE, #XC6C6C6FE, #X76000000, // d
-         #X00007CFE, #XC6FCC0FE, #X7C000000, // e
-         #X000078FC, #XC0F0F0C0, #XC0000000, // f
-         #X000076FE, #XC6C6C6FE, #X7606FE7C, // g
-         #XC0C0DCFE, #XC6C6C6C6, #XC6000000, // h
-         #X18180018, #X18181818, #X18000000, // i
-         #X0C0C000C, #X0C0C0C7C, #X38000000, // j
-         #X00C0C6CC, #XD8F0F8CC, #XC6000000, // k
-         #X00606060, #X6060607C, #X38000000, // l
-         #X00006CFE, #XD6D6D6D6, #XD6000000, // m
-         #X0000DCFE, #XC6C6C6C6, #XC6000000, // n
-         #X00007CFE, #XC6C6C6FE, #X7C000000, // o
-         #X00007CFE, #XC6FEFCC0, #XC0000000, // p
-         #X00007CFE, #XC6FE7E06, #X06000000, // q
-         #X0000DCFE, #XC6C0C0C0, #XC0000000, // r
-         #X00007CFE, #XC07C06FE, #X7C000000, // s
-         #X0060F8F8, #X6060607C, #X38000000, // t
-         #X0000C6C6, #XC6C6C6FE, #X7C000000, // u
-         #X0000C6C6, #X6C6C6C38, #X10000000, // v
-         #X0000D6D6, #XD6D6D6FE, #X6C000000, // w
-         #X0000C6C6, #X6C386CC6, #XC6000000, // x
-         #X0000C6C6, #XC6C6C67E, #X7606FE7C, // y
-         #X00007EFE, #X0C3860FE, #XFC000000, // z
-         #X0C181808, #X18301808, #X18180C00, // {
-         #X18181818, #X18181818, #X18181800, // |
-         #X30181810, #X180C1810, #X18183000, // }
-         #X00000070, #XD1998B0E, #X00000000, // ~
-         #XAA55AA55, #XAA55AA55, #XAA55AA55  // rubout
+         #x00000000, #x00000000, #x00000000, // space
+         #x18181818, #x18180018, #x18000000, // !
+         #x66666600, #x00000000, #x00000000, // "
+         #x6666FFFF, #x66FFFF66, #x66000000, // #
+         #x7EFFD8FE, #x7F1B1BFF, #x7E000000, // $
+         #x06666C0C, #x18303666, #x60000000, // %
+         #x3078C8C8, #x7276DCCC, #x76000000, // &
+         #x18181800, #x00000000, #x00000000, // '
+         #x18306060, #x60606030, #x18000000, // (
+         #x180C0606, #x0606060C, #x18000000, // )
+         #x00009254, #x38FE3854, #x92000000, // *
+         #x00000018, #x187E7E18, #x18000000, // +
+         #x00000000, #x00001818, #x08100000, // ,
+         #x00000000, #x007E7E00, #x00000000, // -
+         #x00000000, #x00000018, #x18000000, // .
+         #x06060C0C, #x18183030, #x60600000, // /
+         #x386CC6C6, #xC6C6C66C, #x38000000, // 0
+         #x18387818, #x18181818, #x18000000, // 1
+         #x3C7E6206, #x0C18307E, #x7E000000, // 2
+         #x3C6E4606, #x1C06466E, #x3C000000, // 3
+         #x1C3C3C6C, #xCCFFFF0C, #x0C000000, // 4
+         #x7E7E6060, #x7C0E466E, #x3C000000, // 5
+         #x3C7E6060, #x7C66667E, #x3C000000, // 6
+         #x7E7E0606, #x0C183060, #x40000000, // 7
+         #x3C666666, #x3C666666, #x3C000000, // 8
+         #x3C666666, #x3E060666, #x3C000000, // 9
+         #x00001818, #x00001818, #x00000000, // :
+         #x00001818, #x00001818, #x08100000, // ;
+         #x00060C18, #x30603018, #x0C060000, // <
+         #x00000000, #x7C007C00, #x00000000, // =
+         #x00603018, #x0C060C18, #x30600000, // >
+         #x3C7E0606, #x0C181800, #x18180000, // ?
+         #x7E819DA5, #xA5A59F80, #x7F000000, // @
+         #x3C7EC3C3, #xFFFFC3C3, #xC3000000, // A
+         #xFEFFC3FE, #xFEC3C3FF, #xFE000000, // B
+         #x3E7FC3C0, #xC0C0C37F, #x3E000000, // C
+         #xFCFEC3C3, #xC3C3C3FE, #xFC000000, // D
+         #xFFFFC0FC, #xFCC0C0FF, #xFF000000, // E
+         #xFFFFC0FC, #xFCC0C0C0, #xC0000000, // F
+         #x3E7FE1C0, #xCFCFE3FF, #x7E000000, // G
+         #xC3C3C3FF, #xFFC3C3C3, #xC3000000, // H
+         #x18181818, #x18181818, #x18000000, // I
+         #x7F7F0C0C, #x0C0CCCFC, #x78000000, // J
+         #xC2C6CCD8, #xF0F8CCC6, #xC2000000, // K
+         #xC0C0C0C0, #xC0C0C0FE, #xFE000000, // L
+         #x81C3E7FF, #xDBC3C3C3, #xC3000000, // M
+         #x83C3E3F3, #xDBCFC7C3, #xC1000000, // N
+         #x7EFFC3C3, #xC3C3C3FF, #x7E000000, // O
+         #xFEFFC3C3, #xFFFEC0C0, #xC0000000, // P
+         #x7EFFC3C3, #xDBCFC7FE, #x7D000000, // Q
+         #xFEFFC3C3, #xFFFECCC6, #xC3000000, // R
+         #x7EC3C0C0, #x7E0303C3, #x7E000000, // S
+         #xFFFF1818, #x18181818, #x18000000, // T
+         #xC3C3C3C3, #xC3C3C37E, #x3C000000, // U
+         #x81C3C366, #x663C3C18, #x18000000, // V
+         #xC3C3C3C3, #xDBFFE7C3, #x81000000, // W
+         #xC3C3663C, #x183C66C3, #xC3000000, // X
+         #xC3C36666, #x3C3C1818, #x18000000, // Y
+         #xFFFF060C, #x183060FF, #xFF000000, // Z
+         #x78786060, #x60606060, #x78780000, // [
+         #x60603030, #x18180C0C, #x06060000, // \
+         #x1E1E0606, #x06060606, #x1E1E0000, // ]
+         #x10284400, #x00000000, #x00000000, // ^
+         #x00000000, #x00000000, #x00FFFF00, // _
+         #x30180C00, #x00000000, #x00000000, // `
+         #x00007AFE, #xC6C6C6FE, #x7B000000, // a
+         #xC0C0DCFE, #xC6C6C6FE, #xDC000000, // b
+         #x00007CFE, #xC6C0C6FE, #x7C000000, // c
+         #x060676FE, #xC6C6C6FE, #x76000000, // d
+         #x00007CFE, #xC6FCC0FE, #x7C000000, // e
+         #x000078FC, #xC0F0F0C0, #xC0000000, // f
+         #x000076FE, #xC6C6C6FE, #x7606FE7C, // g
+         #xC0C0DCFE, #xC6C6C6C6, #xC6000000, // h
+         #x18180018, #x18181818, #x18000000, // i
+         #x0C0C000C, #x0C0C0C7C, #x38000000, // j
+         #x00C0C6CC, #xD8F0F8CC, #xC6000000, // k
+         #x00606060, #x6060607C, #x38000000, // l
+         #x00006CFE, #xD6D6D6D6, #xD6000000, // m
+         #x0000DCFE, #xC6C6C6C6, #xC6000000, // n
+         #x00007CFE, #xC6C6C6FE, #x7C000000, // o
+         #x00007CFE, #xC6FEFCC0, #xC0000000, // p
+         #x00007CFE, #xC6FE7E06, #x06000000, // q
+         #x0000DCFE, #xC6C0C0C0, #xC0000000, // r
+         #x00007CFE, #xC07C06FE, #x7C000000, // s
+         #x0060F8F8, #x6060607C, #x38000000, // t
+         #x0000C6C6, #xC6C6C6FE, #x7C000000, // u
+         #x0000C6C6, #x6C6C6C38, #x10000000, // v
+         #x0000D6D6, #xD6D6D6FE, #x6C000000, // w
+         #x0000C6C6, #x6C386CC6, #xC6000000, // x
+         #x0000C6C6, #xC6C6C67E, #x7606FE7C, // y
+         #x00007EFE, #x0C3860FE, #xFC000000, // z
+         #x0C181808, #x18301808, #x18180C00, // {
+         #x18181818, #x18181818, #x18181800, // |
+         #x30181810, #x180C1810, #x18183000, // }
+         #x00000070, #xD1998B0E, #x00000000, // ~
+         #xAA55AA55, #xAA55AA55, #xAA55AA55  // rubout
 
   IF i>=0 DO charbase := charbase + 3*i
 
   // charbase points to the three words giving the
   // pixels of the character.
-  { LET col = colour
+  { LET col = currcolour
     LET w = VALOF SWITCHON line INTO
     { CASE  0: RESULTIS charbase!0>>24
       CASE  1: RESULTIS charbase!0>>16
@@ -683,14 +826,14 @@ AND write_ch_slice(x, y, ch, line) BE
       CASE 11: RESULTIS charbase!2
     }
 
-    IF ((w >> 7) & 1) = 1 DO drawpoint(x,   y)
-    IF ((w >> 6) & 1) = 1 DO drawpoint(x+1, y)
-    IF ((w >> 5) & 1) = 1 DO drawpoint(x+2, y)
-    IF ((w >> 4) & 1) = 1 DO drawpoint(x+3, y)
-    IF ((w >> 3) & 1) = 1 DO drawpoint(x+4, y)
-    IF ((w >> 2) & 1) = 1 DO drawpoint(x+5, y)
-    IF ((w >> 1) & 1) = 1 DO drawpoint(x+6, y)
-    IF (w & 1)        = 1 DO drawpoint(x+7, y)
+    IF (w & #b10000010) > 0 DO drawpoint(x+0, y)
+    IF (w & #b01000010) > 0 DO drawpoint(x+1, y)
+    IF (w & #b00100010) > 0 DO drawpoint(x+2, y)
+    IF (w & #b00010010) > 0 DO drawpoint(x+3, y)
+    IF (w & #b00001010) > 0 DO drawpoint(x+4, y)
+    IF (w & #b00000100) > 0 DO drawpoint(x+5, y)
+    IF (w & #b00000010) > 0 DO drawpoint(x+6, y)
+    IF (w & #b00000001) > 0 DO drawpoint(x+7, y)
 
 //writef("writeslice: ch=%c line=%i2 w=%b8 bits=%x8 %x8 %x8*n",
 //        ch, line, w, charbase!0, charbase!1, charbase!2)
@@ -700,26 +843,390 @@ AND write_ch_slice(x, y, ch, line) BE
   currx, curry := cx, cy
 }
 
-AND drawstring(x, y, s) BE
+AND drawpoint(x, y) BE UNLESS currcolour = colourkey DO
+{ // Draw a pixel in the pixel plane
+  // (0, 0) is the bottom left point on the surface
+  IF 0<=x<pxlxsize & 0<=y<pxlysize DO
+    pxlv!(pxlxsize*y + x) := currcolour
+}
+
+
+AND fillpxlplane(col) BE
+{ FOR p = pxlv TO pxlxsize*pxlysize + pxlv - 1 DO !p := col
+}
+
+AND drawstr(x, y, s) BE
 { moveto(x, y)
   FOR i = 1 TO s%0 DO drawch(s%i)
 }
 
-AND plotf(x, y, form, a, b, c, d, e, f, g, h) BE
+AND drawf(x, y, form,
+               a, b, c, d, e, f, g, h,i, j, k, l, m, n, o, p, q, r, s, t) BE
 { LET oldwrch = wrch
   LET s = VEC 256/bytesperword
-  plotfstr := s
-  plotfstr%0 := 0
-  wrch := plotwrch
-  writef(form, a, b, c, d, e, f, g, h)
+  drawfstr := s
+  drawfstr%0 := 0
+  wrch := drawwrch
+  writef(form, a, b, c, d, e, f, g, h,i, j, k, l, m, n, o, p, q, r, s, t)
   wrch := oldwrch
-  drawstring(x, y, plotfstr)
+  drawstr(x, y, drawfstr)
 }
 
-AND plotwrch(ch) BE
-{ LET strlen = plotfstr%0 + 1
-  plotfstr%strlen := ch
-  plotfstr%0 := strlen 
+AND drawwrch(ch) BE
+{ LET strlen = drawfstr%0 + 1
+  drawfstr%strlen := ch
+  drawfstr%0 := strlen 
 }
-*/
+
+AND setlims(x0,y0, x1,y1) BE
+{ // This function is used by drawtriangle to draw a filled 2D triangle.
+  // It sets elements of leftxv and rightxv to the smallest and largest
+  // values of x for each y when the line from (x0,y0) to (x1,y1) is
+  // drawn provided 0 <= y < pxlysize.
+
+  LET dx = ABS(x1-x0)
+  AND dy = ABS(y1-y0)
+
+  LET x, y  = x0, y0
+  LET smax = dx + dy      // The sum of the x and y steps
+  LET s    = 0            // number of steps so far
+
+  LET sx = x0<x1 -> 1, -1 // Unit step in the x direction
+  LET sy = y0<y1 -> 1, -1 // Unit step in the y direction
+  LET err = dx-dy
+
+  { // Start of loop stepping currx, curry or both.
+    LET e2 = 2*err
+
+    IF 0 <= y < pxlysize DO
+    { // y is in range.
+      IF leftxv !y > x DO leftxv !y := x
+      IF rightxv!y < x DO rightxv!y := x
+      IF miny > y DO miny := y
+      IF maxy < y DO maxy := y
+    }
+
+    IF s>=smax RETURN // All pixels of the line have been processed.
+
+    IF e2 > -dy DO
+    { err := err - dy
+      x := x + sx     // Unit step in the x direction
+      s := s+1
+    }
+    IF e2 < dx DO
+    { err := err + dx
+      y := y + sy     // Unit step in the y direction
+      s := s+1
+    }
+  } REPEAT
+}
+
+AND alloc2dvecs() BE
+{ LET upb = pxlysize-1
+
+  { leftxv  := getvec(upb)
+    rightxv := getvec(upb)
+    UNLESS leftxv & rightxv DO
+    { sawritef("Unable to allocate leftxv and rightxv, pxlysize=%i3*n",
+                pxlysize)
+      abort(999)
+    }
+  }
+  FOR y = 0 TO upb DO              // Initialise the relevant elements
+    leftxv!y, rightxv!y := upb, 0  // of leftxv and rightxv.
+}
+
+AND drawtriangle(x1,y1, x2,y2, x3,y3) BE
+{ // Draw a 2D triangle filled with currcol.
+
+  // Ensure that leftxv and rightxv are allocated.
+  UNLESS leftxv DO alloc2dvecs()
+
+  // miny and maxy will hold the least and greatest y value in the range
+  //0 to pxlysize-1 of any pixel in the triangle.. If no such
+  // pixels exists, miny will be greater than maxy.
+
+  miny, maxy := pxlysize, -1
+  
+  // The edges of the triangle are processed in turn. Whenever a pixel
+  // on an edge is found with a y value between 0 and pxlysize-1, if
+  // the x value is less than leftxv!y this is replaced by  the x value
+  // of the pixel. Similarly, rightxv!y is conditionally updated. At the
+  // end all pixels between (leftxv!y,y) and (rightxv!y,y) lie in the
+  // triangle and those with x values between 0 and pxlxsize-1 will
+  // be written to the screen. The calls of setlims also set miny and
+  // maxy to the lowest and highest y values in the range 0
+  // to pxlysize-1 that have pixels in the triangle.
+  // 
+
+  setlims(x1,y1, x2,y2)
+  setlims(x2,y2, x3,y3)
+  setlims(x3,y3, x1,y1)
+
+  FOR y = miny TO maxy DO
+  { // For each y value in the triangle draw the raster line at that level.
+    // This code works even when none of the raster line pixels are on the
+    // screen.
+    moveto(leftxv !y, y)
+    drawto(rightxv!y, y)
+    // Reset these entries ready for another triangle to be drawn later.
+    leftxv!y, rightxv!y := pxlysize-1, 0
+  }
+  
+  // Drawing a triangle does not change the current position.
+}
+
+AND drawquad(x1,y1, x2,y2, x3,y3, x4,y4) BE
+{ // A quad is drawn as two tiangles filled with currcol.
+  drawtriangle(x1,y1, x2,y2, x3,y3)
+  drawtriangle(x2,y2, x3,y3, x4,y4)
+}
+
+AND drawrect(x0, y0, x1, y1) BE
+{ // Draw a 2D rectangle edges.
+  LET xmin, xmax = x0, x1
+  LET ymin, ymax = y0, y1
+  IF xmin>xmax DO xmin, xmax := x1, x0
+  IF ymin>ymax DO ymin, ymax := y1, y0
+
+  FOR x = xmin TO xmax DO
+  { drawpoint(x, ymin)
+    drawpoint(x, ymax)
+  }
+  FOR y = ymin+1 TO ymax-1 DO
+  { drawpoint(xmin, y)
+    drawpoint(xmax, y)
+  }
+  currx, curry := x0, y0
+}
+
+AND drawfillrect(x0,y0, x1,y1) BE
+{ // Draw a 2D rectangle filled with currcol.
+  LET xmin, xmax = x0, x1
+  LET ymin, ymax = y0, y1
+  IF xmin>xmax DO xmin, xmax := x1, x0
+  IF ymin>ymax DO ymin, ymax := y1, y0
+
+  FOR y = ymin+1 TO ymax-1 FOR x = xmin TO xmax DO drawpoint(x, y)
+
+  currx, curry := x0, y0
+}
+
+AND drawrndrect(x0,y0, x1,y1, radius) BE
+{ LET xmin, xmax = x0, x1
+  LET ymin, ymax = y0, y1
+  LET r = radius
+  LET f, ddf_x, ddf_y, x, y = ?, ?, ?, ?, ?
+
+  IF xmin>xmax DO xmin, xmax := x1, x0
+  IF ymin>ymax DO ymin, ymax := y1, y0
+  IF r<0 DO r := 0
+  IF r+r>xmax-xmin DO r := (xmax-xmin)/2
+  IF r+r>ymax-ymin DO r := (ymax-ymin)/2
+
+  FOR x = xmin+r TO xmax-r DO
+  { drawpoint(x, ymin)
+    drawpoint(x, ymax)
+  }
+  FOR y = ymin+r+1 TO ymax-r-1 DO
+  { drawpoint(xmin, y)
+    drawpoint(xmax, y)
+  }
+  // Now draw the rounded corners
+  // This is commonly called Bresenham's circle algorithm since it
+  // is derived from Bresenham's line algorithm.
+  f := 1 - r
+  ddf_x := 1
+  ddf_y := -2 * r
+  x := 0
+  y := r
+
+  drawpoint(xmax, ymin+r)
+  drawpoint(xmin, ymin+r)
+  drawpoint(xmax, ymax-r)
+  drawpoint(xmin, ymax-r)
+
+  WHILE x<y DO
+  { // ddf_x = 2*x + 1
+    // ddf_y = -2 * y
+    // f = x*x + y*y - radius*radius + 2*x - y + 1
+    IF f>=0 DO
+    { y := y-1
+      ddf_y := ddf_y + 2
+      f := f + ddf_y
+    }
+    x := x+1
+    ddf_x := ddf_x + 2
+    f := f + ddf_x
+    drawpoint(xmax-r+x, ymax-r+y) // octant 2
+    drawpoint(xmin+r-x, ymax-r+y) // Octant 3
+    drawpoint(xmax-r+x, ymin+r-y) // Octant 7
+    drawpoint(xmin+r-x, ymin+r-y) // Octant 6
+    drawpoint(xmax-r+y, ymax-r+x) // Octant 1
+    drawpoint(xmin+r-y, ymax-r+x) // Octant 4
+    drawpoint(xmax-r+y, ymin+r-x) // Octant 8
+    drawpoint(xmin+r-y, ymin+r-x) // Octant 5
+  }
+
+  currx, curry := x0, y0
+}
+
+AND drawfillrndrect(x0, y0, x1, y1, radius) BE
+{ LET xmin, xmax = x0, x1
+  LET ymin, ymax = y0, y1
+  LET r = radius
+  LET f, ddf_x, ddf_y, x, y = ?, ?, ?, ?, ?
+  LET lastx, lasty = 0, 0
+
+  IF xmin>xmax DO xmin, xmax := x1, x0
+  IF ymin>ymax DO ymin, ymax := y1, y0
+  IF r<0 DO r := 0
+  IF r+r>xmax-xmin DO r := (xmax-xmin)/2
+  IF r+r>ymax-ymin DO r := (ymax-ymin)/2
+
+  FOR x = xmin TO xmax FOR y = ymin+r TO ymax-r DO
+  { drawpoint(x, y)
+    drawpoint(x, y)
+  }
+
+  // Now draw the rounded corners
+  // This is commonly called Bresenham's circle algorithm since it
+  // is derived from Bresenham's line algorithm.
+  f := 1 - r
+  ddf_x := 1
+  ddf_y := -2 * r
+  x := 0
+  y := r
+
+  drawpoint(xmax, ymin+r)
+  drawpoint(xmin, ymin+r)
+  drawpoint(xmax, ymax-r)
+  drawpoint(xmin, ymax-r)
+
+  WHILE x<y DO
+  { // ddf_x = 2*x + 1
+    // ddf_y = -2 * y
+    // f = x*x + y*y - radius*radius + 2*x - y + 1
+    IF f>=0 DO
+    { y := y-1
+      ddf_y := ddf_y + 2
+      f := f + ddf_y
+    }
+    x := x+1
+    ddf_x := ddf_x + 2
+    f := f + ddf_x
+    drawpoint(xmax-r+x, ymax-r+y) // octant 2
+    drawpoint(xmin+r-x, ymax-r+y) // Octant 3
+    drawpoint(xmax-r+x, ymin+r-y) // Octant 7
+    drawpoint(xmin+r-x, ymin+r-y) // Octant 6
+    drawpoint(xmax-r+y, ymax-r+x) // Octant 1
+    drawpoint(xmin+r-y, ymax-r+x) // Octant 4
+    drawpoint(xmax-r+y, ymin+r-x) // Octant 8
+    drawpoint(xmin+r-y, ymin+r-x) // Octant 5
+
+    UNLESS x=lastx DO
+    { FOR fx = xmin+r-y+1 TO xmax-r+y-1 DO
+      { drawpoint(fx, ymax-r+x)
+        drawpoint(fx, ymin+r-x)
+      }
+      lastx := x
+    }
+    UNLESS y=lasty DO
+    { FOR fx = xmin+r-x+1 TO xmax-r+x-1 DO
+      { drawpoint(fx, ymax-r+y)
+        drawpoint(fx, ymin+r-y)
+      }
+    }
+  }
+
+  currx, curry := x0, y0
+}
+
+AND drawcircle(x0,y0, radius) BE
+{ // This is commonly called Bresenham's circle algorithm since it
+  // is derived from Bresenham's line algorithm.
+  LET f = 1 - radius
+  LET ddf_x = 1
+  LET ddf_y = -2 * radius
+  LET x = 0
+  LET y = radius
+  drawpoint(x0, y0+radius)
+  drawpoint(x0, y0-radius)
+  drawpoint(x0+radius, y0)
+  drawpoint(x0-radius, y0)
+
+  WHILE x<y DO
+  { // ddf_x = 2*x + 1
+    // ddf_y = -2 * y
+    // f = x*x + y*y - radius*radius + 2*x - y + 1
+    IF f>=0 DO
+    { y := y-1
+      ddf_y := ddf_y + 2
+      f := f + ddf_y
+    }
+    x := x+1
+    ddf_x := ddf_x + 2
+    f := f + ddf_x
+    drawpoint(x0+x, y0+y)
+    drawpoint(x0-x, y0+y)
+    drawpoint(x0+x, y0-y)
+    drawpoint(x0-x, y0-y)
+    drawpoint(x0+y, y0+x)
+    drawpoint(x0-y, y0+x)
+    drawpoint(x0+y, y0-x)
+    drawpoint(x0-y, y0-x)
+  }
+}
+
+AND drawfillcircle(x0, y0, radius) BE
+{ // This is commonly called Bresenham's circle algorithm since it
+  // is derived from Bresenham's line algorithm.
+  LET f = 1 - radius
+  LET ddf_x = 1
+  LET ddf_y = -2 * radius
+  LET x = 0
+  LET y = radius
+  LET lastx, lasty = 0, 0
+  drawpoint(x0, y0+radius)
+  drawpoint(x0, y0-radius)
+  FOR x = x0-radius TO x0+radius DO drawpoint(x, y0)
+
+  WHILE x<y DO
+  { // ddf_x = 2*x + 1
+    // ddf_y = -2 * y
+    // f = x*x + y*y - radius*radius + 2*x - y + 1
+    IF f>=0 DO
+    { y := y-1
+      ddf_y := ddf_y + 2
+      f := f + ddf_y
+    }
+    x := x+1
+    ddf_x := ddf_x + 2
+    f := f + ddf_x
+    drawpoint(x0+x, y0+y)
+    drawpoint(x0-x, y0+y)
+    drawpoint(x0+x, y0-y)
+    drawpoint(x0-x, y0-y)
+    drawpoint(x0+y, y0+x)
+    drawpoint(x0-y, y0+x)
+    drawpoint(x0+y, y0-x)
+    drawpoint(x0-y, y0-x)
+    UNLESS x=lastx DO
+    { FOR fx = x0-y+1 TO x0+y-1 DO
+      { drawpoint(fx, y0+x)
+        drawpoint(fx, y0-x)
+      }
+      lastx := x
+    }
+    UNLESS y=lasty DO
+    { FOR fx = x0-x+1 TO x0+x-1 DO
+      { drawpoint(fx, y0+y)
+        drawpoint(fx, y0-y)
+      }
+      lasty := y
+    }
+  }
+}
+
+
 

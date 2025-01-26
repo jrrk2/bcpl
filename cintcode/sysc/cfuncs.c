@@ -16,7 +16,7 @@ to res.
 */
 
 #include <stdio.h>
-#include "cintsys.h"
+#include "cintmain.h"
 
 #include <stdlib.h>
 #include <signal.h>
@@ -29,14 +29,13 @@ to res.
 //#include <sys/select.h>
 //#include <linux/time.h>
 #include <unistd.h>
-#include <sys/signal.h>
+//#include <sys/signal.h>
 
 /* include for the TCP/IP code */
 
 #include <netdb.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
 
 #define  c_name2ipaddr 101
 #define  c_name2port   102

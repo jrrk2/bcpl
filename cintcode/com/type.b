@@ -12,6 +12,8 @@ inputstream:ug
 outputstream
 numbers
 linenumber
+chcounts
+chcount
 }
 
 LET start() = VALOF
@@ -23,7 +25,7 @@ LET start() = VALOF
   inputstream := 0
   outputstream := 0
 
-  UNLESS rdargs("FROM/A,TO,OPT/K", argv, 50) DO
+  UNLESS rdargs("FROM/A,TO/K,OPT/K", argv, 50) DO
   { writes("Bad args*n")
     rc := 20
     GOTO exit
@@ -46,21 +48,28 @@ LET start() = VALOF
     selectoutput(outputstream)
   }
 
-  numbers := FALSE
+  numbers  := FALSE
+  chcounts := FALSE
 
   IF argv!2 DO
   { LET opts = argv!2
     FOR i = 1 TO opts%0 SWITCHON capitalch(opts%i) INTO
     { CASE 'N': numbers := TRUE
                 ENDCASE
+
+      CASE 'C': chcounts := TRUE
+                ENDCASE
     }
   }
 
   linenumber := 1
-
+  chcount    := 0
+  
   { LET tab = 0
 
     { ch := rdch()
+      chcount := chcount+1
+      
       IF intflag() DO { IF tab DO wrch('*n')
                         selectoutput(oldoutput)
                         writes("****BREAK*n")
@@ -68,7 +77,8 @@ LET start() = VALOF
                         GOTO exit
                       }
       UNLESS tab DO { IF ch=endstreamch GOTO exit
-                      IF numbers DO writef("%I5  ", linenumber)
+                      IF numbers  DO writef("%I5  ", linenumber)
+                      IF chcounts DO writef("%I7  ", chcount)
                     }
       SWITCHON ch INTO
       { CASE '*c':

@@ -187,7 +187,25 @@ AND mknode(str) = VALOF
 AND prtree(t) BE IF t DO
 { // t = 0  or  t -> [left, right, <string>]
   LET x, y = t!0, t!1
+  LET line = @t!2
+  LET len = line%0
   IF x DO prtree(x)
-  writef("%s*n", @t!2)
+  // If the line length is greater that 80 characters split it after
+  // the first ']'.
+  
+  TEST len<=72
+  THEN { writef("%s*n", line)
+       }
+  ELSE { LET first = TRUE
+         FOR i = 1 TO len DO
+         { LET ch = line%i
+           wrch(ch)
+           IF ch=']' & first DO
+           { writes("*n   ")
+             first := FALSE
+           }
+         }
+         newline()
+       }
   IF y DO prtree(y)
 }

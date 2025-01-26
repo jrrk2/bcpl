@@ -5,7 +5,7 @@
 /* Change history
 
 15/05/13
-Modified to use c64 and t64 that specify the BCPL word length of
+Modified to use ON64 and t64 that specify the BCPL word length of
 the compiler and target machines, respectively.
 
 10/05/13
@@ -89,8 +89,8 @@ Cured bug concerning the closing of gostream when equal to stdout.
 
 SECTION "BCPL64CGCIN"
 
-// If c64 is FALSE, we are running an a 32-bit system
-// If c64 is TRUE,  we are running an a 64-bit system
+// If ON64 is FALSE, we are running an a 32-bit system
+// If ON64 is TRUE,  we are running an a 64-bit system
 
 // If t64 is FALSE, it generates 32-bit Cintcode.
 // If t64 is TRUE,  it generates 64-bit Cintcode.
@@ -393,7 +393,7 @@ f_l4p0 = 249
 }
 
 LET codegenerate(workspace, workspacesize) BE
-{ //writef("%n-bit system generating %n-bit code*n", (c64->64,32), (t64->64,32))
+{ //writef("%n-bit system generating %n-bit code*n", (ON64->64,32), (t64->64,32))
 
   IF workspacesize<2000 DO { cgerror("Too little workspace")
                              errcount := errcount+1
@@ -433,7 +433,7 @@ AND cgsects(workvec, vecsize) BE UNTIL op=0 DO
   procdepth := 0
   info_a, info_b := 0, 0
 
-  TEST t64 & ~c64
+  TEST t64 & ~ON64
   THEN blkupb := 3 // t64 set but running on a 32-bit implementation
   ELSE blkupb := 2 // otherwise.
 
@@ -449,7 +449,7 @@ AND cgsects(workvec, vecsize) BE UNTIL op=0 DO
     rdname(n, v) // Pack up to 11 character of the name into v
 
     IF naming DO
-    { TEST c64
+    { TEST ON64
       THEN codew(  sectword>>32,  sectword)
       ELSE codew(-(sectword>>31), sectword) // Sign extend
       codestr(v)
@@ -599,12 +599,12 @@ AND scan() BE
 
     CASE s_rv:   cgrv(); ENDCASE
 
-    CASE s_mul:CASE s_div:CASE s_rem:
+    CASE s_mul:CASE s_div:CASE s_mod:
     CASE s_add:CASE s_sub:
     CASE s_eq: CASE s_ne:
     CASE s_ls:CASE s_gr:CASE s_le:CASE s_ge:
     CASE s_lshift:CASE s_rshift:
-    CASE s_logand:CASE s_logor:CASE s_eqv:CASE s_neqv:
+    CASE s_logand:CASE s_logor:CASE s_eqv:CASE s_xor:
     CASE s_not:CASE s_neg:CASE s_abs:
                  cgpendingop()
                  pendingop := op
@@ -782,7 +782,7 @@ AND scan() BE
 
                    // For 64-bit target deal with the senior 4 bytes
                    IF t64 DO
-                   { TEST c64
+                   { TEST ON64
                      THEN w := val>>32
                      ELSE w := val<0 -> -1, 0 // Sign extend
                      FOR i = 4 TO 7 DO
@@ -854,13 +854,13 @@ LET cgpendingop() BE
 
     CASE s_mul:   f      := f_mul;        ENDCASE
     CASE s_div:   f, sym := f_div, FALSE; ENDCASE
-    CASE s_rem:   f, sym := f_rem, FALSE; ENDCASE
+    CASE s_mod:   f, sym := f_rem, FALSE; ENDCASE
     CASE s_lshift:f, sym := f_lsh, FALSE; ENDCASE
     CASE s_rshift:f, sym := f_rsh, FALSE; ENDCASE
     CASE s_logand:f      := f_and;        ENDCASE
     CASE s_logor: f      := f_or;         ENDCASE
     CASE s_eqv:
-    CASE s_neqv:  f      := f_xor;        ENDCASE
+    CASE s_xor:   f      := f_xor;        ENDCASE
   }
 
   TEST sym THEN loadboth(arg2, arg1)
@@ -1364,7 +1364,7 @@ AND cgentry(l, n) BE
   chkrefs(80)  // Deal with some forward refs.
   align(wordbytelen)
   IF naming DO
-  { TEST c64
+  { TEST ON64
     THEN codew(  entryword>>32,  entryword)
     ELSE codew(-(entryword>>31), entryword) // Sign extend
     codestr(v)   // Compile the words containing the packed
@@ -1742,10 +1742,10 @@ AND cgstring(n) BE
            IF n>=3 DO h := rdn()
            n := n-4    // 1 to 8 bytes have been packed
            TEST bigender
-           THEN TEST c64
+           THEN TEST ON64
                 THEN h3!t := pack4b(a,b,c,d)<<32 | pack4b(e,f,g,h)
                 ELSE h4!t, h3!t := pack4b(a,b,c,d), pack4b(e,f,g,h)
-           ELSE TEST c64
+           ELSE TEST ON64
                 THEN h3!t := pack4b(h,g,f,e)<<32 | pack4b(d,c,b,a)
                 ELSE h4!t, h3!t := pack4b(h,g,f,e), pack4b(d,c,b,a)
          }
@@ -1812,10 +1812,10 @@ AND cgstatics() BE WHILE nlist DO
     LET w   = h3!blk
     nlist := !nlist
 //writef("cgstatics: blk=%n -> [%n, %n, %x8]*n", blk, blk!0, blk!1, blk!2)
-    TEST c64
+    TEST ON64
     THEN TEST t64
-         THEN codew( (w>>32), w)  // c64 -> T64
-         ELSE codew(-(w>>31), w)  // c64 -> t32   sign extend
+         THEN codew( (w>>32), w)  // ON64 -> T64
+         ELSE codew(-(w>>31), w)  // ON64 -> t32   sign extend
     ELSE TEST t64
          THEN codew(  h4!blk, w)  // c32 -> t64
          ELSE codew(       0, w)  // c32 -> t32

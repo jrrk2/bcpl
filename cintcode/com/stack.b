@@ -16,7 +16,11 @@ LET start() = VALOF
   }
 
   UNLESS argv!0 DO
-  { writef("Current stack size is %n*n", cli_defaultstack)
+  { LET freewords = stackfree()
+    LET used = result2
+    
+    writef("Current stack size is %n/%n  free words=%n*n",
+           used, cli_defaultstack, freewords)
     RESULTIS 0
   }
 

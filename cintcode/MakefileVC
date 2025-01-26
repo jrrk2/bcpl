@@ -47,10 +47,10 @@ allcompiled64:	bin\cintsys64.exe
 	cintsys64 -c c compall64
 	echo touch >allcompiled64
 
-sysc\INT.h:	sysc\mkint-h.c
-	$(CC) /Fe sysc\mkint-h.c
-	.\mkint-h >sysc\INT.h
-	del /q mkint-h.exe
+sysc\defines.h:	sysc\mkdefines-h.c
+	$(CC) /Fe sysc\mkdefines-h.c
+	.\mkdefines-h >sysc\defines.h
+	del /q mkdefines-h.exe
 
 cintsys : bin\cintsys.exe
 
@@ -68,34 +68,34 @@ bin\rastsys.exe : obj\cintsys.obj obj\kblib.obj obj\rasterp.obj \
 	 obj\sdlfn.obj obj\glfn.obj obj\extfn.obj \
 	  obj\cinterp.obj obj\rastlib.obj obj\rasterp.obj winmm.lib
 
-obj\cintsys.obj:       sysc\cintsys.c sysc\cintsys.h sysc/INT.h sysc\soundfn.c
-        $(CC) /Foobj\cintsys.obj -c  sysc\cintsys.c
+obj\cintsys.obj:       sysc\cintmain.c sysc\cintmain.h sysc/defines.h sysc\soundfn.c
+        $(CC) /Foobj\cintsys.obj -c  sysc\cintmain.c
 
-obj\kblib.obj:	sysc\kblib.c sysc\cintsys.h sysc/INT.h
+obj\kblib.obj:	sysc\kblib.c sysc\cintmain.h sysc/defines.h
 	$(CC) /Foobj\kblib.obj -c sysc\kblib.c
 
-obj\sdlfn.obj:	sysc\sdlfn.c sysc\cintsys.h sysc/INT.h
+obj\sdlfn.obj:	sysc\sdlfn.c sysc\cintmain.h sysc/defines.h
 	$(CC) /Foobj\sdlfn.obj -c sysc\sdlfn.c
 
-obj\glfn.obj:	sysc\glfn.c sysc\cintsys.h sysc/INT.h
+obj\glfn.obj:	sysc\glfn.c sysc\cintmain.h sysc/defines.h
 	$(CC) /Foobj\glfn.obj -c sysc\glfn.c
 
-obj\extfn.obj:	sysc\extfn.c sysc\cintsys.h sysc/INT.h
+obj\extfn.obj:	sysc\extfn.c sysc\cintmain.h sysc/defines.h
 	$(CC) /Foobj\extfn.obj -c sysc\extfn.c
 
-obj\cinterp.obj:	sysc\cinterp.c sysc\cintsys.h sysc/INT.h
+obj\cinterp.obj:	sysc\cinterp.c sysc\cintmain.h sysc/defines.h
 	$(CC) /Foobj\cinterp.obj -c sysc\cinterp.c
 
-obj\fasterp.obj:        sysc\cinterp.c sysc\cintsys.h sysc/INT.h
+obj\fasterp.obj:        sysc\cinterp.c sysc\cintmain.h sysc/defines.h
         $(CC) -DFASTyes /Foobj\fasterp.obj -c sysc\cinterp.c
 
-obj\rasterp.obj:	sysc\rasterp.c sysc\cintsys.h sysc/INT.h
+obj\rasterp.obj:	sysc\rasterp.c sysc\cintmain.h sysc/defines.h
 	$(CC) -DFASTyes /Foobj\rasterp.obj -c sysc\rasterp.c
 
-obj\nrastlib.obj:	sysc\nrastlib.c sysc\cintsys.h sysc/INT.h
+obj\nrastlib.obj:	sysc\nrastlib.c sysc\cintmain.h sysc/defines.h
 	$(CC) /Foobj\nrastlib.obj -c sysc\nrastlib.c
 
-obj\rastlib.obj:	sysc\rastlib.c sysc\cintsys.h sysc/INT.h
+obj\rastlib.obj:	sysc\rastlib.c sysc\cintmain.h sysc/defines.h
 	$(CC) /Foobj\rastlib.obj -c sysc\rastlib.c
 
 litender:
@@ -148,38 +148,38 @@ rawxref:
 # Rule for the creation of cintsys64 and rastsys64
 
 
-obj\cintsys64.obj:	sysc\cintsys64.c sysc\cintsys64.h sysc\INT.h \
+obj\cintsys64.obj:	sysc\cintsys64.c sysc\cintsys64.h sysc\defines.h \
 	sysc\soundfn.c sysc\sdlfn.c
 	$(CC) -Foobj\cintsys64.obj -c sysc\cintsys64.c
 
-obj\cinterp64.obj:	sysc\cinterp64.c sysc\cintsys64.h sysc\INT.h
+obj\cinterp64.obj:	sysc\cinterp64.c sysc\cintsys64.h sysc\defines.h
 	$(CC) -Foobj\cinterp64.obj -c sysc\cinterp64.c
 
-obj\fasterp64.obj:	sysc\cinterp64.c sysc\cintsys64.h sysc\INT.h
+obj\fasterp64.obj:	sysc\cinterp64.c sysc\cintsys64.h sysc\defines.h
 	$(CC) -DFASTyes -Foobj\fasterp64.obj -c sysc\cinterp64.c
 
 obj\cintasm64.obj:	$(SYSM)/cintasm64.sx
 	gcc -c -Foobj\cintasm64.obj $(SYSM)/cintasm64.sx
 
-obj\rasterp64.obj:	sysc\rasterp64.c sysc\cintsys64.h sysc\INT.h
+obj\rasterp64.obj:	sysc\rasterp64.c sysc\cintsys64.h sysc\defines.h
 	$(CC) -Foobj\rasterp64.obj -c sysc\rasterp64.c
 
-obj\nrastlib64.obj:	sysc\nrastlib64.c sysc\cintsys64.h sysc\INT.h
+obj\nrastlib64.obj:	sysc\nrastlib64.c sysc\cintsys64.h sysc\defines.h
 	$(CC) -Foobj\nrastlib64.obj -c sysc\nrastlib64.c
 
-obj\rastlib64.obj:	sysc\rastlib64.c sysc\cintsys64.h sysc\INT.h
+obj\rastlib64.obj:	sysc\rastlib64.c sysc\cintsys64.h sysc\defines.h
 	$(CC) -Foobj\rastlib64.obj -c sysc\rastlib64.c
 
-obj\kblib64.obj:	sysc\kblib64.c sysc\cintsys64.h sysc\INT.h
+obj\kblib64.obj:	sysc\kblib64.c sysc\cintsys64.h sysc\defines.h
 	$(CC) -Foobj\kblib64.obj -c sysc\kblib64.c
 
-obj\cfuncs64.obj:	sysc\cfuncs64.c sysc\cintsys64.h sysc\INT.h
+obj\cfuncs64.obj:	sysc\cfuncs64.c sysc\cintsys64.h sysc\defines.h
 	$(CC) -Foobj\cfuncs64.obj -c sysc\cfuncs64.c
 
-obj\sdlfn64.obj:	sysc\sdlfn.c sysc\cintsys64.h sysc\INT.h
+obj\sdlfn64.obj:	sysc\sdlfn.c sysc\cintsys64.h sysc\defines.h
 	$(CC) -Foobj\sdlfn64.obj -c sysc\sdlfn.c
 
-obj\sdldrawlib64.obj:	sysc\sdldrawlib.c sysc\cintsys64.h sysc\INT.h
+obj\sdldrawlib64.obj:	sysc\sdldrawlib.c sysc\cintsys64.h sysc\defines.h
 #	$(CC) -E sysc\sdldrawlib.c >sysc\sdldrawlib.txt
 	$(CC) -Foobj\sdldrawlib64.obj -c sysc\sdldrawlib.c
 

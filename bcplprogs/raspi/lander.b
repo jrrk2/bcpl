@@ -594,20 +594,20 @@ AND displayall() BE
   }
 
   setcolour(col_white)
-  plotf(10, 75, "target %11.3d", target-cgx)
-  plotf(10, 60, "cgx=   %11.3d xdot=%9.3d", cgx, cgxdot)
-  plotf(10, 45, "cgy=   %11.3d ydot=%9.3d", cgy, cgydot)
-  plotf(10, 30, "fuel=  %11.3d", fuel)
-  //plotf(10, 15, "scale= %11.3d", scale)
+  drawf(10, 75, "target %11.3d", target-cgx)
+  drawf(10, 60, "cgx=   %11.3d xdot=%9.3d", cgx, cgxdot)
+  drawf(10, 45, "cgy=   %11.3d ydot=%9.3d", cgy, cgydot)
+  drawf(10, 30, "fuel=  %11.3d", fuel)
+  //drawf(10, 15, "scale= %11.3d", scale)
 
   IF landed DO
   { LET x = screenxsize/2
     LET y = screenysize/2
-    plotf(x, y, "Landed") 
-    IF toofast        DO { y := y-15; plotf(x, y, "Too fast") }
-    IF badsite        DO { y := y-15; plotf(x, y, "Bad site") }
-    IF badorientation DO { y := y-15; plotf(x, y, "Bad orientation") }
-    IF goodlanding    DO { y := y-15; plotf(x, y, "Perfect landing -- well done!") }
+    drawf(x, y, "Landed") 
+    IF toofast        DO { y := y-15; drawf(x, y, "Too fast") }
+    IF badsite        DO { y := y-15; drawf(x, y, "Bad site") }
+    IF badorientation DO { y := y-15; drawf(x, y, "Bad orientation") }
+    IF goodlanding    DO { y := y-15; drawf(x, y, "Perfect landing -- well done!") }
   }
 
   plotmoon()

@@ -5,6 +5,9 @@
 
 /* Change history
 
+21/09/2019
+Made ON64 a manifest rather than a global
+
 06/08/14
 
 Added floating point numbers and the operators FIX FLOAT #ABS #* #/ #+
@@ -302,9 +305,9 @@ c_space     = 32
 
 LET floatingchk() BE
 { TEST t64
-  THEN UNLESS c64 DO
+  THEN UNLESS ON64 DO
          synerr("64-bit floating point requires 64-bit cintcode")
-  ELSE IF c64 DO
+  ELSE IF ON64 DO
          synerr("32-bit floating point requires 32-bit cintcode")
 }
  
@@ -357,9 +360,9 @@ LET start() = VALOF
   bigender := (!"AAAAAAA" & 255) = 'A'    // =TRUE if on a bigender m/c
 
   // Set the current system wordlength flag
-  c64 := B2Wsh=3                          // =TRUE if on a 64-bit system
+  // ON64 is now a manifest constant
   // Set the target system wordlength flag
-  t64 := c64                              // Set the target word length
+  t64 := ON64                             // Set the target word length
   IF argv!18 & argv!19 DO                 // T32/S and T64/S
     writef("Both T32 and T64 specified -- T64 assumed*n")
   IF argv!18 DO t64 := FALSE              // T32/S
@@ -987,7 +990,7 @@ LET lex() BE
 LET lookupword(word) = VALOF
 { LET len, i = word%0, 0
   LET hashval = 19609 // This and 31397 are primes.
-  FOR j = 0 TO len DO hashval := (hashval NEQV word%j) * 31397
+  FOR j = 0 TO len DO hashval := (hashval XOR word%j) * 31397
   hashval := (hashval>>1) REM nametablesize
 
   wordnode := nametable!hashval
@@ -1013,7 +1016,7 @@ LET eqlookupword(word) = VALOF
   LET len, i = word%0, 0
   LET hashval = 19609 // This and 31397 are primes.
   // This hash function ignores the case of letters.
-  FOR j = 0 TO len DO hashval := (hashval NEQV (word%j & 31)) * 31397
+  FOR j = 0 TO len DO hashval := (hashval XOR (word%j & 31)) * 31397
   hashval := (hashval>>1) REM nametablesize
 
   wordnode := nametable!hashval
@@ -1069,16 +1072,16 @@ AND declsyswords() BE
   dsw("LOOP", s_loop)
   dsw("LSHIFT", s_lshift)
   dsw("MANIFEST", s_manifest)
-  dsw("MOD", s_rem)
+  dsw("MOD", s_mod)
   dsw("NE", s_ne)
   dsw("NEEDS", s_needs)
-  dsw("NEQV", s_neqv)
+  dsw("NEQV", s_xor)
   dsw("NOT", s_not)
   dsw("OF", s_of)                   // Inserted 11/7/01
   dsw("OR", s_else)
   dsw("RESULTIS", s_resultis)
   dsw("RETURN", s_return)
-  dsw("REM", s_rem)
+  dsw("REM", s_mod)
   dsw("RSHIFT", s_rshift)
   dsw("RV", s_rv)
   dsw("REPEAT", s_repeat)
@@ -1098,7 +1101,7 @@ AND declsyswords() BE
   dsw("VEC", s_vec)
   dsw("VALOF", s_valof)
   dsw("WHILE", s_while)
-  dsw("XOR", s_neqv)
+  dsw("XOR", s_xor)
   dsw("$", 0)
  
   nulltag := wordnode
@@ -1858,7 +1861,7 @@ AND rexp(n) = VALOF
          CASE s_fdiv:
          CASE s_mul:
          CASE s_div:
-         CASE s_rem:    p := 6; ENDCASE
+         CASE s_mod:    p := 6; ENDCASE
 
          CASE s_fadd:
          CASE s_fsub:
@@ -1889,7 +1892,7 @@ AND rexp(n) = VALOF
          CASE s_logand: p := 3; ENDCASE
          CASE s_logor:  p := 2; ENDCASE
          CASE s_eqv:
-         CASE s_neqv:   p := 1; ENDCASE
+         CASE s_xor:    p := 1; ENDCASE
  
          CASE s_cond:   IF n>=1 RESULTIS a
                         b := rnexp(0)
@@ -2138,11 +2141,11 @@ LET plist(x, n, d) BE
       CASE s_needs:CASE s_section:CASE s_vecap:CASE s_byteap:CASE s_fnap:
       CASE s_of:  // Inserted 11/7/01
       CASE s_fmul:CASE s_fdiv:CASE s_fadd:CASE s_fsub:
-      CASE s_mul:CASE s_div:CASE s_rem:CASE s_add:CASE s_sub:
+      CASE s_mul:CASE s_div:CASE s_mod:CASE s_add:CASE s_sub:
       CASE s_feq:CASE s_fne:CASE s_fls:CASE s_fgr:CASE s_fle:CASE s_fge:
       CASE s_eq:CASE s_ne:CASE s_ls:CASE s_gr:CASE s_le:CASE s_ge:
       CASE s_lshift:CASE s_rshift:CASE s_logand:CASE s_logor:
-      CASE s_eqv:CASE s_neqv:CASE s_comma:
+      CASE s_eqv:CASE s_xor:CASE s_comma:
       CASE s_seq:
                      size := 3;            ENDCASE
                      
@@ -2291,7 +2294,6 @@ AND opname(op) = VALOF SWITCHON op INTO
   CASE s_ne:          RESULTIS "NE"
   CASE s_needs:       RESULTIS "NEEDS"
   CASE s_neg:         RESULTIS "NEG"
-  CASE s_neqv:        RESULTIS "NEQV"
   CASE s_none:        RESULTIS "NONE"
   CASE s_not:         RESULTIS "NOT"
   CASE s_number:      RESULTIS "NUMBER"
@@ -2299,7 +2301,7 @@ AND opname(op) = VALOF SWITCHON op INTO
   CASE s_add:         RESULTIS "ADD"
   CASE s_putbyte:     RESULTIS "PUTBYTE"
   CASE s_query:       RESULTIS "QUERY"
-  CASE s_rem:         RESULTIS "REM"
+  CASE s_mod:         RESULTIS "MOD"
   CASE s_repeat:      RESULTIS "REPEAT"
   CASE s_repeatuntil: RESULTIS "REPEATUNTIL"
   CASE s_repeatwhile: RESULTIS "REPEATWHILE"
@@ -2346,6 +2348,7 @@ AND opname(op) = VALOF SWITCHON op INTO
   CASE s_vecap:       RESULTIS "VECAP"
   CASE s_vecdef:      RESULTIS "VECDEF"
   CASE s_while:       RESULTIS "WHILE"
+  CASE s_xor:         RESULTIS "XOR"
 }
 
 AND flopname(flop) = VALOF SWITCHON flop INTO
@@ -3106,7 +3109,7 @@ LET load(x) BE
     CASE s_byteap:    op:=s_getbyte
 
     CASE s_fdiv: CASE s_fsub:
-    CASE s_div: CASE s_rem: CASE s_sub:
+    CASE s_div: CASE s_mod: CASE s_sub:
     CASE s_fls: CASE s_fgr: CASE s_fle: CASE s_fge:
     CASE s_ls: CASE s_gr: CASE s_le: CASE s_ge:
     CASE s_lshift: CASE s_rshift:
@@ -3116,7 +3119,7 @@ LET load(x) BE
  
     CASE s_fmul: CASE s_fadd: CASE s_feq: CASE s_fne:
     CASE s_vecap: CASE s_mul: CASE s_add: CASE s_eq: CASE s_ne:
-    CASE s_logand: CASE s_logor: CASE s_eqv: CASE s_neqv:
+    CASE s_logand: CASE s_logor: CASE s_eqv: CASE s_xor:
          { LET a, b = h2!x, h3!x
            TEST h1!a=s_name |
                 h1!a=s_number THEN { load(b); load(a) }
@@ -3292,7 +3295,7 @@ LET isconst(x) = VALOF
     CASE s_fsub:
     CASE s_mul:
     CASE s_div:
-    CASE s_rem:
+    CASE s_mod:
     CASE s_add:
     CASE s_sub:
     CASE s_lshift:
@@ -3300,7 +3303,7 @@ LET isconst(x) = VALOF
     CASE s_logor:
     CASE s_logand:
     CASE s_eqv:
-    CASE s_neqv:   IF isconst(h2!x) & isconst(h3!x) RESULTIS TRUE
+    CASE s_xor:    IF isconst(h2!x) & isconst(h3!x) RESULTIS TRUE
 
     DEFAULT:       RESULTIS FALSE
 
@@ -3358,7 +3361,7 @@ LET evalconst(x) = VALOF
     CASE s_fsub:   floatingchk()
     CASE s_mul:
     CASE s_div:
-    CASE s_rem:
+    CASE s_mod:
     CASE s_add:
     CASE s_sub:
     CASE s_lshift:
@@ -3366,7 +3369,7 @@ LET evalconst(x) = VALOF
     CASE s_logor:
     CASE s_logand:
     CASE s_eqv:
-    CASE s_neqv:   a, b := evalconst(h2!x), evalconst(h3!x)
+    CASE s_xor:    a, b := evalconst(h2!x), evalconst(h3!x)
                    ENDCASE
 
     DEFAULT:
@@ -3387,17 +3390,17 @@ LET evalconst(x) = VALOF
     CASE s_fadd:   RESULTIS sys(Sys_flt, fl_add, a,  b)
     CASE s_fsub:   RESULTIS sys(Sys_flt, fl_sub, a,  b)
 
-    CASE s_mul:    RESULTIS a   *    b
-    CASE s_add:    RESULTIS a   +    b
-    CASE s_sub:    RESULTIS a   -    b
-    CASE s_lshift: RESULTIS a   <<   b
-    CASE s_rshift: RESULTIS a   >>   b
-    CASE s_logor:  RESULTIS a   |    b
-    CASE s_logand: RESULTIS a   &    b
-    CASE s_eqv:    RESULTIS a  EQV   b
-    CASE s_neqv:   RESULTIS a  NEQV  b
+    CASE s_mul:    RESULTIS a   *   b
+    CASE s_add:    RESULTIS a   +   b
+    CASE s_sub:    RESULTIS a   -   b
+    CASE s_lshift: RESULTIS a   <<  b
+    CASE s_rshift: RESULTIS a   >>  b
+    CASE s_logor:  RESULTIS a   |   b
+    CASE s_logand: RESULTIS a   &   b
+    CASE s_eqv:    RESULTIS a  EQV  b
+    CASE s_xor:    RESULTIS a  XOR  b
     CASE s_div:    UNLESS b=0 RESULTIS a   /    b
-    CASE s_rem:    UNLESS b=0 RESULTIS a  REM   b
+    CASE s_mod:    UNLESS b=0 RESULTIS a  MOD   b
        
     DEFAULT:       ENDCASE
   }
@@ -3463,7 +3466,7 @@ AND assign(x, y) BE
                        out1(s_add)
                      }
                      out1(s_rv)
-                     out1(s_neqv)
+                     out1(s_xor)
                      ssp := ssp-1
 //writef("xor x!%n*n", offset)
                      out2(s_ln, mask)
@@ -3476,7 +3479,7 @@ AND assign(x, y) BE
                        out1(s_add)
                      }
                      out1(s_rv)
-                     out1(s_neqv)
+                     out1(s_xor)
 //writef("xor with x!%n*n", offset)
                      ssp := ssp-1
                    }
@@ -3846,7 +3849,7 @@ AND prctxte(x, d, prec) BE IF x DO
 
   SWITCHON op INTO
   { DEFAULT: ENDCASE
-    CASE s_mul: CASE s_div: CASE s_rem:
+    CASE s_mul: CASE s_div: CASE s_mod:
          prctxte(h2!x, d-1, 9)
          writef(op=s_mul->"**", op=s_div->"/", " MOD ")
          prctxte(h3!x, d-1, 9)
@@ -3973,7 +3976,7 @@ AND prctxte(x, d, prec) BE IF x DO
   SWITCHON op INTO
   { DEFAULT: ENDCASE
     CASE s_eqv:
-    CASE s_neqv:
+    CASE s_xor:
          prctxte(h2!x, d-1, 2)
          writef(op=s_eqv->" EQV "," XOR ")
          prctxte(h3!x, d-1, 2)

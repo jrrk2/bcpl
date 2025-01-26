@@ -5,6 +5,12 @@
 
 /* Change history
 
+14/01/19
+Added floating point instructions: fmod
+
+07/11/18
+Changed all occurences of neqv to xor.
+
 10/08/14
 Added floating point instructions: fix, float, fabs, fmul,
 fdiv, fadd, fsub, fneg, feq, fne, fls, fgr fle and fge.
@@ -117,6 +123,8 @@ genfg
 genfkg
 genfpg
 genfk
+genfkk
+genfkkk
 genfw
 genfl
 genflk
@@ -349,6 +357,32 @@ AND scan() BE
   { DEFAULT:     cgerror("Bad OCODE op %n", op)
                  ENDCASE
 
+    CASE s_selld: // Added 05/11/2018
+               { LET len = rdn()
+                 LET sh  = rdn()
+                 cgpendingop()
+                 loada(arg1)
+                 genfkk(f_selld, len, sh)
+                 forget_a()
+                 forget_b()
+                 ENDCASE
+               }
+
+    CASE s_selst: // Added 05/11/2018
+               { LET sfop = rdn()
+                 // sfop is sf_none for standard BCPL, but can be
+                 // sf_add, sf_sub, etc for xbcpl
+                 LET len  = rdn()
+                 LET sh   = rdn()
+                 cgpendingop()
+                 TEST loadboth(arg2, arg1)=swapped
+                 THEN genfkkk(f_xselst, sfop, len, sh)
+                 ELSE genfkkk(f_selst,  sfop, len, sh)
+                 forgetallvars()
+                 stack(ssp-2)
+                 ENDCASE
+               }
+
     CASE 0:      RETURN
       
     CASE s_needs:
@@ -375,24 +409,6 @@ AND scan() BE
                  ENDCASE
                }
 
-    CASE s_fnum:
-               { LET x = rdn()
-                 LET exponent = rdn()
-
-                 x := sys(Sys_flt, fl_mk, x, exponent)
-                 
-                 UNLESS -#xFFFFFF<=x<=#xFFFFFF DO
-                 { LET lab = newlab()
-                   loadt(k_lw, lab)
-                   !cliste := getblk(0,lab,x)
-                   cliste := !cliste
-                   ENDCASE
-                 }
-                   
-                 loadt(k_numb, x)
-                 ENDCASE
-               }
-
     CASE s_lstr: cgstring(rdn());         ENDCASE
 
     CASE s_true: loadt(k_numb, -1);       ENDCASE
@@ -410,15 +426,15 @@ AND scan() BE
 
     CASE s_rv:   cgrv(); ENDCASE
 
-    CASE s_mul:CASE s_div:CASE s_rem:
+    CASE s_mul:CASE s_div:CASE s_mod:
     CASE s_add:CASE s_sub:
     CASE s_eq: CASE s_ne:
     CASE s_ls:CASE s_gr:CASE s_le:CASE s_ge:
     CASE s_lshift:CASE s_rshift:
-    CASE s_logand:CASE s_logor:CASE s_eqv:CASE s_neqv:
+    CASE s_logand:CASE s_logor:CASE s_eqv:CASE s_xor:
     CASE s_not:CASE s_neg:CASE s_abs:
     CASE s_float:CASE s_fix:CASE s_fabs:
-    CASE s_fmul:CASE s_fdiv:
+    CASE s_fmul:CASE s_fdiv:CASE s_fmod:
     CASE s_fadd:CASE s_fsub:CASE s_fneg:
     CASE s_feq: CASE s_fne:
     CASE s_fls:CASE s_fgr:CASE s_fle:CASE s_fge:
@@ -671,11 +687,12 @@ LET cgpendingop() BE
     CASE s_logand:f      := f_and;         ENDCASE
     CASE s_logor: f      := f_or;          ENDCASE
     CASE s_eqv:   f      := f_eqv;         ENDCASE
-    CASE s_neqv:  f      := f_xor;         ENDCASE
+    CASE s_xor:   f      := f_xor;         ENDCASE
 
     CASE s_div:   f, sym := f_div,  FALSE; ENDCASE
-    CASE s_rem:   f, sym := f_rem,  FALSE; ENDCASE
+    CASE s_mod:   f, sym := f_mod,  FALSE; ENDCASE
     CASE s_fdiv:  f, sym := f_fdiv, FALSE; ENDCASE
+    CASE s_fmod:  f, sym := f_fmod, FALSE; ENDCASE
     CASE s_fsub:  f, sym := f_fsub, FALSE; ENDCASE
 
     CASE s_lshift:f, sym := f_lsh, FALSE;  ENDCASE
@@ -685,12 +702,13 @@ LET cgpendingop() BE
   IF loadboth(arg2, arg1)=swapped & ~sym SWITCHON f INTO
   { DEFAULT:  ENDCASE
     CASE f_div: f := f_xdiv;            ENDCASE
-    CASE f_rem: f := f_xrem;            ENDCASE
+    CASE f_mod: f := f_xmod;            ENDCASE
     CASE f_sub: f := f_xsub;            ENDCASE
     CASE f_fls: f := f_fgr;             ENDCASE
     CASE f_fle: f := f_fge;             ENDCASE
     CASE f_fgr: f := f_fls;             ENDCASE
     CASE f_fdiv:f := f_fxdiv;           ENDCASE 
+    CASE f_fmod:f := f_fxmod;           ENDCASE 
     CASE f_fsub:f := f_fxsub;           ENDCASE
 
     CASE f_lsh:
@@ -699,12 +717,12 @@ LET cgpendingop() BE
 
   genf(f)
   forget_a()
-  IF f=f_lsh | f=f_rsh |
-     f=f_fmul | f=f_div | f=f_xdiv |
+  IF f=f_lsh  | f=f_rsh  |
+     f=f_fmul | f=f_div  | f=f_xdiv  | f=f_mod | f=f_xmod |
      f=f_fadd | f=f_fsub | f=f_fxsub |
-     f=f_feq | f=f_fne |
-     f=f_fls | f=f_fgr |
-     f=f_fle | f=f_fge DO forget_b()
+     f=f_feq  | f=f_fne  |
+     f=f_fls  | f=f_fgr  |
+     f=f_fle  | f=f_fge DO forget_b()
 
   lose1(k_a, 0)
 }
@@ -1875,6 +1893,21 @@ LET genfk(f, a) BE IF incode DO
   codek(a)
 }
 
+LET genfkk(f, a, b) BE IF incode DO
+{ IF debug>0 DO wrcode(f, a, b)
+  codef(f)
+  codek(a)
+  codek(b)
+}
+
+LET genfkkk(f, a, b, c) BE IF incode DO
+{ IF debug>0 DO wrcode(f, a, b, c)
+  codef(f)
+  codek(a)
+  codek(b)
+  codek(c)
+}
+
 LET genfkl(f, a, l) BE IF incode DO
 { IF debug>0 DO wrcode(f, a, l)
   codef(f)
@@ -1968,7 +2001,7 @@ AND dboutput() BE
    
   IF debug=2 DO { writes("  STK: ")
                   FOR p=tempv TO arg1 BY 3  DO
-                  { IF (p-tempv) REM 30 = 10 DO newline()
+                  { IF (p-tempv) MOD 30 = 10 DO newline()
                     wrkn(h1!p,h2!p)
                     wrch('*s')
                   }
@@ -2002,7 +2035,7 @@ AND wrkn(k,n) BE
   writef(s, n, k>>4)
 }
 
-AND wrcode(f, a, b) BE
+AND wrcode(f, a, b, c) BE
 { LET form = VALOF SWITCHON f INTO
   { DEFAULT:       RESULTIS "-"
 
@@ -2048,12 +2081,12 @@ AND wrcode(f, a, b) BE
     CASE f_abs:    RESULTIS "ABS"
 
     CASE f_xdiv:   RESULTIS "XDIV"
-    CASE f_xrem:   RESULTIS "XREM"
+    CASE f_xmod:   RESULTIS "XMOD"
     CASE f_xsub:   RESULTIS "XSUB"
 
     CASE f_mul:    RESULTIS "MUL"
     CASE f_div:    RESULTIS "DIV"
-    CASE f_rem:    RESULTIS "REM"
+    CASE f_mod:    RESULTIS "MOD"
     CASE f_res:    RESULTIS "RES"
     CASE f_add:    RESULTIS "ADD"
     CASE f_sub:    RESULTIS "SUB"
@@ -2120,6 +2153,9 @@ AND wrcode(f, a, b) BE
     CASE f_jge0:   RESULTIS "JGE0  L%n"
     CASE f_jge0m:  RESULTIS "JGE0M M%n"
 
+    CASE f_selld:  RESULTIS "SELLD K%n K%n"
+    CASE f_selst:  RESULTIS "SELST K%n K%n K%n"
+
     CASE f_brk:    RESULTIS "BRK"
     CASE f_nop:    RESULTIS "NOP"
     CASE f_chgco:  RESULTIS "CHGCO"
@@ -2143,8 +2179,12 @@ AND wrcode(f, a, b) BE
     CASE f_fabs:     RESULTIS "FABS"
     CASE f_fmul:     RESULTIS "FMUL"
     CASE f_fdiv:     RESULTIS "FDIV"
+    CASE f_fxdiv:    RESULTIS "FXDIV"
+    CASE f_fmod:     RESULTIS "FMOD"
+    CASE f_fxmod:    RESULTIS "FXMOD"
     CASE f_fadd:     RESULTIS "FADD"
     CASE f_fsub:     RESULTIS "FSUB"
+    CASE f_fxsub:    RESULTIS "FXSUB"
     CASE f_fneg:     RESULTIS "FNEG"
 
     CASE f_feq:      RESULTIS "FEQ"

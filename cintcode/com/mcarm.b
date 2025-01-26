@@ -13,11 +13,11 @@ that is stores in the data area (with sharing).
 
 #### Special Note ###########
 
-The Cintcode memory used to be allocated in cintsys.c using
+The Cintcode memory used to be allocated in cintmain.c using
 malloc(..). Under Windows this seems to create an area of memory that
 has read, write and execute permission as needed by the MC
 package. However, under some versions of Linux execution permission is
-not set, causing mcCall to fail. On such systems cintsys now uses mmap
+not set, causing mcCall to fail. On such systems cintmain now uses mmap
 rather than malloc to allocate the Cintcode memory.
 
 On the pentium instructions and data share the same cache and so the

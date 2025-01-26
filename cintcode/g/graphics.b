@@ -15,46 +15,117 @@ the global vector from g_grfbase upwards.
 
 For many applications using the SDL or GL libraries is preferable.
 
+21/07/2020
+Allowed both 8-bit to 24-bit pixels eliminating the
+need for the colour map.
+
 09/12/11
 Started inplementation
 */
 
-LET opengraphics(xmax, ymax) = VALOF
-{ // Allocate the rectangular pixel array and colour map.
+LET opengraphics(xmax, ymax, mode) = VALOF
+{ // xmax is the number of pixels per row
+  // ymax is the number of row
+  // Allocate the rectangular pixel array and colour map.
   // Return TRUE if successful
+  
   xsize, ysize := xmax, ymax
-  canvas, colourtab := 0, 0
+  canvas, palettev := 0, 0
 
-  plotcolour := col_black
-  plotx, ploty := 0, 0
-  rowlen := (ysize+3) & -4 // Round up to a multiple of 4 bytes
-  canvassize := xsize * rowlen           // Number of bytes
-  canvasupb := canvassize/bytesperword   // UPB in words
+  bmpmode := mode
+  UNLESS bmpmode=mode8bit | bmpmode=mode8bitalt DO bmpmode := mode24bit
+  
+  palettev := 0  // No colour table needed for 24-bit pixels
 
-  canvas := getvec(canvasupb)
+  IF bmpmode=mode8bit DO
+  { // The default colours for 8-bit pixels
+    col_black   :=   0
+    col_majenta :=  30
+    col_blue    :=  70
+    col_cyan    := 110
+    col_green   := 150
+    col_yellow  := 190
+    col_red     := 230
+    col_white   := 255
+
+    palettev := initpalettev()
+    bpp := 1
+  }
+
+  IF bmpmode=mode8bitalt DO
+  { // Alternative colours for 8-bit pixels
+    col_black   :=  0               // Palette position of #x000000
+    col_majenta :=  2 + (6*6+0)*6+5 // Palette position of #xFF00FF
+    col_blue    :=  2 + (0*6+0)*6+5 // Palette position of #x0000FF
+    col_cyan    :=  2 + (0*6+5)*6+5 // Palette position of #x00FFFF
+    col_green   :=  2 + (0*6+5)*6+0 // Palette position of #x00FF00
+    col_yellow  :=  2 + (6*6+5)*6+0 // Palette position of #xFFFF00
+    col_red     :=  2 + (6*6+0)*6+0 // Palette position of #xFF0000
+    col_white   :=  255             // Palette position of #xFFFFFF
+
+    palettev := initpalettevalt()
+    bpp := 1
+  }
+
+  IF bmpmode=mode24bit DO
+  { // The colours for 24-bit pixels, #xrrggbb
+    col_black   :=   #x000000
+    col_majenta :=   #xFF00FF
+    col_blue    :=   #x0000FF
+    col_cyan    :=   #x00FFFF
+    col_green   :=   #x00FF00
+    col_yellow  :=   #xFFFF00
+    col_red     :=   #xFF0000
+    col_white   :=   #xFFFFFF
+
+    bpp := 3
+  }
+
+//writef("bpp=%n bmpmode=%n col_blue=%x6*n", bpp, bmpmode, col_blue)
+  
+  currcolour    := col_black
+  currx, curry  := 0, 0
+  rowlen        := bpp*xsize               // Without rounding up
+  canvassize    := ysize * rowlen          // Number of bytes of bytes in the canvas
+  canvasupb     := canvassize/bytesperword // UPB in words of the canvas vector.
+
+  canvas := getvec(canvasupb) // Allocate the canvas vector
   UNLESS canvas RESULTIS FALSE
-  colourtab := initcolourtab()
+  //writef("canvas=%n canvassize=%n cansvasupb=%n*n", canvas, canvassize, canvasupb)
+  
+  // Set the entire canvas to white
+  //currcolour := col_white
+  //fillrect(0, 0, xsize/2-1, ysize/2-1)
+//  abort(1000)
+  currcolour := col_white
+  FOR x = 0 TO xsize-1 FOR y = 0 TO ysize-1 DO drawpoint(x, y)
 
-  FOR i = 0 TO canvasupb DO canvas!i := 0//randno(1000000)
-
+  //FOR i = 0 TO canvassize-1 DO
+  //{ IF i MOD 15 = 0 DO writef("*n%i4: ", i)
+  //  writef(" %x2", canvas%i)
+  //}
+  //newline()
+  //abort(1000)
   RESULTIS TRUE
 }
 
 AND closegraphics() BE
-{ IF canvas DO freevec(canvas)
+{ IF canvas   DO freevec(canvas)
+  IF palettev DO freevec(palettev)
 }
 
 AND wrgraph(filename) BE
-{ // Output .pbm format file to filename scale to 15x25cms.
-
-  LET xres  = muldiv(xsize, 100, 15)  // 15 cms horizontal 
-  LET yres  = xres//muldiv(ysize, 100, 25)  // 25 cms vertical
-  LET hdrsize     = 14
-  LET infohdrsize = 40
-  LET paletsize   = 4*256
-  LET dataoffset = hdrsize + infohdrsize + paletsize
-  LET stream = findoutput(filename)
-  LET ostream = output()
+{ // Output the canvas as a .bpm format file to filename, scale 300 DPI
+  
+  LET xres          = 11811  // Pixels per metre at 300 DPI (1m=39.37ins)
+  LET yres          = xres
+  LET hdrsize       = 14
+  LET infohdrsize   = 40
+  LET paletsize     = bmpmode=mode24bit -> 0, 4*256
+  LET dataoffset    = hdrsize + infohdrsize + paletsize
+  LET stream        = findoutput(filename)
+  LET ostream       = output()
+  LET rowlenrounded = (rowlen+3) & -4         // Rounded up to a multiple of 4
 
   UNLESS stream DO
   { writef("Trouble with file: %s*n", filename)
@@ -63,40 +134,73 @@ AND wrgraph(filename) BE
 
   selectoutput(stream)
 
+  // Example bmp file for a 2x2 image using 24-bit pixels
+
+  //                     0  1
+  //                  0  B  G
+  //                  1  R  W
+
+  // is the following sequence of bytes
+
+  // 00   42 4D             BM                 The Id field
+  // 02   46 00 00 00       70 bytes = 54+16   Size of the BMP file
+  // 06   00 00             Unused
+  // 08   00 00             Unused
+  // 0A   36 00 00 00       54 bytes           Offset of the pixel data
+  
+  // 0E   28 00 00 00       40 bytes           Number of bytes of DIB data
+  // 12   02 00 00 00       2 pixels (left to right)
+  // 16   02 00 00 00       2 pixels (bottom to top)
+  // 1A   01 00             1 plane            Number of colour planes
+  // 1C   18 00             24 bits            Number of bits per pixel
+  // 1E   00 00 00 00       0                  BI_RGB, no compression
+  // 22   10 00 00 00       16 bytes           Size of raw pixel data including padding
+  // 26   13 0B 00 00       2835 pixels/metre horizontal    Base on DPI
+  // 2A   13 0B 00 00       2835 pixels/metre vertical      Base on DPI
+  // 2E   00 00 00 00       0 colours          Number of colours in the palette
+  // 32   00 00 00 00       0 important colours
+
+  //                        In bmp point(0,0) is the top left pixel
+  
+  // 36   00 00 FF                             Red   pixel at (0,1)
+  // 39   FF FF FF                             White pixel at (1,1)
+  // 3C   00 00             Padding
+  // 3E   FF 00 00                             Blue  pixel at (0,0)
+  // 41   00 FF 00                             Green pixel at (1,0)
+  // 44   00 00             Padding
+
   // Write the header
-  wr1('B'); wr1('M') // "BM"
-  //wr4(hdrsize + infohdrsize + pixeldatasize) // File size in bytes
-  wr4(dataoffset + canvassize) // File size in bytes
-  wr4(0)             // Unused
-  wr4(dataoffset)    // File offset of pixel data
+  wr1('B'); wr1('M')               // 00 "BM"
+  wr4(dataoffset + canvassize)     // 02 File size in bytes
+  wr4(0)                           // 06 Unused
+  wr4(dataoffset)                  // 0A File offset of pixel data
 
   // Write the Info header
-  wr4(40)             // Size of info header = 40
-  wr4(ysize)          // Bitmap width
-  wr4(xsize)          // Bitmap height
-  wr2(1)              // Number of planes = 1
-  wr2(8)              // 8 bits per pixel
-  wr4(0)              // No compression
-  //wr4(pixeldatasize)  // Size of image
-  wr4(0)              // Size of image =0 valid if no compression
-  wr4(yres)           // Horizontal resolution in pixels per meter
-  wr4(xres)           // Vertical   resolution in pixels per meter
-  wr4(256)            // Number of colours actually used
-  wr4(0)              // All colours are important
+  wr4(40)                          // 0E Size of info header = 40
+  wr4(xsize)                       // 12 Width in pixels
+  wr4(ysize)                       // 16 Height in pixels
+  wr2(1)                           // 1A Number of planes, must = 1
+  wr2(bmpmode=mode24bit -> 24, 8)  // 1C 8 bits per pixel, could be 16, 24 0r 32
+  wr4(0)                           // 1E No compression
+  wr4(rowlenrounded*ysize)         // 22 Size of pixel data including padding
+  wr4(xres)                        // 26 Horizontal resolution in pixels per meter
+  wr4(yres)                        // 2A Vertical   resolution in pixels per meter
+  wr4(bmpmode=mode24bit -> 0, 256) // 2E Number of colours actually used, could be 0
+  wr4(0)                           // 32 All colours are important, generally ignored
 
-  // Write the colour table
-  FOR i = 0 TO 255 DO wr4(colourtab!i)
+  // Write the palette if using 8-bit pixels
+  UNLESS bmpmode=mode24bit FOR i = 0 TO 255 DO wr4(palettev!i)
 
-//sawritef("*nwrgraph: writing picture %nx%n*n", xsize, ysize)
-  FOR x = 0 TO xsize-1 DO
-  { LET xrow = x*rowlen 
-    IF x MOD 100 = 0 DO sawritef("raster line %i4 of %i4*n", x, xsize-1)
+//sawritef("*nwrgraph: writing picture %nx%n using pixels*n", xsize, ysize)
+  FOR y = ysize-1 TO 0 BY -1 DO
+  { // Output rows from bottom to top
+    LET yrow = y*rowlen 
 
-    FOR y = ysize-1 TO 0 BY -1 DO
-    { LET a = canvas%(xrow + y)
+    FOR x = 0 TO rowlen-1 DO // bpp is 1 or 3
+    { LET a = canvas%(yrow + x)
       wr1(a)
     }
-    FOR y = ysize+1 TO rowlen DO wr1(0) // Pad up to next 32-bit boundary
+    FOR y = rowlen TO rowlenrounded-1 DO wr1(0) // Pad up to next 4 byte boundary
   }
 
 fin:
@@ -104,55 +208,84 @@ fin:
   selectoutput(ostream)
 }
 
-AND initcolourtab() = VALOF
-{ LET colours = TABLE
-  //    //   n    red    green    blue
-  //         0,   255,    255,    255,  // White
-  //        28,   150,    150,    150,  // Light grey
-  //        56,     0,    150,    150,  // 
-  //        85,     0,      0,    190,  // Blue
-  //       113,   130,      0,    130,  //
-  //       142,   150,      0,      0,  // Red
-  //       170,   140,    140,      0,  // 
-  //       199,     0,    180,      0,  // Green
-  //       227,   100,    100,    100,  // Dark grey
-  //       256,     0,      0,      0   // Black
+AND initpalettev() = VALOF
+{ palettev := getvec(255)
+  UNLESS palettev RESULTIS 0
 
-      //   n        red    green    blue
-             0,     255,    255,    255,  // White
-          col_rb,   255,      0,    255,  // red-blue
-          col_b,      0,      0,    255,  // blue
-          col_gb,     0,    255,    255,  // blue-green
-          col_g,      0,    255,      0,  // green
-          col_rg,   255,    255,      0,  // green-red
-          col_r,    255,      0,      0,  // red 
-          255,        0,      0,      0   // black
-  LET t = colours
-  LET ctab = getvec(255)
-  UNLESS ctab RESULTIS 0
-
-  WHILE !t<255 DO
-  { LET p, r1, g1, b1 = t!0, t!1, t!2, t!3
-    LET q, r2, g2, b2 = t!4, t!5, t!6, t!7
-//sawritef("p=%i3  q=%i3  %i3 %i3 %i3  %i3 %i3 %i3*n",
-//            p, q, r1, g1, b1, r2, g2, b2)
-    FOR i = p TO q DO
-    { LET r = (r1*(q-i)+r2*(i-p))/(q-p)
-      LET g = (g1*(q-i)+g2*(i-p))/(q-p)
-      LET b = (b1*(q-i)+b2*(i-p))/(q-p)
-      ctab!i := r<<16 | g<<8 | b
-      //sawritef("%i3: %x6*n", i, ctab!i)
-    }
-    //sawritef("*n")
-    //abort(1000)
-    t := t+4
-  }
+  interpolate(   0,             0,      0,      0,  // black
+               col_majenta,   255,      0,    255   // red-blue
+             )
+  interpolate( col_majenta+1, 255,      0,    255,  // red-blue
+               col_blue,        0,      0,    255   // blue
+             )
+  interpolate( col_blue+1,      0,      0,    255,  // blue
+               col_cyan,        0,    255,    255   // blue-green
+             )
+  interpolate( col_cyan+1,      0,    255,    255,  // blue-green
+               col_green,       0,    255,      0   // green
+             )
+  interpolate( col_green+1,     0,    255,      0,  // green
+               col_yellow,    255,    255,      0   // green-red
+             )
+  interpolate( col_yellow+1,  255,    255,      0,  // green-red
+               col_red,       255,      0,      0   // red 
+             )
+  interpolate (col_red+1,     255,      0,      0,  // red 
+                  255,        255,    255,    255   // White
+             )
   //sawritef("*nColour table*n")
   //FOR i = 0 TO 255 DO
   //{ IF i MOD 8 = 0 DO sawrch('*n')
-  //  sawritef(" %x6", ctab!i)
+  //  sawritef(" %x6", palettev!i)
   //}
   //sawrch('*n')
+  RESULTIS palettev    
+}
+
+AND interpolate(p, r1, g1, b1,
+                q, r2, g2, b2) BE
+{ //writef("p=%i3 q=%i3 rgb1=(%n,%n,%n) rgb2(=(%n,%n,%n)*n", p,q, r1,g1,b1, r2,g2,b2)
+  FOR i = p TO q DO
+  { LET r = (r1*(q-i)+r2*(i-p))/(q-p)
+    LET g = (g1*(q-i)+g2*(i-p))/(q-p)
+    LET b = (b1*(q-i)+b2*(i-p))/(q-p)
+    palettev!i := r<<16 | g<<8 | b
+    //writef("%i3: %x6*n", i, palettev!i)
+  }
+}
+
+AND initpalettevalt() = VALOF
+{ // This function creates an alternative palette
+  // This is based on red having 7 intensities and green and blue
+  // having 6 intensities all equally spaced between 0 and 255.
+  // This gives 7x6x6 = 252 diferent colours in palette positions
+  // 2 to 253. Palette positions 0 and are bloth black and positions
+  // 254 and 255 are both white.
+  LET ctab = getvec(255)
+  UNLESS ctab RESULTIS 0
+
+  ctab!0 := #x000000
+  ctab!1 := #x000000
+  
+  FOR r = 0 TO 6 FOR g = 0 TO 5 FOR b = 0 TO 5 DO
+  { LET p = 2 + (r*6+g)*6+b // Palette position
+    LET cr = 255*r/6
+    LET cg = 255*g/5
+    LET cb = 255*b/5
+    ctab!p := cr<<16 | cg<<8 | cb
+    //sawritef("r=%n g=%n b=%n    p=%i3 colour=%x6*n", r, g, b, p, ctab!p)
+    //abort(1000)
+  }
+  ctab!254 := #xFFFFFF
+  ctab!255 := #xFFFFFF
+
+  //{ sawritef("*nColour table*n")
+  //  FOR i = 0 TO 255 DO
+  //  { IF i MOD 8 = 0 DO sawrch('*n')
+  //    sawritef(" %x6", ctab!i)
+  //  }
+  //  sawrch('*n')
+  //}
   RESULTIS ctab    
 }
 
@@ -175,30 +308,43 @@ AND wr4(w) BE
   binwrch(s%3)
 }
 
-AND wrpixel(x, y, col) BE IF 0<=x<xsize & 0<=y<ysize DO
-{ // Plot a point
-  LET p = x*rowlen + y
-//sawritef("wrpixel: x=%i4  y=%i4  col=%i3*n", x, y, col)
-  canvas%p := col
+AND setcolour(col) BE currcolour := col
+
+AND drawpoint(x, y) BE IF 0<=x<xsize & 0<=y<ysize DO
+{ // Plot a pixel at (x,y) with colour currcolour provided that it is in range.
+  // Place (0,0) at the bottom left hand corner of the image.
+  // Positive x is to the righr.
+  // Positive y is up.
+  LET p = (ysize-1-y)*rowlen + bpp*x  // Byte position of the pixel
+
+  TEST bmpmode=mode24bit
+  THEN { // Write 24-bit pixels
+         canvas%(p+0) := currcolour     // Blue
+         canvas%(p+1) := currcolour>>8  // Green
+         canvas%(p+2) := currcolour>>16 // Red
+       }
+  ELSE { canvas%p := currcolour          // For 8-bit pixels
+       }
 }
 
-AND wrpixel33(x, y, col) BE
+AND drawpoint33(x, y) BE
 { // Plot a 3x3 point
-  FOR i = -1 TO 1 FOR j = -1 TO 1 DO wrpixel(x+i, y+j, col)
+  FOR i = -1 TO 1 FOR j = -1 TO 1 DO drawpoint(x+i, y+j)
 }
 
-AND plotch(ch) BE TEST ch='*n'
-THEN { plotx, ploty := 10, ploty-14
+AND drawch(ch) BE TEST ch='*n'
+THEN { currx, curry := 10, curry-14 // Advance to the start of the next line
      }
-ELSE { LET x, y = plotx+1, ploty
+ELSE { LET x, y = currx+1, curry
        FOR line = 0 TO 11 DO
-         write_ch_slice(plotx, ploty+11-line, ch, line)
-       plotx := plotx+9
+         write_ch_slice(currx, curry+11-line, ch, line)
+       currx := currx+9
      }
 
 
 AND write_ch_slice(x, y, ch, line) BE
-{
+{ LET col = currcolour  // Save the cuttrny plot colour
+
   // Writes the horizontal slice of the given character.
 
   LET i = (ch&#x7F) - '*s'
@@ -302,7 +448,7 @@ AND write_ch_slice(x, y, ch, line) BE
 
   IF i>=0 DO charbase := charbase + 3*i
 
-  { LET col = plotcolour
+  { LET col = currcolour
     LET w = VALOF SWITCHON line INTO
     { CASE  0: RESULTIS charbase!0>>24
       CASE  1: RESULTIS charbase!0>>16
@@ -317,128 +463,135 @@ AND write_ch_slice(x, y, ch, line) BE
       CASE 10: RESULTIS charbase!2>> 8
       CASE 11: RESULTIS charbase!2
     }
-    TEST ((w >> 7) & 1) = 1
-    THEN wrpixel(x, y, col)
-    ELSE wrpixel(x, y, 0)
-
-    TEST ((w >> 6) & 1) = 1
-    THEN wrpixel(x+1, y, col)
-    ELSE wrpixel(x+1, y, 0)
-
-    TEST ((w >> 5) & 1) = 1
-    THEN wrpixel(x+2, y, col)
-    ELSE wrpixel(x+2, y, 0)
-
-    TEST ((w >> 4) & 1) = 1
-    THEN wrpixel(x+3, y, col)
-    ELSE wrpixel(x+3, y, 0)
-
-    TEST ((w >> 3) & 1) = 1
-    THEN wrpixel(x+4, y, col)
-    ELSE wrpixel(x+4, y, 0)
-
-    TEST ((w >> 2) & 1) = 1
-    THEN wrpixel(x+5, y, col)
-    ELSE wrpixel(x+5, y, 0)
-
-    TEST ((w >> 1) & 1) = 1
-    THEN wrpixel(x+6, y, col)
-    ELSE wrpixel(x+6, y, 0)
-
-    TEST (w & 1) = 1
-    THEN wrpixel(x+7, y, col)
-    ELSE wrpixel(x+7, y, 0)
-
-    wrpixel(x+8, y, 0)
+    
+    currcolour := (w>>7 & 1) > 0 -> col, col_white
+    drawpoint(x+0, y)
+    currcolour := (w>>6 & 1) > 0 -> col, col_white
+    drawpoint(x+1, y)
+    currcolour := (w>>5 & 1) > 0 -> col, col_white
+    drawpoint(x+2, y)
+    currcolour := (w>>4 & 1) > 0 -> col, col_white
+    drawpoint(x+3, y)
+    currcolour := (w>>3 & 1) > 0 -> col, col_white
+    drawpoint(x+4, y)
+    currcolour := (w>>2 & 1) > 0 -> col, col_white
+    drawpoint(x+5, y)
+    currcolour := (w>>1 & 1) > 0 -> col, col_white
+    drawpoint(x+6, y)
+    currcolour := (w    & 1) > 0 -> col, col_white
+    drawpoint(x+7, y)
+    currcolour := col_white
+    drawpoint(x+8, y)
   }
+  currcolour := col  // Restore the current plot colour
 }
 
-AND plotstr(s) BE FOR i = 1 TO s%0 DO plotch(s%i)
+AND drawstr(x, y, s) BE
+{ moveto(x, y)
+  FOR i = 1 TO s%0 DO drawch(s%i)
+}
+
+AND drawf(x, y, form, a, b, c, d, e, f, g, h) BE
+{ LET oldwrch = wrch
+  LET s = VEC 256/bytesperword
+  drawfstr := s
+  drawfstr%0 := 0
+  wrch := drawwrch
+  writef(form, a, b, c, d, e, f, g, h)
+  wrch := oldwrch
+  drawstr(x, y, drawfstr)
+}
+
+AND drawwrch(ch) BE
+{ LET strlen = drawfstr%0 + 1
+  drawfstr%strlen := ch
+  drawfstr%0 := strlen 
+}
 
 AND moveto(x, y) BE
-{ plotx, ploty := x, y
+{ currx, curry := x, y
 }
 
 AND moveby(dx, dy) BE
-{ plotx, ploty := plotx+dx, ploty+dy
+{ currx, curry := currx+dx, curry+dy
 }
 
 AND drawto(x, y) BE
 { // This is Bresenham's algorithm
-  LET dx = ABS(x-plotx)
-  AND dy = ABS(y-ploty)
-  LET sx = plotx<x -> 1, -1
-  LET sy = ploty<y -> 1, -1
+  LET dx = ABS(x-currx)
+  AND dy = ABS(y-curry)
+  LET sx = currx<x -> 1, -1
+  LET sy = curry<y -> 1, -1
   LET err = dx-dy
   LET e2 = ?
 
-  { wrpixel(plotx, ploty, plotcolour)
-    IF plotx=x & ploty=y RETURN
+  { drawpoint(currx, curry)
+    IF currx=x & curry=y RETURN
     e2 := 2*err
     IF e2 > -dy DO
     { err := err - dy
-      plotx := plotx+sx
+      currx := currx+sx
     }
     IF e2 < dx DO
     { err := err + dx
-      ploty := ploty + sy
+      curry := curry + sy
     }
   } REPEAT
 }
 
-AND drawby(dx, dy) BE drawto(plotx+dx, ploty+dy)
+AND drawby(dx, dy) BE drawto(currx+dx, curry+dy)
 
-AND drawrect(x0, y0, x1, y1) BE
-{ LET xmin, xmax = x0, x1
-  LET ymin, ymax = y0, y1
-  IF xmin>xmax DO xmin, xmax := x1, x0
-  IF ymin>ymax DO ymin, ymax := y1, y0
+AND drawrect(x, y, w, h) BE
+{ LET xmin, xmax = x, x+w
+  LET ymin, ymax = y, y+h
+  IF xmin>xmax DO { xmin := xmax; xmax := x }
+  IF ymin>ymax DO { ymin := ymax; ymax := y }
 //sawritef("drawrect: %i4 %i4 %i4 %i4*n",xmin,ymin,xmax,ymax)
-  FOR x = xmin TO xmax DO
-  { wrpixel(x, ymin, plotcolour)
-    wrpixel(x, ymax, plotcolour)
+  FOR p = xmin TO xmax DO
+  { drawpoint(p, ymin)
+    drawpoint(p, ymax)
   }
-  FOR y = ymin+1 TO ymax-1 DO
-  { wrpixel(xmin, y, plotcolour)
-    wrpixel(xmax, y, plotcolour)
+  FOR p = ymin+1 TO ymax-1 DO
+  { drawpoint(xmin, p)
+    drawpoint(xmax, p)
   }
-  plotx, ploty := x0, y0
 }
 
-AND fillrect(x0, y0, x1, y1) BE
-{ LET xmin, xmax = x0, x1
-  LET ymin, ymax = y0, y1
-  IF xmin>xmax DO xmin, xmax := x1, x0
-  IF ymin>ymax DO ymin, ymax := y1, y0
-//sawritef("fillrect: %i4 %i4 %i4 %i4*n",xmin,ymin,xmax,ymax)
-  FOR x = xmin TO xmax FOR y = ymin TO ymax DO
-  { wrpixel(x, y, plotcolour)
-    //sawritef("fillrect: x=%i4  y=%i4*n", x, y)
+AND fillrect(x, y, w, h) BE
+{ LET xmin, xmax = x, x+w
+  LET ymin, ymax = y, y+h
+  IF xmin>xmax DO { xmin := xmax; xmax := x }
+  IF ymin>ymax DO { ymin := ymax; ymax := y }
+
+  FOR p = xmin TO xmax FOR q = ymin TO ymax DO
+  { drawpoint(p, q)
   }
-  plotx, ploty := x0, y0
 }
 
-AND drawrndrect(x0,y0,x1,y1,radius) BE
-{ LET xmin, xmax = x0, x1
-  LET ymin, ymax = y0, y1
+AND drawrndrect(x, y, w, h, radius) BE
+{ LET xmin, xmax = x, x+w
+  LET ymin, ymax = y, y+h
   LET r = radius
   LET f, ddf_x, ddf_y, x, y = ?, ?, ?, ?, ?
 
-  IF xmin>xmax DO xmin, xmax := x1, x0
-  IF ymin>ymax DO ymin, ymax := y1, y0
+  IF xmin>xmax DO { xmin := xmax; xmax := x }
+  IF ymin>ymax DO { ymin := ymax; ymax := y }
+
+  // Correct the radius if necessary
   IF r<0 DO r := 0
   IF r+r>xmax-xmin DO r := (xmax-xmin)/2
   IF r+r>ymax-ymin DO r := (ymax-ymin)/2
 
-//sawritef("drawrndrect: %i4 %i4 %i4 %i4 %i4*n",xmin,ymin,xmax,ymax,radius)
+  // First draw everything other than the rounded corners
   FOR x = xmin+r TO xmax-r DO
-  { wrpixel(x, ymin, plotcolour)
-    wrpixel(x, ymax, plotcolour)
+  { drawpoint(x, ymin)
+    drawpoint(x, ymax)
   }
   FOR y = ymin+r+1 TO ymax-r-1 DO
-  { wrpixel(xmin, y, plotcolour)
-    wrpixel(xmax, y, plotcolour)
+  { drawpoint(xmin, y)
+    drawpoint(xmax, y)
   }
+  
   // Now draw the rounded corners
   // This is commonly called Bresenham's circle algorithm since it
   // is derived from Bresenham's line algorithm.
@@ -448,10 +601,10 @@ AND drawrndrect(x0,y0,x1,y1,radius) BE
   x := 0
   y := r
 
-  wrpixel(xmax, ymin+r, plotcolour)
-  wrpixel(xmin, ymin+r, plotcolour)
-  wrpixel(xmax, ymax-r, plotcolour)
-  wrpixel(xmin, ymax-r, plotcolour)
+  drawpoint(xmax, ymin+r)
+  drawpoint(xmin, ymin+r)
+  drawpoint(xmax, ymax-r)
+  drawpoint(xmin, ymax-r)
 
   WHILE x<y DO
   { // ddf_x = 2*x + 1
@@ -465,36 +618,35 @@ AND drawrndrect(x0,y0,x1,y1,radius) BE
     x := x+1
     ddf_x := ddf_x + 2
     f := f + ddf_x
-    wrpixel(xmax-r+x, ymax-r+y, plotcolour) // octant 2
-    wrpixel(xmin+r-x, ymax-r+y, plotcolour) // Octant 3
-    wrpixel(xmax-r+x, ymin+r-y, plotcolour) // Octant 7
-    wrpixel(xmin+r-x, ymin+r-y, plotcolour) // Octant 6
-    wrpixel(xmax-r+y, ymax-r+x, plotcolour) // Octant 1
-    wrpixel(xmin+r-y, ymax-r+x, plotcolour) // Octant 4
-    wrpixel(xmax-r+y, ymin+r-x, plotcolour) // Octant 8
-    wrpixel(xmin+r-y, ymin+r-x, plotcolour) // Octant 5
+    drawpoint(xmax-r+x, ymax-r+y) // octant 2
+    drawpoint(xmin+r-x, ymax-r+y) // Octant 3
+    drawpoint(xmax-r+x, ymin+r-y) // Octant 7
+    drawpoint(xmin+r-x, ymin+r-y) // Octant 6
+    drawpoint(xmax-r+y, ymax-r+x) // Octant 1
+    drawpoint(xmin+r-y, ymax-r+x) // Octant 4
+    drawpoint(xmax-r+y, ymin+r-x) // Octant 8
+    drawpoint(xmin+r-y, ymin+r-x) // Octant 5
   }
-
-  plotx, ploty := x0, y0
 }
 
-AND fillrndrect(x0, y0, x1, y1, radius) BE
-{ LET xmin, xmax = x0, x1
-  LET ymin, ymax = y0, y1
+AND fillrndrect(x, y, w, h, radius) BE
+{ LET xmin, xmax = x, x+w
+  LET ymin, ymax = y, y+h
   LET r = radius
   LET f, ddf_x, ddf_y, x, y = ?, ?, ?, ?, ?
   LET lastx, lasty = 0, 0
 
-  IF xmin>xmax DO xmin, xmax := x1, x0
-  IF ymin>ymax DO ymin, ymax := y1, y0
+  IF xmin>xmax DO { xmin := xmax; xmax := x }
+  IF ymin>ymax DO { ymin := ymax; ymax := y }
+
+  // Correct the radius is necessary
   IF r<0 DO r := 0
   IF r+r>xmax-xmin DO r := (xmax-xmin)/2
   IF r+r>ymax-ymin DO r := (ymax-ymin)/2
 
-//sawritef("fillrndrect: %i4 %i4 %i4 %i4 %i4*n",xmin,ymin,xmax,ymax,radius)
   FOR x = xmin TO xmax FOR y = ymin+r TO ymax-r DO
-  { wrpixel(x, y, plotcolour)
-    wrpixel(x, y, plotcolour)
+  { drawpoint(x, y)
+    drawpoint(x, y)
   }
 
   // Now draw the rounded corners
@@ -506,10 +658,10 @@ AND fillrndrect(x0, y0, x1, y1, radius) BE
   x := 0
   y := r
 
-  wrpixel(xmax, ymin+r, plotcolour)
-  wrpixel(xmin, ymin+r, plotcolour)
-  wrpixel(xmax, ymax-r, plotcolour)
-  wrpixel(xmin, ymax-r, plotcolour)
+  drawpoint(xmax, ymin+r)
+  drawpoint(xmin, ymin+r)
+  drawpoint(xmax, ymax-r)
+  drawpoint(xmin, ymax-r)
 
   WHILE x<y DO
   { // ddf_x = 2*x + 1
@@ -523,115 +675,113 @@ AND fillrndrect(x0, y0, x1, y1, radius) BE
     x := x+1
     ddf_x := ddf_x + 2
     f := f + ddf_x
-    wrpixel(xmax-r+x, ymax-r+y, plotcolour) // octant 2
-    wrpixel(xmin+r-x, ymax-r+y, plotcolour) // Octant 3
-    wrpixel(xmax-r+x, ymin+r-y, plotcolour) // Octant 7
-    wrpixel(xmin+r-x, ymin+r-y, plotcolour) // Octant 6
-    wrpixel(xmax-r+y, ymax-r+x, plotcolour) // Octant 1
-    wrpixel(xmin+r-y, ymax-r+x, plotcolour) // Octant 4
-    wrpixel(xmax-r+y, ymin+r-x, plotcolour) // Octant 8
-    wrpixel(xmin+r-y, ymin+r-x, plotcolour) // Octant 5
+    drawpoint(xmax-r+x, ymax-r+y) // octant 2
+    drawpoint(xmin+r-x, ymax-r+y) // Octant 3
+    drawpoint(xmax-r+x, ymin+r-y) // Octant 7
+    drawpoint(xmin+r-x, ymin+r-y) // Octant 6
+    drawpoint(xmax-r+y, ymax-r+x) // Octant 1
+    drawpoint(xmin+r-y, ymax-r+x) // Octant 4
+    drawpoint(xmax-r+y, ymin+r-x) // Octant 8
+    drawpoint(xmin+r-y, ymin+r-x) // Octant 5
 
     UNLESS x=lastx DO
     { FOR fx = xmin+r-y+1 TO xmax-r+y-1 DO
-      { wrpixel(fx, ymax-r+x, plotcolour)
-        wrpixel(fx, ymin+r-x, plotcolour)
+      { drawpoint(fx, ymax-r+x)
+        drawpoint(fx, ymin+r-x)
       }
       lastx := x
     }
     UNLESS y=lasty DO
     { FOR fx = xmin+r-x+1 TO xmax-r+x-1 DO
-      { wrpixel(fx, ymax-r+y, plotcolour)
-        wrpixel(fx, ymin+r-y, plotcolour)
+      { drawpoint(fx, ymax-r+y)
+        drawpoint(fx, ymin+r-y)
       }
     }
   }
-
-  plotx, ploty := x0, y0
 }
 
-AND drawcircle(x0, y0, radius) BE
+AND drawcircle(x, y, radius) BE
 { // This is commonly called Bresenham's circle algorithm since it
   // is derived from Bresenham's line algorithm.
   LET f = 1 - radius
   LET ddf_x = 1
   LET ddf_y = -2 * radius
-  LET x = 0
-  LET y = radius
-  wrpixel(x0, y0+radius, plotcolour)
-  wrpixel(x0, y0-radius, plotcolour)
-  wrpixel(x0+radius, y0, plotcolour)
-  wrpixel(x0-radius, y0, plotcolour)
+  LET p = 0
+  LET q = radius
+  drawpoint(x, y+radius)
+  drawpoint(x, y-radius)
+  drawpoint(x+radius, y)
+  drawpoint(x-radius, y)
 
-  WHILE x<y DO
-  { // ddf_x = 2*x + 1
-    // ddf_y = -2 * y
-    // f = x*x + y*y - radius*radius + 2*x - y + 1
+  WHILE p<q DO
+  { // ddf_x = 2*p + 1
+    // ddf_y = -2 * q
+    // f = p*p + q*q - radius*radius + 2*p - q + 1
     IF f>=0 DO
-    { y := y-1
+    { q := q-1
       ddf_y := ddf_y + 2
       f := f + ddf_y
     }
-    x := x+1
+    p := p+1
     ddf_x := ddf_x + 2
     f := f + ddf_x
-    wrpixel(x0+x, y0+y, plotcolour)
-    wrpixel(x0-x, y0+y, plotcolour)
-    wrpixel(x0+x, y0-y, plotcolour)
-    wrpixel(x0-x, y0-y, plotcolour)
-    wrpixel(x0+y, y0+x, plotcolour)
-    wrpixel(x0-y, y0+x, plotcolour)
-    wrpixel(x0+y, y0-x, plotcolour)
-    wrpixel(x0-y, y0-x, plotcolour)
+    drawpoint(x+p, y+q)
+    drawpoint(x-p, y+q)
+    drawpoint(x+p, y-q)
+    drawpoint(x-p, y-q)
+    drawpoint(x+q, y+p)
+    drawpoint(x-q, y+p)
+    drawpoint(x+q, y-p)
+    drawpoint(x-q, y-p)
   }
 }
 
-AND fillcircle(x0, y0, radius) BE
+AND fillcircle(x, y, radius) BE
 { // This is commonly called Bresenham's circle algorithm since it
   // is derived from Bresenham's line algorithm.
   LET f = 1 - radius
   LET ddf_x = 1
   LET ddf_y = -2 * radius
-  LET x = 0
-  LET y = radius
+  LET p = 0
+  LET q = radius
   LET lastx, lasty = 0, 0
-  wrpixel(x0, y0+radius, plotcolour)
-  wrpixel(x0, y0-radius, plotcolour)
-  FOR x = x0-radius TO x0+radius DO wrpixel(x, y0, plotcolour)
+  drawpoint(x, y+radius)
+  drawpoint(x, y-radius)
+  FOR p = x-radius TO x+radius DO drawpoint(p, y)
 
-  WHILE x<y DO
-  { // ddf_x = 2*x + 1
-    // ddf_y = -2 * y
-    // f = x*x + y*y - radius*radius + 2*x - y + 1
+  WHILE p<q DO
+  { // ddf_x = 2*p + 1
+    // ddf_y = -2 * q
+    // f = p*p + q*q - radius*radius + 2*p - q + 1
     IF f>=0 DO
-    { y := y-1
+    { q := q-1
       ddf_y := ddf_y + 2
       f := f + ddf_y
     }
-    x := x+1
+    p := p+1
     ddf_x := ddf_x + 2
     f := f + ddf_x
-    wrpixel(x0+x, y0+y, plotcolour)
-    wrpixel(x0-x, y0+y, plotcolour)
-    wrpixel(x0+x, y0-y, plotcolour)
-    wrpixel(x0-x, y0-y, plotcolour)
-    wrpixel(x0+y, y0+x, plotcolour)
-    wrpixel(x0-y, y0+x, plotcolour)
-    wrpixel(x0+y, y0-x, plotcolour)
-    wrpixel(x0-y, y0-x, plotcolour)
-    UNLESS x=lastx DO
-    { FOR fx = x0-y+1 TO x0+y-1 DO
-      { wrpixel(fx, y0+x, plotcolour)
-        wrpixel(fx, y0-x, plotcolour)
+    drawpoint(x+p, y+q)
+    drawpoint(x-p, y+q)
+    drawpoint(x+p, y-q)
+    drawpoint(x-p, y-q)
+    drawpoint(x+q, y+p)
+    drawpoint(x-q, y+p)
+    drawpoint(x+q, y-p)
+    drawpoint(x-q, y-p)
+    UNLESS p=lastx DO
+    { FOR fx = x-q+1 TO x+q-1 DO
+      { drawpoint(fx, y+p)
+        drawpoint(fx, y-p)
       }
-      lastx := x
+      lastx := p
     }
-    UNLESS y=lasty DO
-    { FOR fx = x0-x+1 TO x0+x-1 DO
-      { wrpixel(fx, y0+y, plotcolour)
-        wrpixel(fx, y0-y, plotcolour)
+    UNLESS q=lasty DO
+    { FOR fx = x-p+1 TO x+p-1 DO
+      { drawpoint(fx, y+q)
+        drawpoint(fx, y-q)
       }
-      lasty := y
+      lasty := q
     }
   }
 }

@@ -1,12 +1,32 @@
 /*
-This program compiles .sial files to .s files for the
-Pentium pro and later Intel processors. The compiled code
-will run on earlier processors provided no floating point
-operations are compiled.
+This program compiles .sial files to .s files for the Pentium pro and
+later Intel processors. For instance it uses the fucomip instruction
+not availabke on earlier processors. The compiled code will run on
+earlier processors provided no floating point operations are
+compiled. It currently does not compile the SELLD and SELST
+instructions so the .sial files must currently be compiled with the
+NOSELST option.
 
-Implemented by Martin Richards (c) September 2014
+Implemented by Martin Richards (c) January 2019
 
 Change history
+
+01/02/2019
+Another change in register names. Sial registers are still A, B and C,
+but x and y are used for the Pentium registers %ebx and %ecx. The
+floating registers st[0] and st[1] are used. and global 11 is used
+when transfering values between x and y and the floating point
+registers.  The Sial register C is held in %edx.
+
+25/01/2019
+Started a major change to the way floating point operations
+are optimised. Registers L and R will disappear and lbits and
+abits will be renamed abits and bbits. The meaning of the
+bits will change.
+
+14/01/2019
+Made minor changes to make it compatible with the latest
+version of BCPL and SIAL.
 
 21/08/2014
 Working on simple optimisations to the floating point operations.
@@ -19,53 +39,7 @@ FIX, FLOAT, #ABS, #*, #/, #+, #-, #=, #~=, #<=, #>=, #< and #>.
 SECTION "sial-686"
 
 GET "libhdr"
-
 GET "sial.h"
-
-MANIFEST {
-  k_q=0   // Value not known to be in a memory location
-//  k_g     // Global variable Gn
-//  k_l     // Static location addressed by Ln
-//  k_m     // Static location addressed by Mn
-
-  b_a=1   // value is in A
-  b_b=2   // Value is in B
-  b_s=4   // Value is in S  -- never allow L and R to both be in S
-  b_x=8   // Value is in X  -- never allow L and R to both be in X
-  b_p=16  // Value is in Pn
-  b_g=32  // Value is in Gn
-  b_l=64  // Value is in Ln
-  b_m=128 // Value is in Mn
-
-  b_none=0
-  b_all= b_a+b_b+b_s+b_x+b_p+b_g+b_l+b_m
-  b_as= b_a+b_s
-  b_ap= b_a+b_p
-  b_ag= b_a+b_g
-  b_al= b_a+b_l
-  b_am= b_a+b_m
-  b_bs= b_b+b_s
-  b_bp= b_b+b_p
-  b_bg= b_b+b_g
-  b_bl= b_b+b_l
-  b_bm= b_b+b_m
-  b_sx=b_s+b_x
-  b_abs= b_a+b_b+b_s
-  b_abx= b_a+b_b+b_x
-  b_absx= b_a+b_b+b_s+b_x
-  b_sx=b_s+b_x
-  b_pglm=b_p+b_g+b_l+b_m
-  b_spglm=b_s+b_p+b_g+b_l+b_m
-
-  bn_a= b_all - b_a
-  bn_b= b_all - b_b
-  bn_s= b_all - b_s
-  bn_x= b_all - b_x
-  bn_p= b_all - b_p
-  bn_g= b_all - b_g
-  bn_l= b_all - b_l
-  bn_m= b_all - b_m
-}
 
 GLOBAL {
 sialin: ug
@@ -88,160 +62,184 @@ modletter
 charv
 labnumber
 
-lbits  // Bit pattern saying where the value of L can be found
-rbits  // Bit pattern saying where the value of R can be foun
-ln     // n if lbits contains b_p, b_g, b_l or b_m
-rn     // n if rbits contains b_p, b_g, b_l or b_m
+Areg     // =1 => A is held in x ie %ebx
+         // =2 => A is held in y ie %ecx
+         // =3 => A is held in z ie %edx
+         // =4 => A is in st[0]
+         // =5 => A is in st[1]
+Ak       // =1 => A has value Avalk
+Amem     // =1 => A is in Pn when n=Aval
+         // =2 => A is in Gn when n=Aval
+         // =3 => A is Ln when n=Aval
+         // =4 => A is Mn when n=Aval
+Avalk
+Aval
 
+Breg     // =1 => B is held in x ie %ebx
+         // =2 => B is held in y ie %ecx
+         // =3 => B is held in z ie %edx
+         // =4 => B is in st[0]
+         // =5 => B is in st[1]
+Bk       // =1 => B has value Bvalk
+Bmem     // =1 => B is in Pn when n=Bval
+         // =2 => B is in Gn when n=Bval
+         // =3 => B is Ln when n=Bval
+         // =4 => B is Mn when n=Bval
+Bvalk
+Bval
 
-regr_k; rn // Describes the value in the right hand operand R
-               // It must be one of Pn, Gn, Ln, Mn or Q
-               // If R is known to be in a register or in S then
-               // one or more of RinA, RinB, RinS or RinX will be TRUE.
-
-regl_k; ln // Describes what should be in the left operand L
-
-/*
-Abstract registers L and R typically hold the left and right hand
-operands. There are two physical integer registers A and B and one
-floating point register called X. The machine registers %ebx and
-%ecx hold the values of A and B and the floating point accumulator
-%st(0) holds X.
-
-Moving a value between A (%ebx) and X (%st(0)) a memory location must
-be used. This is often location S (0(%esp)). The following variables
-remember which of L and R hold copies of A, B and R.
-*/
-
-tracing  // =TRUE causes debuggin info to be inserted in the
-         // assembly code file as commens
+tracing  // =TRUE causes debugging info to be embedded in the
+         // compiled assembly code file as comments
 prstate
+errflag
 
-moveR2L  // Compile code move R to L
-moveR2A  // Compile code to ensure R is in A
-moveR2B  // Compile code to ensure R is in B
-moveR2S  // Compile code to ensure R is in S
-moveR2X  // Compile code to ensure R is in X
+// The move functions update the state variables
 
-moveL2R  // Compile code move L to R
-moveL2A  // Compile code to ensure L is in A
-moveL2B  // Compile code to ensure L is in B
-moveL2S  // Compile code to ensure L is in S
-moveL2X  // Compile code to ensure L is in X
+moveA2x    // Compile code to ensure A is in x
+moveA2y    // Compile code to ensure A is in y
+pushA2s    // Compile code to push A into the st stack
 
+moveB2x    // Compile code to ensure B is x
+moveB2y    // Compile code to ensure B is y
+pushB2s    // Compile code to push B into the ST stack
+
+genK2reg   // Compile code to ensure const k is in a register.
+
+pops2mem   // Compile code to pop st[0] to a memory location
+
+// The gen functions compile code but do not update the state
+//they basically call sequences of writef calls.
+
+genK2r
 }
 
 /*
-Optimisation
+Optimisation details
 
 Sial is an assembly language for a simple machine having registers
 such as A, B, P, G and PC. These registers typically map into central
 registers of the target machine. For this implementation, A is %ebx, B
-is %ecx, P is %ebp, G is %esi etc. Sial instructions such as LP P3
+is %ecx, P is %ebp and G is %esi. Sial instructions such as LP P3
 cause A to be set to the value of P!3 and this translates to 
 
       movl 12(%ebp),%ebx.
 
-Unfortunately, now that Sial includes floating point operators, the LP
-instruction should not necessarily update %ebx. For example, consider
-the compilation of x := x #+ y whose Sial code might be
+Sial now includes floating point operators, so the LP instruction
+should not necessarily update %ebx. For example, consider the
+compilation of x := x #+ y whose Sial code might be
 
  LP P3           A := P!3
  ATBLP P4        B := A; A := P!4
  FADD            A := B #+ A; B := ?
  SP P3           P!3 := A
 
-The code we might like to generate is
+The compiled code we might like to generate is
 
  flds  12(%ebp)   push P!3 into %st(0) 
  fadds 16(%ebp)   %st(0) := %st(0) #+ P!4
  fstps 12(%ebp)   pop st(0) to P!3
 
-So, for floating point operations such as FADD, the LP instruction
-should move P!3 into %st(0) rather than %ebx. To achieve this, this
-translator delays the generation of code by introducing two abstract
-registers L and R whose actual values may be held in any of the
-physical registers A, B or X, or possibly held in a memory location S
-or one addressed relative to P or G, or accessed using an L or M
-label. There are two variables lbits and rbits that identify where the
-values of L and R can be found. The constants b_a, b_b, b_s, b_x, b_p,
-b_g, b_l and b_m identify bit positions in lbits and rbits specifying
-where the values of L and R can be found.
+A dyadic floating point operations such as FADD should cause one or
+both of its operands to be pushed onto the st stack. In this case only
+B is pushed since the value of A is addressible allowing fadds to be
+used.
 
-If (lbits & b_a) > 0 then the value of L is in the A register.
-If (lbits & b_b) > 0 then the value of L is in the B register.
-If (lbits & b_s) > 0 then the value of L is in S, addreessed by (%esp).
-If (lbits & b_x) > 0 then the value of L is in the floating point
-                     register X addressed by %st.
-If (lbits & b_p) > 0 then the value of L is in the local variable
-                     location addressed by P!n where n is held in ln.
-If (lbits & b_g) > 0 then the value of L is in the global variable
-                     location addressed by G!n where n is held in ln.
-If (lbits & b_l) > 0 then the value of L is in the memory location
-                     addressed by label Ln where n is held in ln.
-If (lbits & b_m) > 0 then the value of L is in the memory location
-                     addressed by label Mn where n is held in ln.
-In none of these bits are set in lbits the the value of L is undefined.
+To achieve this, this translator delays the generation of code by
+regarding A and B as abtract registers whose values may not be in the
+physical register Sial expects. The actual value of an sial register
+may be held in one or more places a specified by variable such as Ap
+and Aval. The possible places are the physical registers x and y, a
+constant k, st[0] or st[1], or a memory locaion sucg as Pn, Gn, Ln or
+Mn.
 
-The meaning of the bits in rbits is defined similarly, but using rn
-to specify n.
-
-By convention the values of L and R same register (A, B, S or X) at
-the same time.
-
-The register S is actually on the run time stack with address (%esp).
+The Pentium allows an st stack of 8 floating point numbers but this
+codegenerator only uses two levels. The st stack is empty if both As
+and Bs are zero. A is held in st[0] if As=1 and B is held in st[0] if
+Bs=1.  Similarly, A is held in st[1] if As=2 and B is held in st[1] if
+Bs=2.  But there is the restriction that As and Bs cannot be equal if
+either is non zero.
 
 The state variables typically change when reading Sial statements or
-generating machine instructions. These changes need to be done with
-care to ensure the result is always consistent and that no information
-is lost. For example, observe how the variables change during the
-translation of the Sial code given above code.
+after generating machine instructions. These changes must be done with
+care to ensure that the state is always consistent and that no
+information is lost. For example, observe how the variables change
+during the translation of the Sial code given above code.
 
  Sial          Code            State
 
  LP P3
-                               L=   R=P3
+                               B=?   A=P3
  ATBLP P4
-                               L=P3  R=P4
+                               B=P3  A=P4
  FADD
                flds 12(%ebp)
-                               L=XP3  R=P4
+                               B=st[0]P3  A=P4
                fadds 16(%ebp)
-                               L=   R=X
+                               B=?  A=st[0]     --  = P3 #+ P4
  SP P3
                fstps 12(%ebp)
-                               L=   R=P3
+                               B=?   A=P3
 
-This shows that the LP P3 statement specifies that the value of R is
-in local variable 3 (R=P3). We assume that the value of L at that
-moment is unspecified. The instruction ATBLP P4 causes the value in R
-to be moved to L before specifying that R is in local variable P4. The
+This shows that the LP P3 statement specifies that the value of A is
+in local variable 3 (A=P3). We assume that the value of B at that
+moment is unspecified. The instruction ATBLP P4 causes the value in A
+to be moved to B before specifying that A is in local variable P4. The
 statement FADD must compile code to perform the floating point
-addition of P3 and P4. It does this by pushing P3 onto the floating
-point stack (flds 12(%ebp)). At this point L=XP3 stating that the
-value of L is in both X and local variable 3 having been pushed there
-by flds. The instruction fadd 16(%ebp) then performs the floating
-point addition of local 4 (P4). The resulting state shows that R holds
-the result in X and that L has become undefined.  Finally, the
-statement SP P3, pops %st(0) from the floating point stack storing X
-in local 3 (at address 12(%ebp)). R is now known to be in local 3
-(R=P3) but not in X because the floating point stack has been popped
-(by fstps).
+addition of P3 and P4. It does this by first pushing P3 onto the
+floating point stack (flds 12(%ebp)). At this point B=st[0]P3 stating
+that the value of B is both in st[0] and in local variable 3.  The
+instruction fadds 16(%ebp) then performs the floating point addition
+of local 4 whose address is 16(%ebp). The resulting state shows that A
+holds the result in st[0] and that B has become undefined.  Finally,
+the statement SP P3, pops %st(0) from the floating point stack storing
+it in local 3 (at address 12(%ebp)). A is now known to be in local 3
+(A=P3) but no no longer in st[0] because the floating point stack has
+been popped (by fstps).
 
-To move a value from say A (%ebx) to the floating point register X
-(%st(0)), it is necessary to use a memory location. Often the stack
-location S (%esp) is used as in:
+To push a value from say A (%ebx) onto the floating point stack, it is
+usually necessary to use a memory location. Often the memory location G11
+is used as in:
 
   push %ebx
-  flds (%esp)
+  flds 44(%esi)
 
-When the values of L and R are held in A and B, L normally prefers to
-use B and R prefers A.
+The only slight disadvantage is that G11 might be corrupted by any
+floating point operation.
 
 */
 
 LET trace(str, a, b, c) BE IF tracing DO
   writef(str, a, b, c)
+
+AND prstate() BE IF tracing DO
+{ writef("#                 B=")
+  IF (Breg+Bk+Bmem)=0 DO wrch('?')
+  IF Breg=1 DO wrch('x')
+  IF Breg=2 DO wrch('y')
+  IF Breg=3 DO wrch('z')
+  IF Breg=4 DO writef("st[0]*n")
+  IF Breg=5 DO writef("st[1]*n")
+  IF Bk DO writef("K%n", Bvalk)
+  IF Bmem=1 DO writef("P%n", Bval)
+  IF Bmem=2 DO writef("G%n", Bval)
+  IF Bmem=3 DO writef("L%n", Bval)
+  IF Bmem=4 DO writef("M%n", Bval)
+
+  writef("    A=")
+  IF (Areg+Ak+Amem)=0 DO wrch('?')
+  IF Areg=1 DO wrch('x')
+  IF Areg=2 DO wrch('y')
+  IF Areg=3 DO wrch('z')
+  IF Areg=4 DO writef("st[0]*n")
+  IF Areg=5 DO writef("st[1]*n")
+  IF Ak DO writef("K%n", Avalk)
+  IF Amem=1 DO writef("P%n", Aval)
+  IF Amem=2 DO writef("G%n", Aval)
+  IF Amem=3 DO writef("L%n", Aval)
+  IF Amem=4 DO writef("M%n", Aval)
+
+newline()
+}
 
 LET start() = VALOF
 { LET argv = VEC 20
@@ -254,6 +252,8 @@ LET start() = VALOF
   charv := cv
   labnumber := 0
 
+  errflag := FALSE
+  
   asmout := 0
   stdout := output()
   IF rdargs("FROM,TO/K,-t/s", argv, 20)=0 DO
@@ -263,6 +263,8 @@ LET start() = VALOF
   IF argv!0=0 DO argv!0 := "prog.sial"  // FROM
   IF argv!1=0 DO argv!1 := "prog.s"     // TO/K
   tracing := argv!2                     // -t/s
+
+tracing := TRUE      // Currently always have tracing on
 
   sialin := findinput(argv!0)
   IF sialin=0 DO
@@ -281,18 +283,20 @@ LET start() = VALOF
   selectoutput(asmout)
 
   // Initialise the state
-  lbits, rbits := 0, 0
-  ln, rn := 0, 0
+  Areg, Ak, Amem := 0, 0, 0
+  Breg, Bk, Bmem := 0, 0, 0
+
 
   nextfcode := 0 // Initialise the F code peeking mechanism
 
   writef("# Code generated by sial-686*n*n")
-  writef(".text*n.align 16*n")
+  writef(".text*n*n")
+  writef(".align 16*n")
 
   scan()
 
   endread()
-  UNLESS asmout=stdout DO endwrite()
+  UNLESS asmout=stdout DO endstream(asmout)
   selectoutput(stdout)
   writef("Conversion complete*n")
   RESULTIS 0
@@ -304,7 +308,7 @@ AND nextlab() = VALOF
 }
 
 AND rdcode(letter) = VALOF
-{ // Read an Sial iten of the form <let>n
+{ // Read an Sial item of the form <letter>n
   // <let> is one of F, P, G, K, W, L, M or C
   LET a, ch, neg = 0, ?, FALSE
 
@@ -357,1391 +361,1109 @@ AND error(mess, a, b, c) BE
   writef(mess, a, b, c)
 }
 
-AND prstate() BE IF tracing DO
-{ writef("# L=")
-  IF (lbits&b_a)>0 DO wrch('A')
-  IF (lbits&b_b)>0 DO wrch('B')
-  IF (lbits&b_s)>0 DO wrch('S')
-  IF (lbits&b_x)>0 DO wrch('X')
-  IF (lbits&b_p)>0 DO writef("P%n", ln)
-  IF (lbits&b_g)>0 DO writef("G%n", ln)
-  IF (lbits&b_l)>0 DO writef("L%n", ln)
-  IF (lbits&b_m)>0 DO writef("M%n", ln)
-
-  writef("    R=")
-  IF (rbits&b_a)>0 DO wrch('A')
-  IF (rbits&b_b)>0 DO wrch('B')
-  IF (rbits&b_s)>0 DO wrch('S')
-  IF (rbits&b_x)>0 DO wrch('X')
-  IF (rbits&b_p)>0 DO writef("P%n", rn)
-  IF (rbits&b_g)>0 DO writef("G%n", rn)
-  IF (rbits&b_l)>0 DO writef("L%n", rn)
-  IF (rbits&b_m)>0 DO writef("M%n", rn)
-
-  IF (lbits & rbits & (b_absx)) > 0 DO
-    writef("  ### ERROR")
-  newline()
-}
-
-AND moveR2L() BE
-{ // Generate code for L := R
-  trace("# moveR2L*n")
-  lbits, ln := rbits, rn
-  rbits := 0
+AND moveA2B() BE
+{ // Generate code for B := A
+  trace("# moveA2B*n")
+  Bmem, Bk, Bvalk, Bmem, Bval := Amem, Ak, Avalk, Amem, Aval
   prstate()
 }
 
-AND moveL2R() BE
-{ // Generate code for R := A
-  trace("# moveL2R*n")
-  rbits, rn := lbits, ln
-  lbits := 0
+AND moveB2A() BE
+{ // Generate code for A := B
+  trace("# moveB2A*n")
+  Amem, Ak, Avalk, Amem, Aval := Bmem, Bk, Bvalk, Bmem, Bval
   prstate()
 }
 
-AND moveR2A() BE
-{ // Compile code to ensure that R is in A
-  // and L is not in A
-  // ie that (rbits & b_a) > 0 and
-  // that (lbits & b_a) = 0
+AND freex() BE
+{ trace("# freex*n")
 
-  trace("# moveR2A*n")
-
-  IF lbits = b_a DO
-  { // L is in A only so move it to B
-    TEST rbits = b_b
-    THEN { // Exchange A and B
+  IF Breg=1 & (Bk+Bmem)=0 DO
+  { // B is only in x, so move it to y
+    TEST Areg=2
+    THEN { // Exchange x and y
            writef(" xchgl %%ebx,%%ecx*n")
-           rbits := b_a
+           Areg, Breg := 1, 2
          }
-    ELSE { writef(" movl %%ebx,%%ecx*n")
+    ELSE { // Move x to y
+           writef(" movl %%ebx,%%ecx*n")
+           Amem := 1
          }
-    lbits := b_b
     prstate()
   }
 
-  lbits := lbits & bn_a
-
-  // R is not in A
-
-  IF (rbits & b_a) > 0 RETURN
-
-  UNLESS rbits DO
-  { // R is undefined so give it the value in A
-    rbits := b_a
-    prstate()
-    RETURN
-  }
-
-  IF (rbits & b_b) > 0 DO
-  { // R is in B so move it to A
-    writef(" movl %%ecx,%%ebx*n")
-    rbits := b_a
-    prstate()
-    RETURN
-  }
-
-  IF rbits = b_x DO
-  { // R is in X only so move it to A via S
-    IF lbits = b_s DO
-    { // We must preserve L so move it to B.
-      // Note that R is not in A
-      writef(" movl (%%esp),%%ecx*n")
-      lbits := b_b
-      prstate()
-    }
-
-    // Now pop X to S
-    writef(" fstps (%%esp)*n")
-    rbits := b_s
+  IF Breg=1 DO
+  { Breg := 0
     prstate()
   }
-
-  // R is in S or a memory location
-
-  IF (rbits & b_s) > 0 DO
-  { // R is in S so move it to A
-    writef(" movl (%%esp),%%ebx*n")
-    rbits := rbits | b_a
-    prstate()
-    RETURN
-  }
-
-  // R must be in a memory location
-  genopmemreg("movl", rbits, rn, "%ebx")
-  rbits := rbits | b_a
-  prstate()
+  trace("# freex done*n")
 }
 
-AND moveL2A() BE
-{ // Compile code to ensure that L is in A
-  // and R is not in A
-  // ie that (lbits & b_a) > 0 and
-  // that (rbits & b_a) = 0
+AND freey() BE
+{ trace("# freey*n")
 
-  trace("# moveL2A*n")
-
-  IF rbits = b_a DO
-  { // R is in A only so move it to B
-    TEST lbits = b_b
-    THEN { // Exchange A and B
-           writef(" xchgl %%ecx,%%ebx*n")
-           lbits := b_a
+  IF Breg=2 & (Bk+Bmem)=0 DO
+  { // A is only in y, so move it to x
+    TEST Areg=1
+    THEN { // Exchange x and y
+           writef(" xchgl %%ebx,%%ecx*n")
+           Areg, Breg := 2, 1
          }
-    ELSE { writef(" movl %%ecx,%%ebx*n")
+    ELSE { // Move y to x
+           writef(" movl %%ecx,%%ebx*n")
+           Bmem := 1
          }
-    rbits := b_b
     prstate()
   }
 
-  rbits := rbits & bn_a
-
-  // R is not in A
-
-  IF (lbits & b_a) > 0 RETURN
-
-  UNLESS lbits DO
-  { // L is undefined so give it the value in A
-    lbits := b_a
-    prstate()
-    RETURN
-  }
-
-  IF (lbits & b_b) > 0 DO
-  { // L is in B so move it to A
-    writef(" movl %%ecx,%%ebx*n")
-    lbits := b_a
-    prstate()
-    RETURN
-  }
-
-  IF lbits = b_x DO
-  { // L is in X only so move it to A via S
-    IF rbits = b_s DO
-    { // We must preserve R so move it to B.
-      // Note that L is not in A
-      writef(" movl (%%esp),%%ecx*n")
-      rbits := b_b
-      prstate()
-    }
-
-    // Now pop X to S
-    writef(" fstps (%%esp)*n")
-    lbits := b_s
+  IF Areg=2 DO
+  { Areg := 0
     prstate()
   }
-
-  // L is in S or a memory location
-
-  IF (lbits & b_s) > 0 DO
-  { // L is in S so move it to A
-    writef(" movl (%%esp),%%ebx*n")
-    lbits := lbits + b_a
-    prstate()
-    RETURN
-  }
-
-  // R must be in a memory location
-  genopmemreg("movl", rbits, rn, "%ebx")
-  rbits := rbits | b_a
-  prstate()
+  trace("# freey done*n")
 }
 
-AND moveR2B() BE
-{ // Compile code to ensure that R is in B
-  // and L is not in B
-  // ie that (rbits & b_b) > 0 and
-  // that (lbits & b_b) = 0
+AND genK2x(k) BE
+{ // Compile code to put constant k in x
+  trace("# moveK2x(%n)*n", k)
 
-  trace("# moveR2B*n")
+  TEST k
+  THEN writef(" movl $%n,%%ebx*n", k)
+  ELSE writef(" xorl %%ebx,%%ebx*n")
 
-  IF lbits = b_b DO
-  { // L is in B only so move it to A
-    TEST rbits = b_a
-    THEN { // Exchange A and B
-           writef(" xchgl %%ecx,%%ebx*n")
-           rbits := b_b
-         }
-    ELSE { writef(" movl %%ecx,%%ebx*n")
-         }
-    lbits := b_a
-    prstate()
-  }
-
-  lbits := lbits & bn_b
-
-  IF (rbits & b_b) > 0 RETURN
-
-  UNLESS rbits DO
-  { // R is undefined so give it the value in B
-    rbits := b_b
-    prstate()
-    RETURN
-  }
-
-  IF (rbits & b_a) > 0 DO
-  { // R is in A so move it to B
-    writef(" movl %%ebx,%%ecx*n")
-    rbits := b_b
-    prstate()
-    RETURN
-  }
-
-  IF rbits = b_x DO
-  { // R is in X only so move it to B via S
-    IF lbits = b_s DO
-    { // We must preserve L so move it to A.
-      // Note that R is not in B
-      writef(" movl (%%esp),%%ebx*n")
-      lbits := b_a
-      prstate()
-    }
-
-    // Now pop X to S
-    writef(" fstps (%%esp)*n")
-    rbits := b_s
-    prstate()
-  }
-
-  // R is in S or a memory location
-
-  IF (rbits & b_s) > 0 DO
-  { // R is in S so move it to B
-    writef(" movl (%%esp),%%ecx*n")
-    rbits := rbits | b_b
-    prstate()
-    RETURN
-  }
-
-  // R must be in a memory location
-  genopmemreg("movl", rbits, rn, "%ecx")
-  rbits := rbits | b_b
-  prstate()
+  writef(" movl $%n,%%ebx*n", k)
 }
 
-AND moveL2B() BE
-{ // Compile code to ensure that L is in B
-  // and R is not in B
-  // ie that (lbits & b_b) > 0 and
-  // that (rbits & b_b) = 0
+AND moveK2y(k) BE
+{ // Compile code to put constant k in x
+  trace("# moveK2y(%n)*n", k)
 
-  trace("# moveL2B*n")
-
-  IF rbits = b_b DO
-  { // R is in B only so move it to A
-    TEST lbits = b_a
-    THEN { // Exchange A and B
-           writef(" xchgl %%ecx,%%ebx*n")
-           lbits := b_b
-         }
-    ELSE { writef(" movl %%ecx,%%ebx*n")
-         }
-    rbits := b_a
-    prstate()
-  }
-
-  rbits := rbits & bn_b
-
-  IF (lbits & b_b) > 0 RETURN
-
-  UNLESS lbits DO
-  { // L is undefined so give it the value in B
-    lbits := b_b
-    prstate()
-    RETURN
-  }
-
-  IF (lbits & b_a) > 0 DO
-  { // L is in A so move it to B
-    writef(" movl %%ebx,%%ecx*n")
-    lbits := b_b
-    prstate()
-    RETURN
-  }
-
-  IF lbits = b_x DO
-  { // L is in X only so move it to B via S
-    IF rbits = b_s DO
-    { // We must preserve R so move it to A.
-      // Note that R is not in B
-      writef(" movl (%%esp),%%ebx*n")
-      rbits := b_a
-      prstate()
-    }
-
-    // Now pop X to S
-    writef(" fstps (%%esp)*n")
-    lbits := b_s
-    prstate()
-  }
-
-  // L is in S or a memory location
-
-  IF (rbits & b_s) > 0 DO
-  { // L is in S so move it to B
-    writef(" movl (%%esp),%%ecx*n")
-    lbits := rbits | b_b
-    prstate()
-    RETURN
-  }
-
-  // L must be in a memory location
-  genopmemreg("movl", lbits, ln, "%ecx")
-  lbits := lbits | b_b
-  prstate()
+  TEST k
+  THEN writef(" movl $%n,%%ecx*n", k)
+  ELSE writef(" xorl %%ecx,%%ecx*n")
 }
 
-AND moveR2S() BE
-{ // Compile code to ensure that R is in S
-  // and L is not in S
-  // ie that (rbits & b_s) > 0 and
-  // that (lbits & b_s) = 0
-
-  trace("# moveR2S*n")
-
-  // Test if R is already in S
-  IF (rbits & b_s) > 0 RETURN
-
-  // First ensure L is not in S
-  IF lbits = b_s DO
-  { IF rbits = b_x DO
-    { // R is only in X and L is only in S
-      // so swap X and S
-      writef(" flds (%%esp)*n")
-      writef(" fxch %%st(1),%%st*n")
-      writef(" fstps (%%esp)*n")
-      rbits := rbits XOR b_sx  // R moved to X
-      lbits := lbits XOR b_sx  // L moved to S
-      prstate()
-      RETURN
-    }
-
-    // Move L to A or B
-    TEST (rbits & b_b)=0
-    THEN { // Move L to B
-           writef(" movl (%%esp),%%ecx*n")
-           lbits := lbits XOR b_bs
-         }
-    ELSE { // Move L to A
-           writef(" movl (%%esp),%%ebx*n")
-           lbits := lbits XOR b_as
-           rbits := rbits   & bn_b   // R in not in B
-         }
-    prstate()
-  }
-
-  // If L is in S it is also somewhere else
-  lbits := lbits & bn_s
-  prstate()
-
-  // L is no longer in S
-
-  IF (rbits & b_s) > 0 RETURN
-
-  IF (rbits = b_x) > 0 DO
-  { // R is in X move it to S
-    writef(" fstps (%%esp)*n")
-    rbits := rbits XOR b_sx
-    prstate()
-    RETURN
-  }
-
-  UNLESS rbits DO
-  { // R is undefined so give it an arbitrary value
-    rbits := b_s
-    prstate()
-    RETURN
-  }
-
-  // If R is in memory (P, G, L or M) move it to S via A
-  IF (rbits & b_spglm) > 0 DO moveR2A()
-
-  IF (rbits & b_a) > 0 DO
-  { writef(" movl %%ebx,(%%esp)*n")
-    rbits := rbits XOR b_as
-    prstate()
-    RETURN
-  }
-
-  IF (rbits & b_b) > 0 DO
-  { writef(" movl %%ecx,(%%esp)*n")
-    rbits := rbits XOR b_bs
-    prstate()
-    RETURN
-  }
-
-  IF (rbits & b_x) > 0 DO
-  { writef(" fstps (%%esp)*n")
-    rbits := rbits XOR b_sx
-    prstate()
-    RETURN
-  }
-
-  writef("# moveR2S: system error  -- ERROR*n")
+AND moveA2xyors0() BE
+{ IF Areg=1 | Areg=2 | Areg=4 RETURN // A is already in x, y or st[0]
+  moveA2either()
 }
 
-AND moveL2S() BE
-{ // Compile code to ensure that L is in S
-  // and R is not in S
-  // ie that (lbits & b_s) > 0 and
-  // that (rbits & b_s) = 0
-
-  trace("# moveL2S*n")
-
-  IF (lbits & b_s) > 0 RETURN
-
-  // First ensure R is not in S
-  IF rbits = b_s DO
-  { IF lbits = b_x DO
-    { // L is only in X and R is only in S
-      // so swap X and S
-      writef(" flds (%%esp)*n")
-      writef(" fxch %%st(1),%%st*n")
-      writef(" fstp (%%esp)*n")
-      rbits := rbits XOR b_sx  // R moved to X
-      lbits := lbits XOR b_sx  // L moved to S
-      prstate()
-      RETURN
-    }
-
-    // Move R to A or B
-    TEST (lbits & b_a)=0
-    THEN { // Move R to A
-           writef(" movl (%%esp),%%ebx*n")
-           rbits := rbits XOR b_as
-         }
-    ELSE { // Move R to B
-           writef(" movl (%%esp),%%ecx*n")
-           rbits := rbits XOR b_bs
-           lbits := rbits  & bn_b   // L in not in B
-         }
-    prstate()
-  }
-
-  // R is no longer in S
-
-  IF (lbits & b_s) > 0 RETURN
-
-  IF (lbits = b_x) > 0 DO
-  { // L is in X move it to S
-    writef(" fstps (%%esp)*n")
-    lbits := lbits XOR b_sx
-    prstate()
-    RETURN
-  }
-
-  UNLESS lbits DO
-  { // L is undefined so give it an arbitrary value
-    lbits := b_s
-    prstate()
-    RETURN
-  }
-
-  IF (lbits & b_spglm) > 0 DO moveL2B()
-
-  IF (lbits & b_b) > 0 DO
-  { writef(" movl %%ecx,(%%esp)*n")
-    lbits := lbits XOR b_bs
-    prstate()
-    RETURN
-  }
-
-  IF (lbits & b_a) > 0 DO
-  { writef(" movl %%ebx,(%%esp)*n")
-    lbits := lbits XOR b_as
-    prstate()
-    RETURN
-  }
-
-  IF (lbits & b_x) > 0 DO
-  { writef(" fstps (%%esp)*n")
-    lbits := lbits XOR b_sx
-    prstate()
-    RETURN
-  }
-
-  writef("# moveL2S: system error  -- ERROR*n")
+AND moveB2xyors0() BE
+{ IF Breg=1 | Breg=2 | Breg=4 RETURN // Bis already in x, y or st[0]
+  moveB2either()
 }
 
-AND moveR2X() BE
-{ // Compile code to ensure that R is in X
-  // and L is not in X
-  // ie that (rbits & b_x) > 0 and
-  // that (lbits & b_x) = 0
+AND moveA2either() BE
+{ TEST Breg=1 THEN moveA2y()
+              ELSE moveA2x()
+}
 
-  trace("# moveR2X*n")
+AND moveB2either() BE
+{ TEST Areg=1 THEN moveB2y()
+              ELSE moveB2x()
+}
 
-  // First ensure L is not in X
-  IF lbits = b_x DO
-  { IF rbits = b_s DO
-    { // L is only in X and R is only in S
-      // so swap X and S
-      writef(" flds (%%esp)*n")
-      writef(" fxch %%st(1),%%st*n")
-      writef(" fstp (%%esp)*n")
-      lbits := lbits XOR b_sx  // L moved to S
-      rbits := rbits XOR b_sx  // R moved to X
-      prstate()
-      RETURN
-    }
-    // Move X to S
-    writef(" fstp (%%esp)*n")
-    lbits := lbits XOR b_sx  // L moved to S
-    prstate()
-  }
+AND moveAB2both() BE
+{ // Ensure that A is in x and B is in Y
+  //          or A is in y and B is in x
+  IF Areg=1 DO { moveB2y(); RETURN }
+  IF Areg=2 DO { moveB2x(); RETURN }
+  IF Breg=1 DO { moveA2y(); RETURN }
+  IF Breg=2 DO { moveA2x(); RETURN }
 
-  lbits := lbits & bn_x
+  // Neither A nor B are in x or y
+  moveA2x()
+  moveB2y()
+}
 
-  // L is no longer in X
-
+AND moveA2x() BE
+{ // Compile code to ensure that A is in x
+  // B must not be in x
   
-  { // L is in X only so move it to S
-    IF (rbits = b_s) > 0 DO
-    { // R is in S so swap X and S
-      writef(" fstp (%%esp)*n")
-      // L is now only in S
-      lbits := b_s
-      prstate()
-    }
+  trace("# moveA2x*n")
+
+  // Check that B is OK
+  IF Breg=1 TEST (Bk+Bmem)=0
+            THEN { prstate()
+                   writef("# SYSERROR: x must not be in B in moveA2x*n")
+                 }
+            ELSE { Breg := 0
+                 }
+
+  IF Areg=1 RETURN // A is already in x
+
+  IF Areg=2 DO
+  { // A is in y so copy y to x
+    writef(" movl %%ecx,%%ebx*n")
+    Areg := 1
+    GOTO ret
   }
 
-  IF lbits = b_x & rbits = b_s DO
-  { // L is only in X and R is only in S
-    // so swap X and S
-    writef(" flds (%%esp)*n")
-    writef(" fxch %%st(1),%%st*n")
-    writef(" fstp (%%esp)*n")
-    lbits := lbits XOR b_sx  // L copied to S
-    rbits := rbits XOR b_sx  // R copied to X
+  IF Ak DO
+  { Areg := 1
+    wropKreg("movl", Avalk, Areg)
+    GOTO ret
+  }
+
+  IF Areg=5 DO
+  { // A is in st[1] and B must be in st[0] so swap st[0] and st[1]
+    UNLESS Breg=4 DO errflag := TRUE
+    writef(" fxch %%st[1],%%st*n")
+    Areg := 4   // A is now in st[0]
+    Breg := 5   // B is now in st[1]
     prstate()
   }
-
-  // L is no longer in X
-
-  UNLESS rbits DO
-  { // R is undefined so give it an arbitrary value
-    writef(" fld1*n")
-    rbits := b_x
-    prstate()
-    RETURN
-  }
-
-  IF (rbits & b_spglm) > 0 DO
-  { // R is in a memory location (SPGLM) so move R to X
-    genopmem("flds", rbits, rn)
-    rbits := rbits | b_x
-    prstate()
-    RETURN
-  }
-
-  // R is in A, B or X
-  IF (rbits & b_x) > 0 RETURN
-
-  // R must be in A or B so move it to X via S
-
-  IF lbits = b_s DO
-  { // L is in S only so move S into A or B
-    TEST rbits = b_a
-    THEN { // L is only in S and R is in A
-           // so move L to B
-           writef(" movl (%%esp),%%ecx*n")
-           lbits := b_b           // L is in B
-           rbits := rbits & bn_b  // R is not in B
-         }
-    ELSE { // L is in S only and R is in B
-           // so move L to A
-           writef(" movl (%%esp),%%ebx*n")
-           lbits := b_a           // L is in A
-           rbits := rbits & bn_a  // R is not in A
-         }
+  
+  IF Areg=4 DO
+  { // Now pop st[0] to G11
+    Amem, Aval := 2, 11
+    wropmem("fstps", Amem, Aval)   // Pop st[0] to G11
+    Areg := 0                      // A is no longer in st[0]
+    IF Breg=5 DO
+        Breg := 4                  // B is now in st[0]
     prstate()
   }
+  
+  IF Amem DO
+  { // A is Pn, Gn, La, Mn, so move it to x
+    Areg := 1
+    wropmemreg("movl", Amem, Aval, Areg)
+    GOTO ret
+  }
 
-  // R is in A or B and L is not using S.
+  IF (Areg+Ak+Amem)=0 DO
+  { // A is undefined so give it the value already in x
+    // This is possibly an error
+    Areg := 1
+    GOTO ret
+  }
 
-  TEST (rbits & b_a) > 0
-  THEN writef(" movl %%ebx,(%%esp)*n")
-  ELSE writef(" movl %%ecx,(%%esp)*n")
+  errflag := TRUE
 
-  rbits := rbits | b_s
+ret:
   prstate()
-  writef(" flds (%%esp)*n")
-  rbits := rbits | b_x  // R is in X
-  prstate()
+  IF errflag DO writef("# SYSERROR: In moveA2x*n")
+  errflag := FALSE
 }
 
-AND moveL2X() BE
-{ // Generate code to move L to X
-  // ie (lbits & b_x) > 0 and
-  // rbits ~= b_x
-  trace("# moveL2X*n")
+AND moveA2y() BE
+{ // Compile code to ensure that A is in y
+  // B must not be in y
+  
+  trace("# moveA2y*n")
 
-  // First ensure R is not in X
-  IF rbits = b_x DO
-  { // R is in X only
-    IF (lbits & b_s) = 0 DO
-    { // and L not in S -- move R to S
-      writef(" fstp (%%esp)*n")
-      // R is now only in S
-      rbits := b_s
-      prstate()
-    }
+  // Check that B is OK
+  IF Breg=2 TEST (Bk+Bmem)=0
+            THEN { prstate()
+                   writef("# SYSERROR: y must not be in B in moveA2y*n")
+                 }
+            ELSE { Breg := 0
+                 }
+
+  IF Areg=2 RETURN // A is already in y
+
+  IF Areg=1 DO
+  { // A is in x so copy x to y
+    writef(" movl %%ebx,%%ecx*n")
+    Areg := 2
+    GOTO ret
   }
 
-  IF rbits = b_x & lbits = b_s DO
-  { // R is only in X and L is only in S
-    // so swap X and S
-    writef(" flds (%%esp)*n")
-    writef(" fxch %%st(1),%%st*n")
-    writef(" fstp (%%esp)*n")
-    rbits := rbits XOR b_sx  // R copied to S
-    lbits := lbits XOR b_sx  // L copied to X
+  IF Ak DO
+  { Areg := 2
+    wropKreg("movl", Avalk, Areg)
+    GOTO ret
+  }
+
+  IF Areg=5 DO
+  { // A is in st[1] and B must be in st[0] so swap st[0] and st[1]
+    UNLESS Breg=4 DO errflag := TRUE
+    writef(" fxch %%st[1],%%st*n")
+    Areg := 4   // A is now in st[0]
+    Breg := 5   // B is now in st[1]
     prstate()
   }
-
-  // R is no longer in X
-
-  UNLESS lbits DO
-  { // L is undefined so give it the value zero
-    writef(" fld1*n")
-    lbits := b_x
+  
+  IF Areg=4 DO
+  { // Now pop st[0] to G11
+    Amem, Aval := 2, 11
+    wropmem("fstps", Amem, Aval)   // Pop st[0] to G11
+    Areg := 0                      // A is no longer in st[0]
+    IF Breg=5 DO
+        Breg := 4                  // B is now in st[0]
     prstate()
   }
+  
+  IF Amem DO
+  { // A is Pn, Gn, La, Mn, so move it to y
+    Areg := 2
+    wropmemreg(" movl ", Amem, Aval, Areg)
+    GOTO ret
+  }
 
-  IF (lbits & b_x) > 0 RETURN
+  IF (Areg+Ak+Amem)=0 DO
+  { // A is undefined so give it the value already in y
+    // This is possibly an error
+    Areg := 2
+    GOTO ret
+  }
 
-  // If L is in a memory location (SPGLM) move L to X
+  errflag := TRUE
 
-  IF (lbits % b_spglm) > 0 DO
-  { genopmem("flds", lbits, ln)
-    lbits := lbits | b_x
+ret:
+  prstate()
+  IF errflag DO writef("# SYSERROR: In moveA2x*n")
+  errflag := FALSE
+}
+
+AND moveB2x() BE
+{ // Compile code to ensure that B is in x
+  // A must not be in x
+  
+  trace("# moveB2x*n")
+
+  // Check that A is OK
+  IF Areg=1 TEST (Ak+Amem)=0
+            THEN { prstate()
+                   writef("# SYSERROR: x must not be in A in moveB2x*n")
+                 }
+            ELSE { Areg := 0
+                 }
+
+  IF Breg=1 RETURN // B is already in x
+
+  IF Breg=2 DO
+  { // B is in y so copy y to x
+    writef(" movl %%ecx,%%ebx*n")
+    Breg := 1
+    GOTO ret
+  }
+
+  IF Bk DO
+  { Breg := 1
+    wropKreg("movl", Bval, Breg)
+    GOTO ret
+  }
+
+  IF Breg=5 DO
+  { // B is in st[1] and A must be in st[0] so swap st[0] and st[1]
+    UNLESS Areg=4 DO errflag := TRUE
+    writef(" fxch %%st[1],%%st*n")
+    Breg := 4   // B is now in st[0]
+    Areg := 5   // A is now in st[1]
     prstate()
-    RETURN
   }
-
-  // L must be in A or B so move it to X via S
-  // First ensure R is not using S
-
-  IF rbits = b_s DO
-  { TEST rbits = b_a
-    THEN { // R is only in S and L is in A
-           // so move R to B
-           writef(" movl (%%esp),%%ecx*n")
-           rbits := b_b           // R is in B
-           lbits := lbits & bn_b  // L is not in B
-         }
-    ELSE { // R is only in S and L is in B
-           // so move R to A
-           writef(" movl (%%esp),%%ebx*n")
-           rbits := b_a           // R is in A
-           lbits := lbits & bn_a  // L is not in A
-         }
+  
+  IF Breg=4 DO
+  { // Now pop st[0] to G11
+    Bmem, Bval := 2, 11
+    wropmem("fstps", Bmem, Bval)   // Pop st[0] to G11
+    Breg := 0
+    IF Areg=2 DO
+      Areg := 5                    // A is now in st[0]
     prstate()
   }
+  
+  IF Bmem DO
+  { // B is Pn, Gn, La, Mn, so move it to x
+    Breg := 1
+    wropmemreg(" movl ", Bmem, Bval, Breg)
+    GOTO ret
+  }
 
-  // L is in A or B and R is not using S.
+  IF (Breg+Bk+Bmem)=0 DO
+  { // B is undefined so give it the value already in x
+    // This is possibly an error
+    Breg := 1
+    GOTO ret
+  }
 
-  TEST (lbits & b_a) > 0
-  THEN writef(" movl %%ebx,(%%esp)*n")
-  ELSE writef(" movl %%ecx,(%%esp)*n")
-
-  lbits := lbits | b_s
+  errflag := TRUE
+  
+ret:
   prstate()
-  writef(" flds (%%esp)*n")
-  lbits := lbits | b_x  // L is in X
+  IF errflag DO writef("# SYSERROR: In moveB2x*n")
+  errflag := FALSE
+}
+
+AND moveB2y() BE
+{ // Compile code to ensure that B is in y
+  // A must not be in y
+  
+  trace("# moveB2y*n")
+
+  // Check that A is OK
+  IF Areg=2 TEST (Ak+Amem)=0
+            THEN { prstate()
+                   writef("# SYSERROR: y must not be in A in moveB2y*n")
+                 }
+            ELSE { Areg := 0
+                 }
+
+  IF Breg=2 RETURN // B is already in y
+
+  IF Breg=1 DO
+  { // B is in x so copy x to y
+    writef(" movl %%ebx,%%ecx*n")
+    Breg := 2
+    GOTO ret
+  }
+
+  IF Bk DO
+  { Breg := 2
+    wropKreg("movl", Bvalk, Breg)
+    GOTO ret
+  }
+
+  IF Breg=5 DO
+  { // B is in st[1] and A must be in st[0] so swap st[0] and st[1]
+    UNLESS Areg=1 DO errflag := TRUE
+    writef(" fxch %%st[1],%%st*n")
+    Breg := 4   // B is now in st[0]
+    Areg := 5   // A is now in st[1]
+    prstate()
+  }
+  
+  IF Breg=4 DO
+  { // Now pop st[0] to G11
+    Bmem, Bval := 2, 11
+    wropmem("fstps", Bmem, Bval)   // Pop st[0] to G11
+    Breg := 0                      // B is no longer in st[0]
+    IF Areg=5 DO
+      Areg := 4                    // A is now in st[0]
+    prstate()
+  }
+  
+  IF Bmem DO
+  { // B is Pn, Gn, La, Mn, so move it to y
+    Breg := 2
+    wropmemreg(" movl ", Bmem, Bval, Breg)
+    GOTO ret
+  }
+
+  IF (Breg+Bk+Bmem)=0 DO
+  { // B is undefined so give it the value already in y
+    Breg := 2
+    GOTO ret
+  }
+
+  errflag := TRUE
+  
+ret:
   prstate()
+  IF errflag DO writef("# SYSERROR: In moveB2y*n")
+  errflag := FALSE
 }
 
-AND moveR2anyreg() BE
-{ // Ensure R is in A, B or X
-  trace("# moveR2anyreg*n")
-
-  // If R in X make sure L is not is X
-  IF (rbits & b_x) > 0 DO
-  { IF lbits = b_x DO
-    { // Move L to S
-      writef(" fstps (%%esp)*n")
-    } 
-  }
-
-  moveR2A()
+AND moveA2mem(mem, val) BE
+{ writef("# SYSERROR: moveA2mem not implemented*n")
 }
 
-AND moveL2anyreg() BE
-{ // Ensure L is in A, B or X
-  trace("# moveL2anyreg*n")
-
-  // If L in X make sure L is not is X
-  IF (lbits & b_x) > 0 RETURN
-
-  moveL2B()
+AND moveB2mem(mem, val) BE
+{ writef("# SYSERROR: moveB2mem not implemented*n")
 }
 
-AND moveR2mem() BE
-{ // Ensure R is in Pn, Gn, Ln, Mn or S
-  trace("# moveR2mem*n")
-
-  IF (rbits & b_pglm) > 0 RETURN // Already im memory
-
-  // R is not in memory so move it to S
-
-  // First check L is not in S
-
-  IF lbits = b_s DO moveL2B()
-  lbits := lbits & bn_s
-  prstate()
-
-  moveR2S()
+AND pushmem2S(mem,val) BE
+{ writef("# SYSERROR: pushmem2S not implemented*n")
 }
 
-AND moveL2mem() BE
-{ // Ensure L is in Pn, Gn, Ln, Mn or S
-  trace("# moveL2mem*n")
-
-  IF (lbits & b_pglm) > 0 RETURN // Already im memory
-
-  // L is not in memory so move it to S
-
-  // First check R is not in S
-
-  IF rbits = b_s DO moveR2A()
-  rbits := rbits & bn_s
-  prstate()
-
-  moveL2S()
+AND popS2mem(mem,val) BE
+{ writef("# SYSERROR: popS2mem not implemented*n")
 }
 
-AND genaddr(bits, n) BE
-{ // (bits, n) must correspond to a memory address
-  // ie must contain b_s, b_p, b_g, b_l or b_m
-
-  IF (bits & b_s) > 0 DO
-  { writef("(%%esp)")
-    RETURN
-  }
-
-  IF (bits & b_p) > 0 DO
-  { writef("%n(%%ebp)", 4*n)
-    RETURN
-  }
-
-  IF (bits & b_g) > 0 DO
-  { writef("%n(%%esi)", 4*n)
-    RETURN
-  }
-
-  IF (bits & b_l) > 0 DO
-  { writef("L%c%n", modletter, n)
-    RETURN
-  }
-
-  IF (bits & b_m) > 0 DO
-  { writef("M%c%n", modletter, n)
-    RETURN
-  }
-}
-
-AND genopmem(opstr, bits, n) BE
+AND wropmemreg(opstr,mem,val,reg) BE
 { writef(" %s ", opstr)
-  genaddr(bits, n)
+  wrmem(mem, val)
+  wrch(',')
+  wrreg(reg)
+  newline()
+  IF errflag DO writef("# SYSERROR:*n")
+  errflag := FALSE
+}
+
+AND wropregmem(opstr,reg,mem,val) BE
+{ writef(" %s ", opstr)
+  wrreg(reg)
+  wrch(',')
+  wrmem(mem, val)
+  newline()
+  IF errflag DO writef("# SYSERROR:*n")
+  errflag := FALSE
+}
+
+AND wropKreg(opstr,k,reg) BE
+{ writef(" %s $%n,", opstr, k)
+  wrreg(reg)
   newline()
 }
 
-AND genopmemreg(opstr, bits, n, regstr) BE
+AND wropmem(opstr,mem,val) BE
 { writef(" %s ", opstr)
-  genaddr(bits, n)
-  writef(",%s*n", regstr)
+  wrmem(mem,val)
+  newline()
 }
 
-AND genopregmem(opstr, regstr, bits, n) BE
+AND wropreg(opstr,reg) BE
 { writef(" %s ", opstr)
-  writef("%s,", regstr)
-  genaddr(bits, n)
+  wrreg(reg)
   newline()
+}
+
+AND wropregreg(opstr,r1, r2) BE
+{ writef(" %s ", opstr)
+  wrreg(r1)
+  wrch(',')
+  wrreg(r2)
+  newline()
+}
+
+AND wrreg(reg) BE SWITCHON reg INTO
+{ DEFAULT:  writes("%eax")
+            errflag := TRUE
+	    RETURN
+	    
+  CASE 1:   writes("%ebx"); RETURN
+  CASE 2:   writes("%ecx"); RETURN
+  CASE 3:   writes("%edx"); RETURN
+  CASE 4:   writes("%st"); RETURN
+  CASE 5:   writes("%st[1]"); RETURN
+}
+
+AND wrmem(mem, val) BE SWITCHON mem INTO
+{ DEFAULT: writef("LA1")
+           errflag := TRUE
+           RETURN
+
+  CASE 1:  writef("%n(%%ebp)", 4*val)
+           RETURN
+  CASE 2:  writef("%n(%%esi)", 4*val)
+           RETURN
+  CASE 3:  writef("L%c%n", modletter, val)
+           RETURN
+  CASE 4:  writef("M%c%n", modletter, val)
+           RETURN
 }
 
 AND scan() BE
 { LET op = rdf()
-
+//writef("# scan: op=%n*n", op)
   SWITCHON op INTO
 
-  { DEFAULT:       error("# Bad op %n*n", op); LOOP
+  { DEFAULT:       error("# Bad SIAL op %n*n", op); LOOP
 
     CASE -1:       RETURN
       
-    CASE f_lp:     cvfp("LP") // R := P!n
-                   // Specify that the value of R is now in Pn
-                   rbits, rn := b_p, pval
+    CASE f_lp:     cvfp("LP") // A := P!n
+                   // Specify that the value of A is now only in Pn
+                   Areg, Ak, Amem, Aval := 0, 0, 1, pval
                    ENDCASE
 
-    CASE f_lg:     cvfg("LG") // R := G!n
-                   // Specify that the value of R is now in Gn
-                   rbits, rn := b_g, gval
+    CASE f_lg:     cvfg("LG") // A := G!n
+                   // Specify that the value of A is now only in Gn
+                   Areg, Ak, Amem, Aval := 0, 0, 2, gval
                    ENDCASE
 
-    CASE f_ll:     cvfl("LL") // R := !Ln
-                   // Specify that the value of R is now in Ln
-                   rbits, rn := b_l, lval
+    CASE f_ll:     cvfl("LL") // A := !Ln
+                   // Specify that the value of A is now only in Ln
+                   Areg, Ak, Amem, Aval := 0, 0, 3, lval
                    ENDCASE
 
-    CASE f_llp:    cvfp("LLP") // R := @ P!n
-                   IF (lbits & b_a) > 0 DO
-                   { writef(" movl %%ebx,%%ecx*n")
-                     lbits := b_b
+    CASE f_llp:    cvfp("LLP") // A := @ P!n
+                   IF Breg=1 & (Bk+Bmem)=0 DO
+                   { // B is only in xso move x to y
+		     writef(" movl %%ebx,%%ecx*n")
+                     Breg := 2
                      prstate()
                    }
-                   genopmemreg("leal", b_p, pval, "%ebx")
+                   writef(" leal %n(%%ebp),%%ebx*n", 4 * pval)
                    writef(" shrl $2,%%ebx*n")
-                   rbits := b_a
+                   Areg, Ak, Amem := 0, 0, 0
                    prstate()
                    ENDCASE
 
-    CASE f_llg:    cvfg("LLG") // R := @ G!n
-                   IF (lbits & b_a) > 0 DO
-                   { writef(" movl %%ebx,%%ecx*n")
-                     lbits := b_b
+    CASE f_llg:    cvfg("LLG") // A := @ G!n
+                   IF Breg=1 & (Bk+Bmem)=0 DO
+                   { // B is only in xso move x to y
+		     writef(" movl %%ebx,%%ecx*n")
+                     Breg := 2
                      prstate()
                    }
-                   genopmemreg("leal", b_g, gval, "%ebx")
+                   writef(" leal %n(%%edx),%%ebx*n", 4 * gval)
                    writef(" shrl $2,%%ebx*n")
-                   rbits := b_a
+                   Areg, Ak, Amem := 1, 0, 0
                    prstate()
                    ENDCASE
 
-    CASE f_lll:    cvfl("LLL") // R := @ !Ln
-                   IF (lbits & b_a) > 0 DO
-                   { writef(" movl %%ebx,%%ecx*n")
-                     lbits := b_b
+    CASE f_lll:    cvfl("LLL") // A := @ !Ln
+                   IF Breg=1 & (Bk+Bmem)=0 DO
+                   { // B is only in xso move x to y
+		     writef(" movl %%ebx,%%ecx*n")
+                     Breg := 2
                      prstate()
                    }
-                   genopmemreg("leal", b_l, lval, "%ebx")
+                   writef(" leal L%c%n,%%ebx*n", modletter, lval)
                    writef(" shrl $2,%%ebx*n")
-                   rbits := b_a
+                   Areg, Ak, Amem := 1, 0, 0
                    prstate()
                    ENDCASE
 
-    CASE f_lf:     cvfl("LF") // R := byte address of Ln
-                   IF (lbits & b_a) > 0 DO
-                   { writef(" movl %%ebx,%%ecx*n")
-                     lbits := b_b
+    CASE f_lf:     cvfl("LF") // A := byte address of Ln
+                   IF Breg=1 & (Bk+Bmem)=0 DO
+                   { // B is only in xso move x to y
+		     writef(" movl %%ebx,%%ecx*n")
+                     Breg := 2
                      prstate()
                    }
-                   genopmemreg("leal", b_l, lval, "%ebx")
-                   rbits := b_a
+                   writef(" leal L%c%n,%%ebx*n", modletter, lval)
+                   Areg, Ak, Amem := 1, 0, 0
                    prstate()
                    ENDCASE
 
-    CASE f_lw:     cvfm("LW") // R := Mn
-                   // Specify that the value of R is now in Mn
-                   rbits, rn := b_m, mval
+    CASE f_lw:     cvfm("LW") // A := Mn
+                   // Specify that the value of A is now in Mn
+                   Areg, Ak, Amem, Aval := 0, 0, 4, mval
+                   prstate()
                    ENDCASE
 
-    CASE f_l:      cvfk("L") // R := n
-                   IF (lbits & b_a) > 0 DO
-                   { writef(" movl %%ebx,%%ecx*n")
-                     lbits := b_b
-                     prstate()
-                   }
-                   TEST kval
-                   THEN writef(" movl $%n,%%ebx*n", kval)
-                   ELSE writef(" xorl %%ebx,%%ebx*n")
-                   rbits := b_a
+    CASE f_l:      cvfk("L") // A := n
+                   Areg, Ak, Avalk, Amem := 0, 1, kval, 0
                    prstate()
                    ENDCASE
 
     CASE f_lm:     cvfk("LM") // a := -n
-                   IF (lbits & b_a) > 0 DO
-                   { writef(" movl %%ebx,%%ecx*n")
-                     lbits := b_b
+                   Areg, Ak, Avalk, Amem := 0, 1, -kval, 0
+                   prstate()
+                   ENDCASE
+
+    CASE f_sp:     cvfp("SP") // P!n := A
+                   IF Bmem=1 & Bval=pval & Bk=0 & Breg=0 DO moveB2xyors0()
+
+                   moveA2xyors0() // Ensure A into x, y or st[0]
+                                  // but not in a register holding B
+
+                   Amem, Aval := 1, pval // The destination addr
+                   IF Areg=4 DO
+                   { wropmem("fstps", Amem, Aval) // Compile pop st[0] to P!n
+                     Areg := 0  // A is no longer in st[0]
+                     IF Bmem=Amem & Bval=Aval DO Bmem := 0
+                     // B may have moved from st[1] to st[0]
+		     IF Breg = 5 DO Breg := 4
                      prstate()
+                     ENDCASE
                    }
-                   TEST kval
-                   THEN writef(" movl $-%n,%%ebx*n", kval)
-                   ELSE writef(" xorl %%ebx,%%ebx*n")
-                   rbits := b_a
+		   wropregmem("movl", Areg, Amem, Aval)
+                   IF Bmem=Amem & Bval=Aval DO Bmem := 0
                    prstate()
                    ENDCASE
 
-    CASE f_sp:     cvfp("SP") // P!n := R
-                   IF lbits=b_p & ln=pval DO moveL2anyreg()
+    CASE f_sg:     cvfg("SG") // G!n := A
+                   IF Bmem=2 & Bval=gval & Bk=0 & Breg=0 DO moveB2xyors0()
 
-                   moveR2anyreg() // Move R into A, B or X
-                   IF (rbits & b_x) > 0 DO
-                   { genopmem("fstps", FALSE, b_p, pval)
-                     rbits, rn := b_p, pval
-                     lbits := lbits & bn_p
+                   moveA2xyors0() // Ensure A into x, y or st[0]
+                                  // but not in a register holding B
+
+                   Amem, Aval := 2, gval // The destination addr
+                   IF Areg=4 DO
+                   { wropmem("fstps", Amem, Aval) // Compile pop st[0] to G!n
+                     Areg := 0  // A is no longer in st[0]
+                     IF Bmem=Amem & Bval=Aval DO Bmem := 0
+                     // B may have moved from st[1] to st[0]
+		     IF Breg = 5 DO Breg := 4
+		     prstate()
                      ENDCASE
                    }
-                   TEST (rbits & b_a) > 0
-                   THEN { genopregmem("movl", "%ebx", b_p, pval)
-                          rbits, rn := b_ap, pval
-                        }
-                   ELSE { genopregmem("movl", "%ecx", b_p, pval)
-                          rbits, rn := b_bp, pval
-                        }
-                   lbits := lbits & bn_p
-                   ENDCASE
-
-    CASE f_sg:     cvfg("SG") // G!n := R
-                   IF lbits=b_g & ln=gval DO moveL2anyreg()
-
-                   moveR2anyreg() // Move R into A, B or X
-
-                   IF (rbits & b_x) > 0 DO
-                   { genopmem("fstps", FALSE, b_g, gval)
-                     rbits, rn := b_g, gval
-                     lbits := lbits & bn_g
-                     ENDCASE
-                   }
-                   TEST (rbits & b_a) > 0
-                   THEN { genopregmem("movl", "%ebx", b_g, gval)
-                          rbits, rn := b_ag, gval
-                        }
-                   ELSE { genopregmem("movl", "%ecx", b_g, gval)
-                          rbits, rn := b_bg, gval
-                        }
-                   lbits := lbits & bn_g
-                   ENDCASE
-
-    CASE f_sl:     cvfl("SL") // !Ln := a
-                   moveR2A()
-                   genopregmem("movl", "%ebx", b_l, lval)
-                   rbits, rn := b_al, lval
-                   lbits := lbits & bn_l
+		   wropregmem("movl", Areg, Amem, Aval)
+                   IF Bmem=Amem & Bval=Aval DO Bmem := 0
                    prstate()
                    ENDCASE
 
-    CASE f_ap:     cvfp("AP") // a := a + P!n
-                   moveR2A()
-                   genopmemreg("addl", b_p, pval, "%ebx")
-                   rbits := b_a
+    CASE f_sl:     cvfl("SL") // !Ln := A
+                   IF Bmem=3 & Bval=lval & Bk=0 & Breg=0 DO moveB2xyors0()
+
+                   moveA2xyors0() // Ensure A into x, y or st[0]
+                                  // but not in a register holding B
+
+                   Amem, Aval := 3, lval // The destination addr
+                   IF Areg=4 DO
+                   { wropmem("fstps", Amem, Aval) // Compile pop st[0] to !Ln
+                     Areg := 0  // A is no longer in st[0]
+                     IF Bmem=Amem & Bval=Aval DO Bmem := 0
+                     // B may have moved from st[1] to st[0]
+		     IF Breg = 5 DO Breg := 4
+                     ENDCASE
+                   }
+		   wropregmem("movl", Areg, Amem, Aval)
+                   IF Bmem=Amem & Bval=Aval DO Bmem := 0
+                   prstate()
+                   ENDCASE
+
+    CASE f_ap:     cvfp("AP") // A := A + P!n
+                   moveA2either() // Ensure A is in x or y
+                   wropmemreg("addl", 1, pval, Areg)
+                   Ak, Amem := 0, 0
                    prstate() 
                    ENDCASE
 
     CASE f_ag:     cvfg("AG") // a := a + G!n
-                   moveR2A()
-                   writef(" addl %n(%%esi),%%ebx*n", 4*gval)
-                   rbits := b_a
+                   moveA2either() // Ensure A is in x or y
+                   wropmemreg("addl", 2, gval, Areg)
+                   Ak, Amem := 0, 0
                    prstate() 
                    ENDCASE
 
     CASE f_a:      cvfk("A") // a := a + n
-                   moveR2A()
-                   rbits := b_a 
-                   IF kval=0 ENDCASE
-                   IF kval=1  DO { writef(" incl %%ebx*n"); ENDCASE }
-                   IF kval=-1 DO { writef(" decl %%ebx*n"); ENDCASE }
-                   writef(" addl $%n,%%ebx*n", kval)
+                   moveA2either() // Ensure A is in x or y
+                   SWITCHON kval INTO
+                   { DEFAULT: wropKreg("addl", kval, Areg)
+                     CASE  0: ENDCASE
+                     CASE  1: wropreg("incl", Areg); ENDCASE
+                     CASE -1: wropreg("decl", Areg); ENDCASE
+                   }
+                   Ak, Amem := 0, 0
+		   prstate()
                    ENDCASE
 
     CASE f_s:      cvfk("S")  // a := a - n
-                   moveR2A()
-                   rbits := b_a 
-                   IF kval=0 ENDCASE
-                   IF kval=1  DO { writef(" decl %%ebx*n"); ENDCASE }
-                   IF kval=-1 DO { writef(" incl %%ebx*n"); ENDCASE }
-                   writef(" subl $%n,%%ebx*n", kval)
+                   moveA2either() // Ensure A is in x or y
+                   SWITCHON kval INTO
+                   { DEFAULT: wropKreg("subl", kval, Areg)
+                     CASE  0: ENDCASE
+                     CASE  1: wropreg("decl", Areg); ENDCASE
+                     CASE -1: wropreg("dinl", Areg); ENDCASE
+                   }
+                   Ak, Amem := 0, 0
+		   prstate()
                    ENDCASE
 
     CASE f_lkp:    cvfkp("LKP") // a := P!n!k
-                   moveR2A()
+                   moveA2x()
                    writef(" movl %n(%%ebp),%%eax*n", 4*pval)
                    writef(" movl %n(,%%eax,4),%%ebx*n", 4*kval)
-                   rbits := b_a
+                   Areg, Ak, Amem := 1, 0, 0
+		   prstate()
                    ENDCASE
 
     CASE f_lkg:    cvfkg("LKG") // a := G!n!k
-                   moveR2A()
+                   moveA2x()
                    writef(" movl %n(%%esi),%%eax*n", 4*gval)
                    writef(" movl %n(,%%eax,4),%%ebx*n", 4*kval)
-                   rbits := b_a
+                   Areg, Ak, Amem := 1, 0, 0
+		   prstate()
                    ENDCASE
 
     CASE f_rv:     cvf("RV")  // a := ! a
-                   moveR2A()
+                   moveA2x()
                    writef(" movl (,%%ebx,4),%%ebx*n")
-                   lbits, rbits := lbits & bn_a, b_a
+                   Ak, Amem := 0, 0
+		   prstate()
                    ENDCASE
 
     CASE f_rvp:    cvfp("RVP") // a := P!n!a
-                   moveR2A()
+                   moveA2x()
                    writef(" addl %n(%%ebp),%%ebx*n", 4*pval)
                    writef(" movl (,%%ebx,4),%%ebx*n")
-                   lbits, rbits := lbits & bn_a, b_a
+                   Ak, Amem := 0, 0
+		   prstate()
                    ENDCASE
 
     CASE f_rvk:    cvfk("RVK") // a := a!k
-                   moveR2A()
+                   moveA2x()
                    writef(" movl %n(,%%ebx,4),%%ebx*n", 4*kval)
-                   lbits, rbits := lbits & bn_a, b_a
+                   Ak, Amem := 0, 0
+		   prstate()
                    ENDCASE
 
     CASE f_st:     cvf("ST") // !a := b
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" movl %%ecx,(,%%ebx,4)*n")
-                   rbits := rbits & b_abx
-                   lbits := lbits & b_abx
+                   Amem := 0
+                   Bmem := 0
+		   prstate()
                    ENDCASE
 
     CASE f_stp:    cvfp("STP") // P!n!a := b
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" movl %n(%%ebp),%%eax*n", 4*pval)
                    writef(" addl %%ebx,%%eax*n")
                    writef(" movl %%ecx,(,%%eax,4)*n")
-                   rbits := rbits & b_abx
-                   lbits := lbits & b_abx
+                   Amem := 0
+                   Bmem := 0
+		   prstate()
                    ENDCASE
 
     CASE f_stk:    cvfk("STK") // a!n := b
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" movl %%ecx,%n(,%%ebx,4)*n", 4*kval)
-                   rbits := rbits & b_abx
-                   lbits := lbits & b_abx
+                   Amem := 0
+                   Bmem := 0
+		   prstate()
                    ENDCASE
 
     CASE f_stkp:   cvfkp("STKP")  // P!n!k := a
-                   moveR2A()
+                   moveA2x()
                    writef(" movl %n(%%ebp),%%eax*n", 4*pval)
                    writef(" movl %%ebx,%n(,%%eax,4)*n", 4*kval)
-                   rbits := 0
-                   lbits := 0
+                   Amem := 0
+                   Bmem := 0
+		   prstate()
                    ENDCASE
 
     CASE f_skg:    cvfkg("SKG") // G!n!k := a
-                   moveR2A()
+                   moveA2x()
                    writef(" movl %n(%%esi),%%eax*n", 4*gval)
                    writef(" movl %%ebx,%n(,%%eax,4)*n", 4*kval)
-                   rbits := rbits & b_abx
-                   lbits := lbits & b_abx
+                   Amem := 0
+                   Bmem := 0
+		   prstate()
                    ENDCASE
 
     CASE f_xst:    cvf("XST") // !b := a
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" movl %%ebx,(,%%ecx,4)*n")
-                   rbits := rbits & b_abx
-                   lbits := lbits & b_abx
+                   Amem := 0
+                   Bmem := 0
+		   prstate()
                    ENDCASE
 
     CASE f_k:      cvfp("K") // Call  a(b,...) incrementing P by n
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" movl %%ebx,%%eax*n")
                    writef(" movl %%ecx,%%ebx*n")
                    writef(" leal %n(%%ebp),%%edx*n", 4*pval)
                    writef(" call **%%eax*n")
-                   lbits, rbits := 0, b_a
+                   Areg, Ak, Amem := 1, 0, 0
+                   Breg, Bk, Bmem := 0, 0, 0
+		   prstate()
                    ENDCASE
 
     CASE f_kpg:    cvfpg("KPG") // Call Gg(a,...) incrementing P by n
-                   moveR2A()
+                   moveA2x()
                    writef(" movl %n(%%esi),%%eax*n", 4*gval)
                    writef(" leal %n(%%ebp),%%edx*n", 4*pval)
                    writef(" call **%%eax*n")
-                   lbits, rbits := 0, b_a
+                   Areg, Ak, Amem := 1, 0, 0
+                   Breg, Bk, Bmem := 0, 0, 0
+		   prstate()
                    ENDCASE
 
     CASE f_neg:    cvf("NEG") // a := - a
-                   moveR2A()
+                   moveA2x()
                    writef(" negl %%ebx*n") 
-                   rbits := b_a
+                   Ak, Amem := 0, 0
+		   prstate()
                    ENDCASE
 
     CASE f_not:    cvf("NOT") // a := ~ a
-                   moveR2A()
+                   moveA2x()
                    writef(" notl %%ebx*n") 
-                   rbits := b_a
+                   Ak, Amem := 0, 0
+		   prstate()
                    ENDCASE
 
     CASE f_abs:    cvf("ABS") // a := ABS a
-                   moveR2A()
+                   moveA2x()
                  { LET l = nextlab()
                    writef(" orl %%ebx,%%ebx*n")
                    writef(" jge L%n*n", l)
                    writef(" negl %%ebx*n")
                    writef("L%n:*n", l)
-                   rbits := b_a
+                   Ak, Amem := 0, 0
+		   prstate()
                    ENDCASE
                  }
 
     CASE f_xdiv:   cvf("XDIV") // a := a / b
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" movl %%ebx,%%eax*n")
                    writef(" cdq*n")
                    writef(" idiv %%ecx*n")
                    writef(" movl %%eax,%%ebx*n")
-                   rbits := b_a
+                   Ak, Amem := 0, 0
+		   prstate()
+		   writef("# UNCHECKED*n")
                    ENDCASE
 
-    CASE f_xrem:   cvf("XREM") // a := a REM b
-                   moveL2B()
-                   moveR2A()
+    CASE f_xmod:   cvf("XMOD") // a := a MOD b
+                   moveB2y()
+                   moveA2x()
                    writef(" movl %%ebx,%%eax*n")
                    writef(" cdq*n")
                    writef(" idiv %%ecx*n")
                    writef(" movl %%edx,%%ebx*n")
-                   rbits := b_a
+                   Ak, Amem := 0, 0
+		   prstate()
                    ENDCASE
 
     CASE f_xsub:   cvf("XSUB") // a := a - b
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" subl %%ecx,%%ebx*n")
-                   rbits := b_a
+                   Ak, Amem := 0, 0
+		   prstate()
                    ENDCASE
 
     CASE f_mul:    cvf("MUL") // a := b * a; c := ?
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" movl %%ecx,%%eax*n")
                    writef(" imul %%ebx*n") // currupts edx
                    writef(" movl %%eax,%%ebx*n")
-                   rbits := b_a
+                   Ak, Amem := 0, 0
+		   prstate()
                    ENDCASE
 
     CASE f_div:    cvf("DIV")  // a := b / a; c := ?
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" movl %%ecx,%%eax*n")
                    writef(" cdq*n")
                    writef(" idiv %%ebx*n")
                    writef(" movl %%eax,%%ebx*n")
-                   rbits := b_a
+                   Ak, Amem := 0, 0
+		   prstate()
                    ENDCASE
 
-    CASE f_rem:    cvf("REM") // a := b REM a; c := ?
-                   moveL2B()
-                   moveR2A()
+    CASE f_mod:    cvf("MOD") // a := b MOD a; c := ?
+                   moveB2y()
+                   moveA2x()
                    writef(" movl %%ecx,%%eax*n")
                    writef(" cdq*n")
                    writef(" idiv %%ebx*n")
                    writef(" movl %%edx,%%ebx*n")
-                   rbits := b_a
+                   Ak, Amem := 0, 0
+		   prstate()
                    ENDCASE
 
     CASE f_add:    cvf("ADD") // a := b + a
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" addl %%ecx,%%ebx*n")
-                   rbits := b_a
+                   Ak, Amem := 0, 0
+		   prstate()
                    ENDCASE
 
     CASE f_sub:    cvf("SUB") // a := b - a
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" subl %%ecx,%%ebx*n")
                    writef(" negl %%ebx")
-                   rbits := b_a
+                   Ak, Amem := 0, 0
+		   prstate()
                    ENDCASE
 
     CASE f_eq:     cvf("EQ") // a := b = a
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" cmpl %%ebx,%%ecx*n")
                    writef(" seteb %%bl*n")
                    writef(" movzbl %%bl,%%ebx*n")
                    writef(" negl %%ebx*n")
-                   rbits := b_a 
-                   lbits := b_b 
                    ENDCASE
 
     CASE f_ne:     cvf("NE") // a := b ~= a
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" cmpl %%ebx,%%ecx*n")
                    writef(" setneb %%bl*n")
                    writef(" movzbl %%bl,%%ebx*n")
                    writef(" negl %%ebx*n")
-                   rbits := b_a 
-                   lbits := b_b 
                    ENDCASE
 
     CASE f_ls:     cvf("LS") // a := b < a
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" cmpl %%ebx,%%ecx*n")
                    writef(" setlb %%bl*n")
                    writef(" movzbl %%bl,%%ebx*n")
                    writef(" negl %%ebx*n")
-                   rbits := b_a 
-                   lbits := b_b 
                    ENDCASE
 
     CASE f_gr:     cvf("GR") // a := b > a
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" cmpl %%ebx,%%ecx*n")
                    writef(" setgb %%bl*n")
                    writef(" movzbl %%bl,%%ebx*n")
                    writef(" negl %%ebx*n")
-                   rbits := b_a 
-                   lbits := b_b 
                    ENDCASE
 
     CASE f_le:     cvf("LE") // a := b <= a
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" cmpl %%ebx,%%ecx*n")
                    writef(" setleb %%bl*n")
                    writef(" movzbl %%bl,%%ebx*n")
                    writef(" negl %%ebx*n")
-                   rbits := b_a 
-                   lbits := b_b 
                    ENDCASE
 
     CASE f_ge:     cvf("GE") // a := b >= a
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" cmpl %%ebx,%%ecx*n")
                    writef(" setgeb %%bl*n")
                    writef(" movzbl %%bl,%%ebx*n")
                    writef(" negl %%ebx*n")
-                   rbits := b_a 
-                   lbits := b_b 
                    ENDCASE
 
     CASE f_eq0:    cvf("EQ0") // a := a = 0
-                   moveR2A()
+                   moveA2x()
                    writef(" orl %%ebx,%%ebx*n")
                    writef(" seteb %%bl*n")
                    writef(" movzbl %%bl,%%ebx*n")
                    writef(" negl %%ebx*n")
-                   rbits := b_a 
                    ENDCASE
 
     CASE f_ne0:    cvf("NE0") // a := a ~= 0
-                   moveR2A()
+                   moveA2x()
                    writef(" orl %%ebx,%%ebx*n")
                    writef(" setneb %%bl*n")
                    writef(" movzbl %%bl,%%ebx*n")
                    writef(" negl %%ebx*n")
-                   rbits := b_a 
                    ENDCASE
 
     CASE f_ls0:    cvf("LS0") // a := a < 0
-                   moveR2A()
+                   moveA2x()
                    writef(" sarl $31,%%ebx*n")
-                   rbits := b_a 
                    ENDCASE
 
     CASE f_gr0:    cvf("GR0") // a := a > 0
-                   moveR2A()
+                   moveA2x()
                    writef(" orl %%ebx,%%ebx*n")
                    writef(" setgb %%bl*n")
                    writef(" movzbl %%bl,%%ebx*n")
                    writef(" negl %%ebx*n")
-                   rbits := b_a 
                    ENDCASE
 
     CASE f_le0:    cvf("LE0") // a := a <= 0
-                   moveR2A()
+                   moveA2x()
                    writef(" orl %%ebx,%%ebx*n")
                    writef(" setleb %%bl*n")
                    writef(" movzbl %%bl,%%ebx*n")
                    writef(" negl %%ebx*n")
-                   rbits := b_a 
                    ENDCASE
 
     CASE f_ge0:    cvf("GE0") // a := a >= 0
-                   moveR2A()
+                   moveA2x()
                    writef(" sarl $31,%%ebx*n")
                    writef(" notl %%ebx*n")
-                   rbits := b_a 
                    ENDCASE
 
     CASE f_lsh:    cvf("LSH") // a := b << a; b := ?
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" xchgl %%ebx,%%ecx*n")
                    writef(" cmpl $32,%%ecx*n")
                    writef(" sbbl %%eax,%%eax*n")  // set eax to -1 or 0
                    writef(" andl %%eax,%%ebx*n")  // set ebx to b or 0
                    writef(" sall %%cl,%%ebx*n")   // now shift it
-                   rbits := b_a 
-                   lbits := 0 
+                   Ak, Amem := 0, 0
+                   Breg, Bk, Bmem := 0, 0, 0
+		   prstate()
                    ENDCASE
 
     CASE f_rsh:    cvf("RSH") // a := b >> a; b := ?
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" xchgl %%ebx,%%ecx*n")
                    writef(" cmpl $32,%%ecx*n")
                    writef(" sbbl %%eax,%%eax*n")  // set eax to -1 or 0
                    writef(" andl %%eax,%%ebx*n")  // set ebx to b or 0
                    writef(" shrl %%cl,%%ebx*n")   // now shift it
-                   rbits := b_a 
-                   lbits := 0 
+                   Ak, Amem := 0, 0
+                   Breg, Bk, Bmem := 0, 0, 0
                    prstate()
                    ENDCASE
 
     CASE f_and:    cvf("AND") // a := b & a 
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" andl %%ecx,%%ebx*n") 
-                   rbits := b_a 
+                   Ak, Amem := 0, 0
                    prstate()
                    ENDCASE
 
     CASE f_or:     cvf("OR") // a := b | a 
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" orl %%ecx,%%ebx*n") 
-                   rbits := b_a 
+                   Ak, Amem := 0, 0
                    prstate()
                    ENDCASE
 
     CASE f_xor:    cvf("XOR") // a := b NEQV a
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" xorl %%ecx,%%ebx*n") 
-                   rbits := b_a 
+                   Ak, Amem := 0, 0
                    prstate()
                    ENDCASE
 
     CASE f_eqv:    cvf("EQV") // a := b EQV a 
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" xorl %%ecx,%%ebx*n") 
                    writef(" notl %%ebx*n") 
-                   rbits := b_a 
+                   Ak, Amem := 0, 0
                    prstate()
                    ENDCASE
 
     CASE f_gbyt:   cvf("GBYT") // a := b % a
-                   moveL2B()
-                   moveR2A()
-                   writef(" movzbl (%%ebx,%%ecx,4),%%ebx*n") 
-                   rbits := b_a 
+                   moveB2either()
+                 { LET bstr = Breg=1 -> "%ebx", "%ecx"
+                   TEST Ak=1
+                   THEN { TEST Avalk
+                          THEN writef(" movzbl %n(,%s,4),%%ebx*n", Avalk, bstr) 
+                          ELSE writef(" movzbl (,%s,4),%%ebx*n", bstr)
+                        }
+                   ELSE { TEST Breg=1
+                          THEN { moveA2y()
+                                 writef(" movzbl (%%ecx,%%ebx,4),%%ebx*n")
+                               }
+                          ELSE { moveA2x()
+                                 writef(" movzbl (%%ebx,%%ecx,4),%%ebx*n")
+                               }
+                        }
+                   Areg, Ak, Amem := 1, 0, 0
+                   IF Breg=1 DO Breg := 0
                    prstate()
                    ENDCASE
+                 }
 
     CASE f_xgbyt:  cvf("XGBYT") // a := a % b 
-                   moveL2B()
-                   moveR2A()
-                   writef(" movzbl (%%ecx,%%ebx,4),%%ebx*n")
-                   rbits := b_a 
+                   moveA2x()
+                   TEST Bk=1
+                   THEN { TEST Bval
+                          THEN writef(" movzbl %n(,%%ebx,4),%%ebx*n", Bval) 
+                          ELSE writef(" movzbl (,%%ebx,4),%%ebx*n")
+                        }
+                   ELSE { moveB2y()
+                          writef(" movzbl (%%ecx,%%ebx,4),%%ebx*n")
+                        }
+                   Areg, Ak, Amem := 1, 0, 0
                    prstate()
                    ENDCASE
 
     CASE f_pbyt:   cvf("PBYT") // b % a := c
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" movb %%dl,(%%ebx,%%ecx,4)*n") 
-                   rbits := rbits & b_abx
-                   lbits := lbits & b_abx
+                   Amem := 0
+                   Bmem := 0
                    prstate()
                    ENDCASE
 
     CASE f_xpbyt:  cvf("XPBYT") // a % b := c 
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" movb %%dl,(%%ecx,%%ebx,4)*n") 
-                   rbits := rbits & b_abx
-                   lbits := lbits & b_abx
+                   Amem := 0
+                   Bmem := 0
                    prstate()
                    ENDCASE
 
@@ -1754,93 +1476,85 @@ AND scan() BE
                    ENDCASE
 
     CASE f_xch:    cvf("XCH") // swap a and b
-                 { LET r, n = rbits, rn
-                   rbits, rn := lbits, ln
-                   lbits, ln := r, n
+                 { LET reg, k, valk, mem, val = Areg, Ak, Avalk, Amem, Aval
+                   Areg, Ak, Avalk, Amem, Aval := Breg, Bk, Bvalk, Bmem, Bval
+                   Breg, Bk, Bvalk, Bmem, Bval :=  reg,  k,  valk,  mem,  val
                    ENDCASE
                  }
 
-    CASE f_atb:    cvf("ATB") // L := R
-                   IF (rbits & b_a) > 0 DO
-                   { TEST (lbits & b_b) > 0
+    CASE f_atb:    cvf("ATB") // B := A
+                   IF Areg=1 DO
+                   { TEST Breg=2
                      THEN { writef(" xchgl %%ebx,%%ecx*n")
-                            rbits := b_a
+                            Areg := 1
                           }
                      ELSE { writef(" movl %%ebx,%%ecx*n")
                           }
-                     lbits := b_b
+                     Breg, Bk, Bvalk, Bmem, Bval :=  2,  Ak, Avalk, Amem, Aval
                      prstate()
                      ENDCASE
                    }
-                   moveR2B()
-                   lbits := b_b
+                   moveA2y()
+                   Areg := 2
                    ENDCASE
 
     CASE f_atc:    cvf("ATC") // c := a
-                   moveR2A()
+                   moveA2x()
                    writef(" movl %%ebx,%%edx*n")
                    ENDCASE
 
-    CASE f_bta:    cvf("BTA") // R := L
-                   rbits, rn := lbits, ln
-                   lbits := lbits & b_pglm
+    CASE f_bta:    cvf("BTA") // A := B
+                   Areg, Ak, Avalk, Amem, Aval := Breg, Bk, Bvalk, Bmem, Bval
                    prstate()
                    ENDCASE
 
     CASE f_btc:    cvf("BTC") // c := b
-                   moveL2B()
+                   moveB2y()
                    writef(" movl %%ecx,%%edx*n")
                    ENDCASE
 
     CASE f_atblp:  cvfp("ATBLP") // b := a; a := P!n
-                   lbits, ln := rbits, rn
-                   rbits, rn := b_p, pval
+                   Breg, Bk, Bvalk, Bmem, Bval := Areg, Ak, Avalk, Amem, Aval
+                   Areg, Ak, Amem, Aval := 0, 0, 1, pval
                    prstate()
                    ENDCASE
 
     CASE f_atblg:  cvfg("ATBLG") // b := a; a := G!n
-                   lbits, ln := rbits, rn
-                   rbits, rn := b_g, gval
+                   Breg, Bk, Bvalk, Bmem, Bval := Areg, Ak, Avalk, Amem, Aval
+                   Areg, Ak, Amem, Aval := 0, 0, 2, gval
+                   prstate()
                    ENDCASE
 
     CASE f_atbl:   cvfk("ATBL") // b := a; a := k
-                   lbits, ln := rbits & bn_a, rn
-
-                   // If R was in A, move A to B
-                   IF (rbits & b_a) > 0 DO
-                   { writef(" movl %%ebx,%%ecx*n")
-                     lbits := b_b
-                     prstate()
-                   }
-                   // Compile code to put k in A
-                   TEST kval
-                   THEN writef(" movl $%n,%%ebx*n", kval)
-                   ELSE writef(" xorl %%ebx,%%ebx*n")
-                   rbits := b_a
+                   Breg, Bk, Bvalk, Bmem, Bval := Areg, Ak, Avalk, Amem, Aval
+                   Areg, Ak, Amem, Aval := 0, 1, 0, kval
                    prstate()
                    ENDCASE
 
     CASE f_j:      cvfl("J") // jump to Ln
                    writef(" jmp L%c%n*n", modletter, lval)
-                   lbits, rbits := 0, 0
-                   prstate()
+                   Areg, Ak, Amem := 0, 0, 0
+                   Breg, Bk, Bmem := 0, 0, 0
+                   //prstate()
                    ENDCASE
 
     CASE f_rtn:    cvf("RTN") // procedure return
                    // Load A popping esp if necessary
-                   moveR2A()
+                   moveA2x()
                    writef(" movl 4(%%ebp),%%eax*n")
                    writef(" movl 0(%%ebp),%%ebp*n")
                    writef(" jmp **%%eax*n")
-                   lbits, rbits := 0, 0
-                   prstate()
+                   Areg, Ak, Amem := 0, 0, 0
+                   Breg, Bk, Bmem := 0, 0, 0
+                   //prstate()
                    ENDCASE
 
     CASE f_goto:   cvf("GOTO") // jump to a
-                   moveR2A()
+                   moveA2x()
                    writef(" jmp **%%ebx*n")
-                   lbits, rbits := 0, 0
-                   prstate()
+                   Areg, Ak, Amem := 0, 0, 0
+                   Breg, Bk, Bmem := 0, 0, 0
+                   //prstate()
                    ENDCASE
 
     CASE f_res:    cvf("RES")   // <res> := A
@@ -1849,8 +1563,8 @@ AND scan() BE
                    // It also could be just before a conditional jump in
                    // a switchon command when B = the switch expression value
                    // and B holds a case constant.
-                   moveR2A()
-                   moveL2B()
+                   moveA2x()
+                   moveB2y()
                    ENDCASE
 
     CASE f_ldres:  cvf("LDRES") // A := <res>
@@ -1859,12 +1573,13 @@ AND scan() BE
                    // expression, when the result value is in A.
                    // It is also used in switches to specify B holds
                    // the switch value. 
-                   lbits, rbits := b_b, b_a
+                   Areg, Ak, Amem := 1, 0, 0
+                   Breg, Bk, Bmem := 2, 0, 0
                    prstate()
                    ENDCASE
 
     CASE f_ikp:    cvfkp("IKP") // a := P!n + k; P!n := a
-                   moveR2A()
+                   moveA2x()
                    writef(" movl %n(%%ebp),%%ebx*n", 4*pval)
                    TEST kval=1
                    THEN writef(" incl %%ebx*n")
@@ -1872,12 +1587,13 @@ AND scan() BE
                         THEN writef(" decl %%ebx*n")
                         ELSE writef(" addl $%n,%%ebx*n", kval)
                    writef(" movl %%ebx,%n(%%ebp)*n", 4*pval)
-                   rbits, rn := b_ap, pval
+                   Areg, Ak, Amem, Aval := 1, 0, 1, pval
+		   Bmem := 0
                    prstate()
                    ENDCASE
 
     CASE f_ikg:    cvfkg("IKG") // a := G!n + k; G!n := a
-                   moveR2A()
+                   moveA2x()
                    writef(" movl %n(%%esi),%%ebx*n", 4*gval)
                    TEST kval=1
                    THEN writef(" incl %%ebx*n")
@@ -1885,12 +1601,13 @@ AND scan() BE
                         THEN writef(" decl %%ebx*n")
                         ELSE writef(" addl $%n,%%ebx*n", kval)
                    writef(" movl %%ebx,%n(%%esi)*n", 4*gval)
-                   rbits, rn := b_ag, gval
+                   Areg, Ak, Amem, Aval := 1, 0, 2, gval
+		   Bmem := 0
                    prstate()
                    ENDCASE
 
     CASE f_ikl:    cvfkl("IKL") // a := !Ln + k; !Ln := a
-                   moveR2A()
+                   moveA2x()
                    writef(" movl L%c%n,%%ebx*n", modletter, lval)
                    TEST kval=1
                    THEN writef(" incl %%ebx*n")
@@ -1898,156 +1615,174 @@ AND scan() BE
                         THEN writef(" decl %%ebx*n")
                         ELSE writef(" addl $%n,%%ebx*n", kval)
                    writef(" movl %%ebx,L%c%n*n", modletter, lval)
-                   rbits, rn := b_al, lval
+                   Areg, Ak, Amem, Aval := 1, 0, 4, lval
+		   Bmem := 0
                    prstate()
                    ENDCASE
 
     CASE f_ip:     cvfp("IP") // a := P!n + a; P!n := a
-                   moveR2A()
+                   moveA2x()
                    writef(" addl %n(%%ebp),%%ebx*n", 4*pval)
                    writef(" movl %%ebx,%n(%%ebp)*n", 4*pval)
-                   rbits, rn := b_ap, pval
+                   Areg, Ak, Amem, Aval := 1, 0, 1, pval
+		   Bmem := 0
                    prstate()
                    ENDCASE
 
     CASE f_ig:     cvfg("IG") // a := G!n + a; G!n := a
-                   moveR2A()
+                   moveA2x()
                    writef(" addl %n(%%esi),%%ebx*n", 4*gval)
                    writef(" movl %%ebx,%n(%%esi)*n", 4*gval)
-                   rbits, rn := b_ag, gval
+                   Areg, Ak, Amem, Aval := 1, 0, 2, gval
+		   Bmem := 0
                    prstate()
                    ENDCASE
 
     CASE f_il:     cvfl("IL") // a := !Ln + a; !Ln := a
-                   moveR2A()
+                   moveA2x()
                    writef(" addl L%c%n,%%ebx*n", modletter, lval)
                    writef(" movl %%ebx,L%c%n*n", modletter, lval)
-                   rbits, rn := b_al, lval
+                   Areg, Ak, Amem, Aval := 1, 0, 4, lval
+		   Bmem := 0
                    prstate()
                    ENDCASE
 
     CASE f_jeq:    cvfl("JEQ") // Jump to Ln if b = a
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" cmpl %%ebx,%%ecx*n")
                    writef(" je L%c%n*n", modletter, lval)
+                   writef("# Needs improvement*n")
                    ENDCASE
 
     CASE f_jne:    cvfl("JNE") // Jump to Ln if b ~= a
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" cmpl %%ebx,%%ecx*n")
                    writef(" jne L%c%n*n", modletter, lval)
+                   writef("# Needs improvement*n")
                    ENDCASE
 
     CASE f_jls:    cvfl("JLS") // Jump to Ln if b < a
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" cmpl %%ebx,%%ecx*n")
                    writef(" jl L%c%n*n", modletter, lval)
+                   writef("# Needs improvement*n")
                    ENDCASE
 
-    CASE f_jgr:    cvfl("JGR") // Jump to Ln if b > a
-                   moveL2B()
-                   moveR2A()
-                   writef(" cmpl %%ebx,%%ecx*n")
+    CASE f_jgr:    cvfl("JGR") // Jump to Ln if B > A
+                   moveAB2both() // Move one into x and
+                                 // the other into y
+                   wropregreg("cmpl", Areg, Breg)
                    writef(" jg L%c%n*n", modletter, lval)
                    ENDCASE
 
     CASE f_jle:    cvfl("JLE") // Jump to Ln if b <= a
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" cmpl %%ebx,%%ecx*n")
                    writef(" jle L%c%n*n", modletter, lval)
+                   writef("# Needs improvement*n")
                    ENDCASE
 
     CASE f_jge:    cvfl("JGE") // Jump to Ln if b >= a
-                   moveL2B()
-                   moveR2A()
+                   moveB2y()
+                   moveA2x()
                    writef(" cmpl %%ebx,%%ecx*n")
                    writef(" jge L%c%n*n", modletter, lval)
+                   writef("# Needs improvement*n")
                    ENDCASE
 
     CASE f_jeq0:   cvfl("JEQ0") // Jump to Ln if a = 0
-                   moveR2A()
+                   moveA2x()
                    writef(" orl %%ebx,%%ebx*n")
                    writef(" je L%c%n*n", modletter, lval)
+                   writef("# Needs improvement*n")
                    ENDCASE
 
     CASE f_jne0:   cvfl("JNE0") // Jump to Ln if a ~= 0
-                   moveR2A()
+                   moveA2x()
                    writef(" orl %%ebx,%%ebx*n")
                    writef(" jne L%c%n*n", modletter, lval)
+                   writef("# Needs improvement*n")
                    ENDCASE
 
     CASE f_jls0:   cvfl("JLS0") // Jump to Ln if a < 0
-                   moveR2A()
+                   moveA2x()
                    writef(" orl %%ebx,%%ebx*n")
                    writef(" jl L%c%n*n", modletter, lval)
+                   writef("# Needs improvement*n")
                    ENDCASE
 
     CASE f_jgr0:   cvfl("JGR0") // Jump to Ln if a > 0
-                   moveR2A()
+                   moveA2x()
                    writef(" orl %%ebx,%%ebx*n")
                    writef(" jg L%c%n*n", modletter, lval)
+                   writef("# Needs improvement*n")
                    ENDCASE
 
     CASE f_jle0:   cvfl("JLE0") // Jump to Ln if a <= 0
-                   moveR2A()
+                   moveA2x()
                    writef(" orl %%ebx,%%ebx*n")
                    writef(" jle L%c%n*n", modletter, lval)
+                   writef("# Needs improvement*n")
                    ENDCASE
 
     CASE f_jge0:   cvfl("JGE0") // Jump to Ln if a >= 0
-                   moveR2A()
+                   moveA2x()
                    writef(" orl %%ebx,%%ebx*n")
                    writef(" jge L%c%n*n", modletter, lval)
+                   writef("# Needs improvement*n")
                    ENDCASE
 
     CASE f_jge0m:  cvfm("JGE0M") // Jump to Mn if a >= 0
-                   moveR2A()
+                   moveA2x()
                    writef(" orl %%ebx,%%ebx*n")
                    writef(" jge M%c%n*n", modletter, mval)
+                   writef("# Needs improvement*n")
                    ENDCASE
 
     // The following five opcodes are never generated by
     // the BCPL compiler
     CASE f_brk:    cvf("BRK") // Breakpoint instruction
-                   writef(" unimplemented*n")
+                   writef("*n# BRK not yet implemented*n")
                    ENDCASE
 
     CASE f_nop:    cvf("NOP") // No operation
                    ENDCASE
 
     CASE f_chgco:  cvf("CHGCO") // Change coroutine
-                   writef(" CHGCO unimplemented*n")
+                   writef("*n# CHGCO not yet implemented*n")
                    ENDCASE
 
     CASE f_mdiv:   cvf("MDIV") // a := Muldiv(P!3, P!4, P!5) 
-                   writef(" MDIV unimplemented*n")
+                   writef("*n# MDIV not yet implemented*n")
                    ENDCASE
 
     CASE f_sys:    cvf("SYS") // System function
-                   writef(" SYS unimplemented*n")
+                   writef("*n# SYS not yet implemented*n")
                    ENDCASE
 
     CASE f_section:  cvfs("SECTION") // Name of section
                      FOR i = 0 TO charv%0 DO sectname%i := charv%i
-                     lbits, rbits := 0, 0
+                     Areg, Ak, Amem := 0, 0, 0
+                     Breg, Bk, Bmem := 0, 0, 0
+		     //prstate()
                      ENDCASE
 
     CASE f_modstart: cvf("MODSTART") // Start of module  
                      sectname%0 := 0
-                     lbits, rbits := 0, 0
+                     Areg, Ak, Amem := 0, 0, 0
+                     Breg, Bk, Bmem := 0, 0, 0
+		     //prstate()
                      ENDCASE
 
     CASE f_modend:   cvf("MODEND") // End of module 
                      modletter := modletter+1
-                     lbits, rbits := 0, 0
                      ENDCASE
 
     CASE f_global:   cvglobal() // Global initialisation data
-                     lbits, rbits := 0, 0
                      ENDCASE
 
     CASE f_string:   cvstring() // String constant
@@ -2061,649 +1796,832 @@ AND scan() BE
 
     CASE f_mlab:     cvfm("MLAB") // Destination of jge0m
                      writef("M%c%n:*n", modletter, mval)
-                     lbits, rbits := 0, 0
-                     prstate()
+                     Areg, Ak, Amem := 0, 0, 0
+                     Breg, Bk, Bmem := 0, 0, 0
+		     prstate()
                      ENDCASE
 
     CASE f_lab:      cvfl("LAB") // Program label
                      writef("*nL%c%n:*n", modletter, lval)
-                     lbits, rbits := 0, 0
-                     prstate()
+                     Areg, Ak, Amem := 0, 0, 0
+                     Breg, Bk, Bmem := 0, 0, 0
+		     prstate()
                      ENDCASE
 
     CASE f_lstr:     cvfm("LSTR") // a := Mn   (pointer to string)
-                     IF lbits = b_a DO
-                     { // L is in A only so move it to B
+                     IF Breg=1 & (Bk+Bmem)=0 DO
+                     { // B is in A only so move it to y
                        writef(" movl %%ebx,%%ecx*n")
-                       lbits := b_b
+                       Breg := 2
                        prstate()
                      }
                      writef(" leal M%c%n,%%ebx*n", modletter, mval)
                      writef(" shrl $2,%%ebx*n")
-                     lbits, rbits := lbits & bn_a, b_a
-                     prstate()
+                     Areg, Ak, Amem := 1, 0, 0
+		     prstate()
                      ENDCASE
 
     CASE f_entry:    cventry() // Start of a function
                      ENDCASE
 
-    CASE f_float:    cvf("FLOAT")
-                     // Ensure L is not using X
-                     IF lbits = b_x DO moveL2S()
-                     // Ensure R is Pn, Gn, Ln, Mn or S
-                     moveR2mem()
-                     genopmem("filds", rbits, rn) // st[0] := FLOAT a
-                     rbits := b_x
+    CASE f_float:    cvf("FLOAT") // st[0] := FLOAT a
+                     // Ensure B is not using st[0]
+                     IF Breg=4 DO popS2mem(2, 11)
+                     // Ensure A is Pn, Gn, Ln, Mn or T
+                     moveA2mem()
+                     wropmem("filds", Areg, Aval)
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
                      ENDCASE
 
-    CASE f_fix:      cvf("FIX") // a := FIX a
-                     moveR2X()
-                     writef(" fistpl (%%esp)*n")
-                     rbits := b_s
+    CASE f_fix:      cvf("FIX") // A := FIX A
+                     pushA2s()
+                     writef(" fistpl 44(%%esi)*n")
+                     Areg, Ak, Amem, Aval := 0, 0, 2, 11 // A is in G11
+                     prstate()
+                     writef("# UNCHECKED*n")
                      ENDCASE
 
-    CASE f_fabs:     cvf("FABS") // R := #ABS R
-                     moveR2X()
-                     writef(" fabs*n")
-                     rbits := b_x
+    CASE f_fabs:     cvf("FABS") // A := #ABS A
+                     pushA2s()
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
+                     ENDCASE
+
+    CASE f_fmul:     cvf("FMUL") // A := B #* A; B := ?
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
+                     ENDCASE
+		     /*
+                     IF (bbits & b_s) > 0 DO
+                     { moveA2mem()
+                       wropmem("fmuls")
+                       bbits, abits := 0, b_s
+                       prstate()
+                       ENDCASE
+                     }
+
+                     IF (abits & b_s) > 0 DO
+                     { moveB2mem()
+                       wropmem("fmuls")
+                       bbits, abits := 0, b_s
+                       prstate()
+                       ENDCASE
+                     }
+
+                     IF (bbits & b_tpglm) > 0 DO
+                     { wropmem("flds")
+                       bbits := b_s
+                       moveA2mem()
+                       wropmem("fmuls")
+                       bbits, abits := 0, b_s
+                       prstate()
+                       ENDCASE
+                     }
+
+                     IF (abits & b_tpglm) > 0 DO
+                     { wropmem("flds")
+                       abits := b_s
+                       moveB2mem()
+                       wropmem("fmuls")
+                       bbits, abits := 0, b_s
+                       prstate()
+                       ENDCASE
+                     }
+
+                     pushB2s()
+                     bbits := b_s
+                     moveA2mem()
+                     wropmem("fmuls")
+                     bbits, abits := 0, b_s
                      prstate()
                      ENDCASE
-
-    CASE f_fmul:     cvf("FMUL") // R := L #* R; L := ?
-
-                     IF (lbits & b_x) > 0 DO
-                     { moveR2mem()
-                       genopmem("fmuls", rbits, rn)
-                       lbits, rbits := 0, b_x
+  */
+  
+    CASE f_fdiv:     cvf("FDIV") // A := B #/ A; B := ?
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
+                     ENDCASE
+		     
+                     //IF (bbits & b_s) > 0 DO
+                     { moveA2mem()
+                       wropmem("fdivs")
+                       //bbits, abits := 0, b_s
                        prstate()
                        ENDCASE
                      }
 
-                     IF (rbits & b_x) > 0 DO
-                     { moveL2mem()
-                       genopmem("fmuls", lbits, ln)
-                       lbits, rbits := 0, b_x
+                     //IF (abits & b_s) > 0 DO
+                     { moveB2mem()
+                       wropmem("fdivrs")
+                       //bbits, abits := 0, b_s
                        prstate()
                        ENDCASE
                      }
 
-                     IF (lbits & b_spglm) > 0 DO
-                     { genopmem("flds", lbits, ln)
-                       lbits := b_x
-                       moveR2mem()
-                       genopmem("fmuls", rbits, rn)
-                       lbits, rbits := 0, b_x
+                     //IF (bbits & b_tpglm) > 0 DO
+                     { wropmem("flds")
+                       //bbits := b_s
+                       moveA2mem()
+                       wropmem("fdivs")
+                       //bbits, abits := 0, b_s
                        prstate()
                        ENDCASE
                      }
 
-                     IF (rbits & b_spglm) > 0 DO
-                     { genopmem("flds", rbits, rn)
-                       rbits := b_x
-                       moveL2mem()
-                       genopmem("fmuls", lbits, ln)
-                       lbits, rbits := 0, b_x
+                     //IF (abits & b_tpglm) > 0 DO
+                     { wropmem("flds")
+                       //abits := b_s
+                       moveB2mem()
+                       wropmem("fdivrs")
+                       //bbits, abits := 0, b_s
                        prstate()
                        ENDCASE
                      }
 
-                     moveL2X()
-                     lbits := b_x
-                     moveR2mem()
-                     genopmem("fmuls", rbits, rn)
-                     lbits, rbits := 0, b_x
+                     pushB2s()
+                     //bbits := b_s
+                     moveA2mem()
+                     wropmem("fdivs")
+                     //bbits, abits := 0, b_s
                      prstate()
                      ENDCASE
   
-    CASE f_fdiv:     cvf("FDIV") // R := L #/ R; L := ?
-
-                     IF (lbits & b_x) > 0 DO
-                     { moveR2mem()
-                       genopmem("fdivs", rbits, rn)
-                       lbits, rbits := 0, b_x
+    CASE f_fxdiv:    cvf("FXDIV") // A := A #/ B; B := ?
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
+                     ENDCASE
+		     
+                     //IF (bbits & b_s) > 0 DO
+                     { moveA2mem()
+                       wropmem("fdivrs")
+                       //bbits, abits := 0, b_s
                        prstate()
                        ENDCASE
                      }
 
-                     IF (rbits & b_x) > 0 DO
-                     { moveL2mem()
-                       genopmem("fdivrs", lbits, ln)
-                       lbits, rbits := 0, b_x
+                     //IF (abits & b_s) > 0 DO
+                     { moveB2mem()
+                       wropmem("fdivs")
+                       //bbits, abits := 0, b_s
                        prstate()
                        ENDCASE
                      }
 
-                     IF (lbits & b_spglm) > 0 DO
-                     { genopmem("flds", lbits, ln)
-                       lbits := b_x
-                       moveR2mem()
-                       genopmem("fdivs", rbits, rn)
-                       lbits, rbits := 0, b_x
+                     //IF (bbits & b_tpglm) > 0 DO
+                     { wropmem("flds")
+                       //bbits := b_s
+                       moveA2mem()
+                       wropmem("fdivrs")
+                       //bbits, abits := 0, b_s
                        prstate()
                        ENDCASE
                      }
 
-                     IF (rbits & b_spglm) > 0 DO
-                     { genopmem("flds", rbits, rn)
-                       rbits := b_x
-                       moveL2mem()
-                       genopmem("fdivrs", lbits, ln)
-                       lbits, rbits := 0, b_x
+                     //IF (abits & b_tpglm) > 0 DO
+                     { wropmem("flds")
+                       //abits := b_s
+                       moveB2mem()
+                       wropmem("fdivs")
+                       //bbits, abits := 0, b_s
                        prstate()
                        ENDCASE
                      }
 
-                     moveL2X()
-                     lbits := b_x
-                     moveR2mem()
-                     genopmem("fdivs", rbits, rn)
-                     lbits, rbits := 0, b_x
+                     pushB2s()
+                     //bbits := b_s
+                     moveA2mem()
+                     wropmem("fdivrs")
+                     //bbits, abits := 0, b_s
                      prstate()
                      ENDCASE
   
-    CASE f_fxdiv:    cvf("FXDIV") // R := R #/ L; L := ?
+    CASE f_fmod:     cvf("FMOD")  // A := B #MOD A; B := ?
+                     writef("*n# FMOD not yet implemented*n")
+                     ENDCASE
 
-                     IF (lbits & b_x) > 0 DO
-                     { moveR2mem()
-                       genopmem("fdivrs", rbits, rn)
-                       lbits, rbits := 0, b_x
+    CASE f_fxmod:    cvf("XFMOD") // A := A #MOD B; B := ?
+                     writef("*n# FXMOD not yet implemented*n")
+                     ENDCASE
+
+
+    CASE f_fadd:     cvf("FADD") // A := B #+ A; B := ?
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
+                     ENDCASE
+		     
+                     //IF (bbits & b_s) > 0 DO
+                     { moveA2mem()
+                       wropmem("fadds")
+                       //bbits, abits := 0, b_s
                        prstate()
                        ENDCASE
                      }
 
-                     IF (rbits & b_x) > 0 DO
-                     { moveL2mem()
-                       genopmem("fdivs", lbits, ln)
-                       lbits, rbits := 0, b_x
+                     //IF (abits & b_s) > 0 DO
+                     { moveB2mem()
+                       wropmem("fadds")
+                       //bbits, abits := 0, b_s
                        prstate()
                        ENDCASE
                      }
 
-                     IF (lbits & b_spglm) > 0 DO
-                     { genopmem("flds", lbits, ln)
-                       lbits := b_x
-                       moveR2mem()
-                       genopmem("fdivrs", rbits, rn)
-                       lbits, rbits := 0, b_x
+                     //IF (bbits & b_tpglm) > 0 DO
+                     { wropmem("flds")
+                       //bbits := b_s
+                       moveA2mem()
+                       wropmem("fadds")
+                       //bbits, abits := 0, b_s
                        prstate()
                        ENDCASE
                      }
 
-                     IF (rbits & b_spglm) > 0 DO
-                     { genopmem("flds", rbits, rn)
-                       rbits := b_x
-                       moveL2mem()
-                       genopmem("fdivs", lbits, ln)
-                       lbits, rbits := 0, b_x
+                     //IF (abits & b_tpglm) > 0 DO
+                     { wropmem("flds")
+                       //abits := b_s
+                       moveB2mem()
+                       wropmem("fadds")
+                       //bbits, abits := 0, b_s
                        prstate()
                        ENDCASE
                      }
 
-                     moveL2X()
-                     lbits := b_x
-                     moveR2mem()
-                     genopmem("fdivrs", rbits, rn)
-                     lbits, rbits := 0, b_x
+                     pushB2s()
+                     //bbits := b_s
+                     moveA2mem()
+                     wropmem("fadds")
+                     //bbits, abits := 0, b_s
                      prstate()
                      ENDCASE
   
-    CASE f_fadd:     cvf("FADD") // R := L #+ R; L := ?
+    CASE f_fsub:     cvf("FSUB") // A := B #- A; B := ?
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
+                     ENDCASE
 
-                     IF (lbits & b_x) > 0 DO
-                     { moveR2mem()
-                       genopmem("fadds", rbits, rn)
-                       lbits, rbits := 0, b_x
+                     //IF (bbits & b_s) > 0 DO
+                     { moveA2mem()
+                       wropmem("fsubs")
+                       //bbits, abits := 0, b_s
                        prstate()
                        ENDCASE
                      }
 
-                     IF (rbits & b_x) > 0 DO
-                     { moveL2mem()
-                       genopmem("fadds", lbits, ln)
-                       lbits, rbits := 0, b_x
+                     //IF (abits & b_s) > 0 DO
+                     { //moveB2mem()
+                       //wropmem("fsubrs")
+                       //bbits, abits := 0, b_s
                        prstate()
                        ENDCASE
                      }
 
-                     IF (lbits & b_spglm) > 0 DO
-                     { genopmem("flds", lbits, ln)
-                       lbits := b_x
-                       moveR2mem()
-                       genopmem("fadds", rbits, rn)
-                       lbits, rbits := 0, b_x
+                     //IF (bbits & b_tpglm) > 0 DO
+                     { wropmem("flds")
+                       //bbits := b_s
+                       moveA2mem()
+                       wropmem("fsubs")
+                       //bbits, abits := 0, b_s
                        prstate()
                        ENDCASE
                      }
 
-                     IF (rbits & b_spglm) > 0 DO
-                     { genopmem("flds", rbits, rn)
-                       rbits := b_x
-                       moveL2mem()
-                       genopmem("fadds", lbits, ln)
-                       lbits, rbits := 0, b_x
+                     //IF (abits & b_tpglm) > 0 DO
+                     { wropmem("flds")
+                       //abits := b_s
+                       moveB2mem()
+                       wropmem("fsubrs")
+                       //bbits, abits := 0, b_s
                        prstate()
                        ENDCASE
                      }
 
-                     moveL2X()
-                     lbits := b_x
-                     moveR2mem()
-                     genopmem("fadds", rbits, rn)
-                     lbits, rbits := 0, b_x
+                     pushB2s()
+                     //bbits := b_s
+                     moveA2mem()
+                     wropmem("fsubs")
+                     //bbits, abits := 0, b_s
                      prstate()
                      ENDCASE
   
-    CASE f_fsub:     cvf("FSUB") // R := L #- R; L := ?
-
-                     IF (lbits & b_x) > 0 DO
-                     { moveR2mem()
-                       genopmem("fsubs", rbits, rn)
-                       lbits, rbits := 0, b_x
-                       prstate()
-                       ENDCASE
-                     }
-
-                     IF (rbits & b_x) > 0 DO
-                     { moveL2mem()
-                       genopmem("fsubrs", lbits, ln)
-                       lbits, rbits := 0, b_x
-                       prstate()
-                       ENDCASE
-                     }
-
-                     IF (lbits & b_spglm) > 0 DO
-                     { genopmem("flds", lbits, ln)
-                       lbits := b_x
-                       moveR2mem()
-                       genopmem("fsubs", rbits, rn)
-                       lbits, rbits := 0, b_x
-                       prstate()
-                       ENDCASE
-                     }
-
-                     IF (rbits & b_spglm) > 0 DO
-                     { genopmem("flds", rbits, rn)
-                       rbits := b_x
-                       moveL2mem()
-                       genopmem("fsubrs", lbits, ln)
-                       lbits, rbits := 0, b_x
-                       prstate()
-                       ENDCASE
-                     }
-
-                     moveL2X()
-                     lbits := b_x
-                     moveR2mem()
-                     genopmem("fsubs", rbits, rn)
-                     lbits, rbits := 0, b_x
+    CASE f_fxsub:    cvf("FXSUB") // A := A #- B; B := ?
+                     Areg, Ak, Amem := 4, 0, 0
                      prstate()
+                     writef("# UNCHECKED*n")
                      ENDCASE
-  
-    CASE f_fneg:     cvf("FNEG") // R := #- R
-                     moveR2X()
+
+    CASE f_fneg:     cvf("FNEG") // A := #- A
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
+                     ENDCASE
+
+                     pushA2s()
                      writef(" fchs*n")          // st[0] := #- a
-                     rbits := b_x
+                     //abits := b_s
                      prstate()
                      ENDCASE
 
     CASE f_feq:      cvf("FEQ")
-                     moveL2B()
-                     moveR2A()
-                     writef(" pushl %%ecx*n")
-                     writef(" flds (%%esp)*n")  // st[0] := b
+                     moveB2y()
+                     moveA2x()
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
+                     ENDCASE
+
+
+                     // Corrected code
+                     // %ebx holds A and %ecx holds B
                      writef(" pushl %%ebx*n")
-                     writef(" flds (%%esp)*n")  // st[0], st[1] = a, b
+                     writef(" flds 44(%%esi)*n")  // st[0] := a
+                     writef(" pushl %%ecx*n")
+                     writef(" flds 44(%%esi)*n")  // st[0], st[1] = b, a
                      writef(" addl $8,%%esp*n")
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
-                     writef(" seteb %%bl*n")
+
+                     writef(" seteb %%bl*n")    // Convert result to TRUE or FALSE
                      writef(" movzbl %%bl,%%ebx*n")
                      writef(" negl %%ebx*n")
-                     rbits := b_a
+
+                     //abits := b_x
                      prstate()
                      ENDCASE
 
     CASE f_fne:      cvf("FNE")
-                     moveL2B()
-                     moveR2A()
-                     writef(" pushl %%ecx*n")
-                     writef(" flds (%%esp)*n")  // st[0] := b
+                     moveB2y()
+                     moveA2x()
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
+                     ENDCASE
+
+
+                     // Corrected code
+                     // %ebx holds A and %ecx holds B
                      writef(" pushl %%ebx*n")
-                     writef(" flds (%%esp)*n")  // st[0], st[1] = a, b
+                     writef(" flds 44(%%esi)*n")  // st[0] := a
+                     writef(" pushl %%ecx*n")
+                     writef(" flds 44(%%esi)*n")  // st[0], st[1] = b, a
                      writef(" addl $8,%%esp*n")
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
+
                      writef(" setneb %%bl*n")
                      writef(" movzbl %%bl,%%ebx*n")
                      writef(" negl %%ebx*n")
-                     rbits := b_a
+                     //abits := b_x
                      prstate()
                      ENDCASE
 
     CASE f_fls:      cvf("FLS")
-                     moveL2B()
-                     moveR2A()
-                     writef(" pushl %%ecx*n")
-                     writef(" flds (%%esp)*n")  // st[0] := b
+                     moveB2y()
+                     moveA2x()
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
+                     ENDCASE
+
+
+                     // Corrected code
+                     // %ebx holds A and %ecx holds B
                      writef(" pushl %%ebx*n")
-                     writef(" flds (%%esp)*n")  // st[0], st[1] = a, b
+                     writef(" flds 44(%%esi)*n")  // st[0] := a
+                     writef(" pushl %%ecx*n")
+                     writef(" flds 44(%%esi)*n")  // st[0], st[1] = b, a
                      writef(" addl $8,%%esp*n")
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
-                     writef(" seta %%bl*n")
+
+                     writef(" setb %%bl*n")
                      writef(" movzbl %%bl,%%ebx*n")
                      writef(" negl %%ebx*n")
-                     rbits := b_a
+                     //abits := b_x
                      prstate()
                      ENDCASE
 
     CASE f_fgr:      cvf("FGR")
-                     moveL2B()
-                     moveR2A()
+                     moveB2y()
+                     moveA2x()
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
+                     ENDCASE
+
+
+                     // Corrected code
+                     // %ebx holds A and %ecx holds B
                      writef(" pushl %%ebx*n")
-                     writef(" flds (%%esp)*n")  // st[0] := a
+                     writef(" flds 44(%%esi)*n")  // st[0] := a
                      writef(" pushl %%ecx*n")
-                     writef(" flds (%%esp)*n")  // st[0], st[1] = b, a
+                     writef(" flds 44(%%esi)*n")  // st[0], st[1] = b, a
                      writef(" addl $8,%%esp*n")
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
+
                      writef(" seta %%bl*n")
                      writef(" movzbl %%bl,%%ebx*n")
                      writef(" negl %%ebx*n")
-                     rbits := b_a
+                     //abits := b_x
                      prstate()
                      ENDCASE
 
     CASE f_fle:      cvf("FLE")
-                     moveL2B()
-                     moveR2A()
+                     moveB2y()
+                     moveA2x()
                      writef(" pushl %%ecx*n")
-                     writef(" flds (%%esp)*n")  // st[0] := b
+                     writef(" flds 44(%%esi)*n")  // st[0] := b
                      writef(" pushl %%ebx*n")
-                     writef(" flds (%%esp)*n")  // st[0], st[1] = a, b
+                     writef(" flds 44(%%esi)*n")  // st[0], st[1] = a, b
                      writef(" addl $8,%%esp*n")
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
                      writef(" setae %%bl*n")
                      writef(" movzbl %%bl,%%ebx*n")
                      writef(" negl %%ebx*n")
-                     rbits := b_a
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
                      prstate()
                      ENDCASE
 
     CASE f_fge:      cvf("FGE")
-                     moveL2B()
-                     moveR2A()
+                     moveB2y()
+                     moveA2x()
                      writef(" pushl %%ebx*n")
-                     writef(" flds (%%esp)*n")  // st[0] := a
+                     writef(" flds 44(%%esi)*n")  // st[0] := a
                      writef(" pushl %%ecx*n")
-                     writef(" flds (%%esp)*n")  // st[0], st[1] = b, a
+                     writef(" flds 44(%%esi)*n")  // st[0], st[1] = b, a
                      writef(" addl $8,%%esp*n")
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
+
                      writef(" setae %%bl*n")
                      writef(" movzbl %%bl,%%ebx*n")
                      writef(" negl %%ebx*n")
-                     rbits := b_a
+
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
                      prstate()
                      ENDCASE
 
     CASE f_feq0:     cvf("FEQ0")
-                     moveR2X()
+                     pushA2s()
                      writef(" fldz*n")        // st[0], st[1] = 0.0, a
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
                      writef(" seteb %%bl*n")
                      writef(" movzbl %%bl,%%ebx*n")
                      writef(" negl %%ebx*n")
-                     rbits := b_a
+
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
+                     prstate()
                      ENDCASE
 
     CASE f_fne0:     cvf("FNE0")
-                     moveR2X()
+                     pushA2s()
                      writef(" fldz*n")        // st[0], st[1] = 0.0, a
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
                      writef(" setneb %%bl*n")
                      writef(" movzbl %%bl,%%ebx*n")
                      writef(" negl %%ebx*n")
-                     rbits := b_a
+                     //abits := b_x
+
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
                      prstate()
                      ENDCASE
 
     CASE f_fls0:     cvf("FLS0")
-                     moveR2X()
+                     pushA2s()
                      writef(" fldz*n")        // st[0], st[1] = 0.0, a
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
                      writef(" setab %%bl*n")
                      writef(" movzbl %%bl,%%ebx*n")
                      writef(" negl %%ebx*n")
-                     rbits := b_a
+
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
                      prstate()
                      ENDCASE
 
     CASE f_fgr0:     cvf("FGR0")
-                     moveR2X()
+                     pushA2s()
                      writef(" fldz*n")        // st[0], st[1] = 0.0, a
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
                      writef(" setbb %%bl*n")
                      writef(" movzbl %%bl,%%ebx*n")
                      writef(" negl %%ebx*n")
-                     rbits := b_a
+
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
                      prstate()
                      ENDCASE
 
     CASE f_fle0:     cvf("FLE0")
-                     moveR2X()
+                     pushA2s()
                      writef(" fldz*n")        // st[0], st[1] = 0.0, a
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
                      writef(" setaeb %%bl*n")
                      writef(" movzbl %%bl,%%ebx*n")
                      writef(" negl %%ebx*n")
-                     rbits := b_a
+
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
                      prstate()
                      ENDCASE
 
     CASE f_fge0:     cvf("FGE0")
-                     moveR2X()
+                     pushA2s()
                      writef(" fldz*n")        // st[0], st[1] = 0.0, a
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
                      writef(" setbeb %%bl*n")
                      writef(" movzbl %%bl,%%ebx*n")
                      writef(" negl %%ebx*n")
-                     rbits := b_a
+
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
                      prstate()
                      ENDCASE
 
     CASE f_jfeq:     cvfl("JFEQ")
-                     moveL2B()
-                     moveR2A()
-                     writef(" pushl %%ecx*n")
-                     writef(" flds (%%esp)*n")  // st[0] := b
+                     moveB2y()
+                     moveA2x()
+
+                     // Corrected code
+                     // %ebx holds A and %ecx holds B
                      writef(" pushl %%ebx*n")
-                     writef(" flds (%%esp)*n")  // st[0], st[1] = a, b
+                     writef(" flds 44(%%esi)*n")  // st[0] := a
+                     writef(" pushl %%ecx*n")
+                     writef(" flds 44(%%esi)*n")  // st[0], st[1] = b, a
                      writef(" addl $8,%%esp*n")
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
+
                      writef(" je L%c%n*n", modletter, lval)
-                     lbits, rbits := b_b, b_a
+
+
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
                      prstate()
                      ENDCASE
 
     CASE f_jfne:     cvfl("JFNE")
-                     moveL2B()
-                     moveR2A()
-                     writef(" pushl %%ecx*n")
-                     writef(" flds (%%esp)*n")  // st[0] := b
+                     moveB2y()
+                     moveA2x()
+
+                     // Corrected code
+                     // %ebx holds A and %ecx holds B
                      writef(" pushl %%ebx*n")
-                     writef(" flds (%%esp)*n")  // st[0], st[1] = a, b
+                     writef(" flds 44(%%esi)*n")  // st[0] := a
+                     writef(" pushl %%ecx*n")
+                     writef(" flds 44(%%esi)*n")  // st[0], st[1] = b, a
                      writef(" addl $8,%%esp*n")
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
+
                      writef(" jne L%c%n*n", modletter, lval)
-                     lbits, rbits := b_b, b_a
+
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
                      prstate()
                      ENDCASE
 
     CASE f_jfls:     cvfl("JFLS")
-                     moveL2B()
-                     moveR2A()
-                     writef(" pushl %%ecx*n")
-                     writef(" flds (%%esp)*n")  // st[0] := b
+                     moveB2y()
+                     moveA2x()
+
+                     // Corrected code
+                     // %ebx holds A and %ecx holds B
                      writef(" pushl %%ebx*n")
-                     writef(" flds (%%esp)*n")  // st[0], st[1] = a, b
+                     writef(" flds 44(%%esi)*n")  // st[0] := a
+                     writef(" pushl %%ecx*n")
+                     writef(" flds 44(%%esi)*n")  // st[0], st[1] = b, a
                      writef(" addl $8,%%esp*n")
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
-                     writef(" jne L%c%n*n", modletter, lval)
-                     lbits, rbits := b_b, b_a
+
+                     writef(" jb L%c%n*n", modletter, lval)
+
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
                      prstate()
                      ENDCASE
 
     CASE f_jfgr:     cvfl("JFGR")
-                     moveL2B()
-                     moveR2A()
-                     writef(" pushl %%ecx*n")
-                     writef(" flds (%%esp)*n")  // st[0] := b
+                     moveB2y()
+                     moveA2x()
+
+                     // Corrected code
+                     // %ebx holds A and %ecx holds B
                      writef(" pushl %%ebx*n")
-                     writef(" flds (%%esp)*n")  // st[0], st[1] = a, b
+                     writef(" flds 44(%%esi)*n")  // st[0] := a
+                     writef(" pushl %%ecx*n")
+                     writef(" flds 44(%%esi)*n")  // st[0], st[1] = b, a
                      writef(" addl $8,%%esp*n")
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
-                     writef(" jb L%c%n*n", modletter, lval)
-                     lbits, rbits := b_b, b_a
+
+                     writef(" ja L%c%n*n", modletter, lval)
+
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
                      prstate()
                      ENDCASE
 
     CASE f_jfle:     cvfl("JFLE")
-                     moveL2B()
-                     moveR2A()
-                     writef(" pushl %%ecx*n")
-                     writef(" flds (%%esp)*n")  // st[0] := b
+                     moveB2y()
+                     moveA2x()
+
+                     // Corrected code
+                     // %ebx holds A and %ecx holds B
                      writef(" pushl %%ebx*n")
-                     writef(" flds (%%esp)*n")  // st[0], st[1] = a, b
+                     writef(" flds 44(%%esi)*n")  // st[0] := a
+                     writef(" pushl %%ecx*n")
+                     writef(" flds 44(%%esi)*n")  // st[0], st[1] = b, a
                      writef(" addl $8,%%esp*n")
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
+
                      writef(" jbe L%c%n*n", modletter, lval)
-                     lbits, rbits := b_b, b_a
+
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
                      prstate()
                      ENDCASE
 
     CASE f_jfge:     cvfl("JFGE")
-                     moveL2B()
-                     moveR2A()
+                     moveB2y()
+                     moveA2x()
                      writef(" pushl %%ecx*n")
-                     writef(" flds (%%esp)*n")  // st[0] := b
+                     writef(" flds 44(%%esi)*n")  // st[0] := b
                      writef(" pushl %%ebx*n")
-                     writef(" flds (%%esp)*n")  // st[0], st[1] = a, b
+                     writef(" flds 44(%%esi)*n")  // st[0], st[1] = a, b
                      writef(" addl $8,%%esp*n")
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
                      writef(" jae L%c%n*n", modletter, lval)
-                     lbits, rbits := b_b, b_a
+
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
                      prstate()
                      ENDCASE
 
     CASE f_jfeq0:    cvfl("JFEQ0")
-                     moveR2X()
+                     pushA2s()
                      writef(" fldz*n")        // st[0], st[1] = 0.0, a
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
                      writef(" je L%c%n*n", modletter, lval)
-                     lbits, rbits := b_b, b_a
+
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
                      prstate()
                      ENDCASE
 
     CASE f_jfne0:    cvfl("JFNE0")
-                     moveR2X()
+                     pushA2s()
                      writef(" fldz*n")        // st[0], st[1] = 0.0, a
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
                      writef(" jne L%c%n*n", modletter, lval)
-                     lbits, rbits := b_b, b_a
+
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
                      prstate()
                      ENDCASE
 
     CASE f_jfls0:    cvfl("JFLS0")
-                     moveR2X()
+                     pushA2s()
                      writef(" fldz*n")        // st[0], st[1] = 0.0, a
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
                      writef(" ja L%c%n*n", modletter, lval)
-                     lbits, rbits := b_b, b_a
+
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
                      prstate()
                      ENDCASE
 
     CASE f_jfgr0:    cvfl("JFGR0")
-                     moveR2X()
+                     pushA2s()
                      writef(" fldz*n")        // st[0], st[1] = 0.0, a
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
                      writef(" jb L%c%n*n", modletter, lval)
-                     lbits, rbits := b_b, b_a
+
+                     Areg, Ak, Amem := 4, 0, 0
+                     prstate()
+                     writef("# UNCHECKED*n")
                      prstate()
                      ENDCASE
 
     CASE f_jfle0:    cvfl("JFLE0")
-                     moveR2X()
+                     pushA2s()
                      writef(" fldz*n")        // st[0], st[1] = 0.0, a
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
                      writef(" jae L%c%n*n", modletter, lval)
-                     lbits, rbits := b_b, b_a
+                     //bbits, abits := b_y, b_x
                      prstate()
                      ENDCASE
 
     CASE f_jfge0:    cvfl("JFGE0")
-                     moveR2X()
+                     pushA2s()
                      writef(" fldz*n")        // st[0], st[1] = 0.0, a
                      writef(" fucomip %%st(1),%%st*n")
                      writef(" fstp %%st*n")
                      writef(" jbe L%c%n*n", modletter, lval)
-                     lbits, rbits := b_b, b_a
+
+                     Areg, Ak, Amem := 4, 0, 0
                      prstate()
+                     writef("# UNCHECKED*n")
+                     prstate()
+                     ENDCASE
+
+    CASE f_selld:    cvfkk("SELLD")
+                     writef("*n# SELLD not yet implemented*n")
+                     ENDCASE
+    CASE f_selst:    cvffkk("SELST")
+                     writef("*n# SELST not yet implemented*n")
+                     ENDCASE
+    CASE f_xselst:   cvffkk("XSELST")
+                     writef("*n# XSELST not yet implemented*n")
                      ENDCASE
   }
 } REPEAT
 
-AND cvf(s)   BE { prstate()
-                  writef("# %s*n", s)
+AND cvf(s)   BE { writef("# %s*n", s)
                 } 
-AND cvfp(s)  BE { prstate()
+AND cvfp(s)  BE { //prstate()
                   writef("# %t7 P%n*n", s, rdp())
                 } 
-AND cvfkp(s) BE { prstate()
+AND cvfkp(s) BE { //prstate()
                   writef("# %t7 K%n P%n*n", s, rdk(), rdp())
                 } 
-AND cvfg(s)  BE { prstate()
+AND cvfg(s)  BE { //prstate()
                   writef("# %t7 G%n*n", s, rdg())
                 } 
-AND cvfkg(s) BE { prstate()
+AND cvfkg(s) BE { //prstate()
                   writef("# %t7 K%n G%n*n", s, rdk(), rdg())
                 } 
-AND cvfkl(s) BE { prstate()
+AND cvfkl(s) BE { //prstate()
                   writef("# %t7 K%n L%n*n", s, rdk(), rdl())
                 } 
-AND cvfpg(s) BE { prstate()
+AND cvfpg(s) BE { //prstate()
                   writef("# %t7 P%n G%n*n", s, rdp(), rdg())
                 } 
-AND cvfk(s)  BE { prstate()
+AND cvfk(s)  BE { //prstate()
                   writef("# %t7 K%n*n", s, rdk())
                 } 
-AND cvfw(s)  BE { prstate()
+AND cvfw(s)  BE { //prstate()
                   writef("# %t7 W%n*n", s, rdw())
                 } 
-AND cvfl(s)  BE { prstate()
+AND cvfl(s)  BE { //prstate()
                   writef("# %t7 L%n*n", s, rdl())
                 } 
-AND cvfm(s)  BE { prstate()
+AND cvfm(s)  BE { //prstate()
                   writef("# %t7 M%n*n", s, rdm())
                 } 
+
+AND cvfkk(s) BE writef("%t7 K%n K%n", s, rdk(), rdk())
+
+AND cvffkk(s) BE
+{ LET f   = rdk()
+  LET len = rdk()
+  LET sh  = rdk()
+  LET fs  = sfname(f)
+  writef("%t7 %s K%n K%n", s, fs, len, sh)
+}
 
 AND cvswl() BE
 { LET n = rdk()
@@ -2711,7 +2629,7 @@ AND cvswl() BE
   LET lab = nextlab()
   prstate()
   writef("# SWL K%n L%n*n", n, l)
-  moveR2A()
+  moveA2x()
   writef(" orl %%ebx,%%ebx*n")
   writef(" jl L%c%n*n", modletter, l)
   writef(" cmpl $%n,%%ebx*n", n)
@@ -2725,7 +2643,7 @@ AND cvswl() BE
     writef(" .long L%c%n*n", modletter, lval)
   }
   writef(" .text*n")
-  lbits, rbits := 0, 0
+  //bbits, abits := 0, 0
   prstate()
 }
 
@@ -2734,7 +2652,7 @@ AND cvswb() BE
   LET l = rdl()
   prstate()
   writef("# SWB K%n L%n*n", n, l)
-  moveR2A()
+  moveA2x()
   FOR i = 1 TO n DO 
   { LET k = rdk()
     LET l = rdl()
@@ -2743,14 +2661,12 @@ AND cvswb() BE
     writef(" je L%c%n*n", modletter, l)
   }
   writef(" jmp L%c%n*n", modletter, l)
-  lbits, rbits := 0, 0
+  //bbits, abits := 0, 0
   prstate()
 }
 
 AND cvglobal() BE
 { LET n = rdk()
-  moveL2B()
-  moveR2A()
   writef("# GLOBAL K%n*n", n)
   IF sectname%0=0 FOR i = 0 TO 4 DO sectname%i := "prog"%i
   writef(".globl %s*n", sectname)
@@ -2827,7 +2743,7 @@ AND cventry() BE
   FOR i = 1 TO n DO writef(" C%n", charv%i)
   newline()
   TEST op=f_lab THEN writef("# LAB     L%n*n", lab)
-                ELSE writef("# cventry: Bad op F%n L%n*n", op, lab)
+                ELSE writef("# cventry: Bad SIAL op F%n L%n*n", op, lab)
   writef("L%c%n:*n", modletter, lab)
   writef(" movl %%ebp,(%%edx)*n")    // NP!0 := P
   writef(" movl %%edx,%%ebp*n")      // P    := NP
@@ -2835,7 +2751,30 @@ AND cventry() BE
   writef(" movl %%edx,4(%%ebp)*n")   // P!1  := return address
   writef(" movl %%eax,8(%%ebp)*n")   // P!2  := entry address
   writef(" movl %%ebx,12(%%ebp)*n")  // P!3  := arg1
-  lbits := 0
-  rbits, rn := b_ap, 3
+  Areg, Ak, Amem, Aval := 1, 0, 1, 3
+  Breg, Bk, Bmem       := 0, 0, 0
   prstate()
+}
+
+AND sfname(sfop) = VALOF SWITCHON sfop INTO
+{ DEFAULT:        RESULTIS "UNKNOWN"
+
+  CASE 0:         RESULTIS "NULL"
+  CASE sf_vecap:  RESULTIS "VECAP"
+  CASE sf_fmul:   RESULTIS "FMUL"
+  CASE sf_fdiv:   RESULTIS "FDIV"
+  CASE sf_fmod:   RESULTIS "FMOD"
+  CASE sf_fadd:   RESULTIS "FADD"
+  CASE sf_fsub:   RESULTIS "FSUB"
+  CASE sf_mul:    RESULTIS "MUL"
+  CASE sf_div:    RESULTIS "DIV"
+  CASE sf_mod:    RESULTIS "MOD"
+  CASE sf_add:    RESULTIS "ADD"
+  CASE sf_sub:    RESULTIS "SUB"
+  CASE sf_lshift: RESULTIS "LSHIFT"
+  CASE sf_rshift: RESULTIS "RSHIFT"
+  CASE sf_logand: RESULTIS "LOGAND"
+  CASE sf_logor:  RESULTIS "LOGOR"
+  CASE sf_eqv:    RESULTIS "EQV"
+  CASE sf_xor:    RESULTIS "XOR"
 }

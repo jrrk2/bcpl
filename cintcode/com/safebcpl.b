@@ -5,7 +5,11 @@
 // Note: ../cintcode/ is used so that the compiler can be
 // compiled in a directory parallel to cintcode (such as natbcpl).
 
-GET "../cintcode/com/safebcplfe.b"
+GET "../cintcode/com/safebcplsyn.b"
+
+.
+
+GET "../cintcode/com/safebcpltrn.b"
 
 .
 

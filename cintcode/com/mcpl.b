@@ -1,16 +1,23 @@
 /*
-MCPL to MINTCODE compiler
+MCPL to Mintcode compiler
 
 Copyright: Martin Richards 16 June 1997
 
-It uses a reverse polish form of MCODE.
+It uses a reverse polish form of MCODE, similar to OCODE.
 
 Development of this compiler started on 2 Nov 1992
-This version is designed to run interpretively using MINTCODE,
+This version is designed to run interpretively using Mintcode,
 and is similar in structure to the BCPL Cintcode system.
 The GLOBAL declaration has been put back into the MCPL and
 the syntax of EXTERNAL declarations has been retained but not
 implemented.
+
+History
+
+16/08/2021
+Changed pointers to be BCPL style word addresses rather than byte addresses.
+Changes strings to be like BCPL strings with the length in the zeroth byte.
+Removed the +++ operator.
 
 30/7/93 Implemented GLOBAL declarations in SYN and TRN.
 28/1/97 Removed bug in storein
@@ -100,7 +107,7 @@ LET start() = VALOF
    sysprint := stdout
    selectoutput(sysprint)
  
-   writef("*nMCPL 13 Oct 2006*n")
+   writef("*nMCPL 16 Oct 2021*n")
  
    IF rdargs(argform, argv, 50)=0 DO {  writes("Bad arguments*n")
                                         RESULTIS 20
@@ -173,13 +180,13 @@ LET start() = VALOF
          tree := formtree()
          IF tree=0 BREAK
  
-         //writef("*nTree size %n*n", treesize+treevec-treep)
+         writef("*nTree size %n*n", treesize+treevec-treep)
  
          IF prtree DO {  writes("Parse Tree*n")
                          plist(tree, 0, 20)
                          newline()
                       }
-  
+//abort(1000)  
          UNLESS errcount=0 GOTO fin
          selectoutput(mcodeout)
          translate(tree)

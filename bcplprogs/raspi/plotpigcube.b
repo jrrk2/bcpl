@@ -6,6 +6,11 @@ prepcubepic..
 
 Implemented by Martin Richards (c) March 2014
 
+History
+
+12/09/2019
+Modified to use the new BCPL sdl library. No changes were needed.
+
 */
 
 GET "libhdr"
@@ -27,11 +32,11 @@ GLOBAL {
   plotall
   p1x; p1y; p2x; p2y; tx; ty
   ox; oy
-  playcount    // Number of positions in the cube where PLAY is the best strategy
+  playcount  // Number of positions in the cube where PLAY is the best strategy
   stdin
   stdout
   datastream
-  datav        // Byte vector holding the cube data
+  datav      // Byte vector holding the cube data
 }
 
 LET plotaxes() BE
@@ -102,16 +107,18 @@ FOR i = 0 TO 99 FOR j = 0 TO 99 DO
 }
 
 AND plotcolumn(op, my, lo, h) BE IF lo=0 | plotall DO
-{ LET x0 = ox + my*p1x + op*p2x + lo*tx
-  LET y0 = oy + my*p1y + op*p2y + lo*ty
-  LET x1, y1 = x0+p1x, y0+p1y
-  LET x2, y2 = x0+p2x, y0+p2y
-  LET x3, y3 = x0+p1x+p2x, y0+p1y+p2y
-
-  LET tx0, ty0 = x0+h*tx, y0+h*ty
-  LET tx1, ty1 = x1+h*tx, y1+h*ty
-  LET tx2, ty2 = x2+h*tx, y2+h*ty
-  LET tx3, ty3 = x3+h*tx, y3+h*ty
+{ // The columns are drawn from furthest to nearest and from right to left
+  // so that hidden surfaces are removed. 
+  LET x0 = ox + my*p1x + op*p2x + lo*tx  //   +------+
+  LET y0 = oy + my*p1y + op*p2y + lo*ty  //   |\     |\
+  LET x1, y1 = x0+p1x, y0+p1y            //   | x------x
+  LET x2, y2 = x0+p2x, y0+p2y            //   | |    | |
+  LET x3, y3 = x0+p1x+p2x, y0+p1y+p2y    //   | |    | |
+                                         //   | |    | |
+  LET tx0, ty0 = x0+h*tx, y0+h*ty        //   | |    | |
+  LET tx1, ty1 = x1+h*tx, y1+h*ty        //   1-|----2 |
+  LET tx2, ty2 = x2+h*tx, y2+h*ty        //    \|     \|
+  LET tx3, ty3 = x3+h*tx, y3+h*ty        //     0----- 3
 
   LET t = lo+h
   LET r = ABS(t-15)*4
@@ -183,7 +190,7 @@ LET start() = VALOF
 
   plotall := TRUE
 
-  stdin := input()
+  stdin  := input()
   stdout := output()
 
   datav := getvec(datavupb)
@@ -194,7 +201,7 @@ LET start() = VALOF
 
   datastream := findinput("cubepic.txt")
   UNLESS datastream DO
-  { writef("Trouble with file: cubepic.txt*n")
+  { writef("Unable to open file: cubepic.txt*n")
     GOTO fin
   }
 

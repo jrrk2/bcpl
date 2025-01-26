@@ -20,7 +20,7 @@ LET start() = VALOF
   FOR i = 0 TO 1000 DO v!i := 1000+i
 
   UNLESS mcseg DO
-  { writef("Trouble with MC package: mci386*n")
+  { writef("Trouble with MC package: mcarm*n")
     GOTO fin
   }
 

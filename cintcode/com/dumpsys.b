@@ -67,7 +67,7 @@ MANIFEST {
 
 LET start() BE
 { LET argv       = VEC 50
-  AND datv       = VEC 1
+  AND datv       = VEC 2
   AND datstrings = VEC 12
   AND sysin      = input()
   AND sysout     = output()
@@ -159,6 +159,7 @@ AND memdatstamp(v) = VALOF
 
   v!0 := mem(tv+0)
   v!1 := mem(tv+1)
+  v!2 := mem(tv+2) // For compatibility with old date format
 
   RESULTIS TRUE
 }
@@ -166,18 +167,18 @@ AND memdatstamp(v) = VALOF
 AND dumprootnode() BE
 { writef("*nRootnode at %n*n*n", rootnode)
 
-  writef("  blklist    %iA*n", mem(rtn_blklist+rootnode))
-  writef("  memsize    %iA*n", mem(rtn_memsize+rootnode))
-  writef("  info       %iA*n", mem(rtn_info+rootnode))
-  writef("  sys        %iA*n", mem(rtn_sys+rootnode))
-  writef("  blib       %iA*n", mem(rtn_blib+rootnode))
-  writef("  boot       %iA*n", mem(rtn_boot+rootnode))
-  writef("  abortcode  %iA*n", mem(rtn_abortcode+rootnode))
-  writef("  context    %iA*n", mem(rtn_context+rootnode))
-  writef("  lastp      %iA*n", mem(rtn_lastp+rootnode))
-  writef("  lastg      %iA*n", mem(rtn_lastg+rootnode))
-  writef("  days       %iA*n", mem(rtn_days+rootnode))
-  writef("  msecs      %iA*n", mem(rtn_msecs+rootnode))
+  writef("  blklist    %10i*n", mem(rtn_blklist+rootnode))
+  writef("  memsize    %10i*n", mem(rtn_memsize+rootnode))
+  writef("  info       %10i*n", mem(rtn_info+rootnode))
+  writef("  sys        %10i*n", mem(rtn_sys+rootnode))
+  writef("  blib       %10i*n", mem(rtn_blib+rootnode))
+  writef("  boot       %10i*n", mem(rtn_boot+rootnode))
+  writef("  abortcode  %10i*n", mem(rtn_abortcode+rootnode))
+  writef("  context    %10i*n", mem(rtn_context+rootnode))
+  writef("  sysp       %10i*n", mem(rtn_sysp+rootnode))
+  writef("  sysg       %10i*n", mem(rtn_sysg+rootnode))
+  writef("  days       %10i*n", mem(rtn_days+rootnode))
+  writef("  msecs      %10i*n", mem(rtn_msecs+rootnode))
 }
 
 AND dumpmemory() BE
@@ -243,7 +244,7 @@ AND dumpmemory() BE
 dump:
     FOR i = 1 TO 5 DO { LET n = mem(a+i)
                         TEST -10_000_000<=n<=10_000_000
-                        THEN writef("%iA ", n)
+                        THEN writef("%10i ", n)
                         ELSE writef("#x%x8 ", n)
                       }
 nxt: 
@@ -356,12 +357,16 @@ AND wrcortn() BE
   writearg(cont(cptr+co_fn))
   writef("  Parent %n", mem(cptr+co_parent))
   WHILE cont(cptr+hwm)=stackword DO hwm:=hwm-1
-  writef("  Stack %n/%n*n", size, hwm-6)
+  writef("  Stack %n/%n*n", hwm-6, size)
   wrframe()
 
   WHILE pptr> cptr DO
   { LET a = cont(pptr)>>2
     fsize := pptr-a
+    IF a >= pptr DO
+    { writef(" Stack corrupt*n")
+      RETURN
+    }
     pptr := a
     wrframe()
   }
@@ -372,7 +377,7 @@ AND wrcortn() BE
 AND wrframe() BE
 { writef("%i8:", pptr)
   TEST pptr=cptr
-  THEN writef("  #StackBase#")
+  THEN writef("    #StackBase#")
   ELSE writearg(mem(pptr+2))
   FOR i=3 TO 6 UNLESS i>=fsize DO writearg(cont(pptr+i))
   newline()
@@ -388,20 +393,22 @@ AND wrframe() BE
   }
 }
 
-AND writearg(n) BE
-// Write an argument in a field width of 13 characters
-  TEST isfun(n)
-  THEN { LET s = (n>>2)-3  // MR 1/11/03
-         LET len = memb(s, 0)
-         WHILE len>0 & memb(s, len)=' ' DO len := len-1
-         FOR i = len+1 TO 13 DO wrch(' ')
-         FOR i = 1 TO len DO wrch(memb(s, i))
-       }
-  ELSE TEST globword<=n<=globword+1000  // MR 1/11/03
-       THEN writef("       #G%z3#", n-globword)
-       ELSE TEST -10_000_000<=n<=10_000_000
-            THEN writef("  %iB", n)
-            ELSE writef("   #x%x8", n)
+AND writearg(n) BE TEST isfun(n)
+                   THEN { // Write the function name right justified
+                          LET s = (n>>2)-3  // MR 1/11/03
+                          LET len = 0
+                          FOR i = 1 TO 11 DO
+                          { IF memb(s, i)='*s' BREAK
+                            len := len+1
+                          }
+                          FOR i = len+1 TO 15 DO wrch('*s')
+                          FOR i = 1 TO len DO wrch(memb(s, i))
+                        }
+                   ELSE TEST globword<=n<=globword+1000  // MR 1/11/03
+                        THEN writef("         #G%z3#", n-globword)
+                        ELSE TEST -10_000_000<=n<=10_000_000
+                             THEN writef("    %11i", n)
+                             ELSE writef("     #x%8x", n)
 
 AND isfun(f) = VALOF
 { LET a = f>>2
@@ -422,7 +429,7 @@ AND getimage(filename) = VALOF
   imagedata, addrv, datav := 0, 0, 0
 
   UNLESS scb RESULTIS FALSE
-  size := sys(Sys_filesize, scb!scb_fd)    // Size in bytes
+  size := sys(Sys_filesize, @scb!scb_fd)   // Size in bytes
   IF size DO upb  := (size-1)/bytesperword // UPB in words      
 
   imagedata := getvec(upb)

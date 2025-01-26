@@ -2,6 +2,10 @@
 A BCPL Native System for 386/486/Pentium based machines, the DEC Alpha
 (64-bit implementation), VAX and ARM machines.
 
+The version for the Pentium processors is currently being improved
+and in not yet debugged.
+
+
 ==== Note: The ARM version is currently under development. ====
 
 This directory contain a version of a BCPL system that compiles into
@@ -48,8 +52,9 @@ called cintsys, and recompile all the standard BCPL system code and
 commands. If successful it will generate a lot of output ending with
 two lines similar to the following:
 
-BCPL Cintcode System (24 Jan 2012)
-0>
+BCPL Cintcode System (13 Dec 2023)
+Estimated 20535 Cintcode instructions per milli-second
+0.000>
 
 The BCPL Cincode system is now expecting you to type Command Language
 Interpreter commands. To exit the system type the command: logout or
@@ -69,10 +74,17 @@ moment. But can be used to generate assembly code for the VAX.
 This will build the native BCPL system and compile and run some
 example programs.
 
-This native code version of BCPL was revised and improved in April
-2004 to incorporate suggestions made by Colin Liebenrood.
+History
+
+29/05/2023
+Attempting to bring natbcpl up to date for modern Pentium machines.
+Still under development.
+
+13/04/2004
+This native code version of BCPL was revised and improved
+to incorporate suggestions made by Colin Liebenrood.
 
 
-Martin Richards                      http://www.cl.cam.ac.ul/users/mr/
-20 May 2013                          mr@cl.cam.ac.uk
+Martin Richards                      http://www.cl.cam.ac.ul/users/mr10/
+29 May 2024                          mr10@cl.cam.ac.uk
 

@@ -33,10 +33,12 @@ LET start() = VALOF
   writef("%10.0d*n", 1234)
   writef("%10.0d*n", -1234)
 
-  FOR d = 100 TO 500 BY 25 DO // Scaled decimal with 2 digit after
-                              // the decimal point
-  { writef("Delay for %4.2d seconds*n", d)
-    sys(Sys_delay, (tickspersecond*d)/100)
+  writef("%n %n (%f) %n %n*n", 1, 2, "%n %n %n", 3, 4, 5, 6, 7)
+
+  FOR d = 1000 TO 3000 BY 250 DO // Scaled decimal with 3 digit after
+                                 // the decimal point
+  { writef("Delay for %6.3d seconds*n", d)
+    delay(d)
   }
 
   RESULTIS 0

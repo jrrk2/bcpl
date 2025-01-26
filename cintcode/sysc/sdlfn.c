@@ -3,10 +3,22 @@ This contains the implemetation of the sys(Sys_sdl, fno, ...) facility.
 
 Implemented by Martin Richards (c) June 2013
 
+09/09/2019
+
+Made systematic changes to allow this library to work on both 32 and 64 bit
+machine using both 32 and 64 bit BCPL.  Unfortunately this involves making
+changes to all BCPL programs interfacing with SDL. BCPL program must allocate
+always allocate two condecutive BCPL words to hold machine addresses although
+often only the first word will be used. All SDL functions needing or returning
+a machine address must now use pointers to the word pair. Functions returning
+a machine address will have to pass a pointer to the pair as an extra argument.
+So, for instance, the call mkwindow(name, xsize, ysize) will have to be
+mkwindow(name, xsize, ysize, ptr).
+
 24/07/2014
 Began to add SDL2 
 
-24/09/12
+24/09/2012
 Added joystick events
 
 
@@ -22,10 +34,10 @@ fno=0  Test the sdl is available
 fno=1 ...
 */
 
-#include "cintsys.h"
+#include "cintmain.h"
 
-extern char *b2c_str(BCPLWORD bstr, char *cstr);
-extern BCPLWORD c2b_str(const char *cstr, BCPLWORD bstr);
+// cintmain.h must be included early since it defines such constants as
+// BCPLWORD, SDLavail and GLavail.
 
 #ifndef SDLavail
 BCPLWORD sdlfn(BCPLWORD *args, BCPLWORD *g, BCPLWORD *W) {
@@ -37,19 +49,14 @@ BCPLWORD sdlfn(BCPLWORD *args, BCPLWORD *g, BCPLWORD *W) {
 #ifdef SDLavail
 // SDL is available
 
-#include <stdio.h>
-#include <stdlib.h>
-#include "sdldraw.h"
+//#include <stdio.h>
+//#include <stdlib.h>
+//#include "sdldraw.h"
 
-#ifdef forWIN32
-#include <SDL.h>
-#else
-#include <SDL/SDL.h>
-#endif
-
-//#ifdef GLavail
-//#include <GL/gl.h>
-//#include <GL/glu.h>
+//#ifdef forWIN32
+//#include <SDL.h>
+//#else
+//#include <SDL/SDL.h>
 //#endif
 
 // These must agree with the declarations in g/sdl.h
@@ -82,21 +89,23 @@ BCPLWORD sdlfn(BCPLWORD *args, BCPLWORD *g, BCPLWORD *W) {
 #define sdl_wm_setcaption  24
 #define sdl_videoinfo      25
 #define sdl_maprgb         26
-#define sdl_drawline       27
-#define sdl_drawhline      28
-#define sdl_drawvline      29
-#define sdl_drawcircle     30
-#define sdl_drawrect       31
-#define sdl_drawpixel      32
-#define sdl_drawellipse    33
-#define sdl_drawfillellipse   34
-#define sdl_drawround      35
-#define sdl_drawfillround  36
-#define sdl_drawfillcircle 37
-#define sdl_drawfillrect   38
+
+//#define sdl_drawline       27
+//#define sdl_drawhline      28
+//#define sdl_drawvline      29
+//#define sdl_drawcircle     30
+//#define sdl_drawrect       31
+//#define sdl_drawpixel      32
+//#define sdl_drawellipse    33
+//#define sdl_drawfillellipse   34
+//#define sdl_drawround      35
+//#define sdl_drawfillround  36
+//#define sdl_drawfillcircle 37
+//#define sdl_drawfillrect   38
 
 #define sdl_fillrect       39
 #define sdl_fillsurf       40
+
 // Joystick functions
 #define sdl_numjoysticks       41
 #define sdl_joystickopen       42
@@ -119,27 +128,11 @@ BCPLWORD sdlfn(BCPLWORD *args, BCPLWORD *g, BCPLWORD *W) {
 #define sdl_joystickgetball    57
 #define sdl_joystickgethat     58
 
-#define gl_setvideomode        200
-#define gl_avail               201
-#define gl_ShadeModel          202
-#define gl_CullFace            203
-#define gl_FrontFace           204
-#define gl_Enable              205
-#define gl_ClearColor          206
-#define gl_ViewPort            207
-#define gl_MatrixMode          208
-#define gl_LoadIdentity        209
-#define glu_Perspective        210
-#define gl_Clear               211
-#define gl_Translate           212
-#define gl_Begin               213
-#define gl_End                 214
-#define gl_Color4v             215
-#define gl_Vertex3v            216
-#define gl_SwapBuffers         217
-#define gl_Rotate              218
 
-
+extern char *b2c_str(BCPLWORD bstr, char *cstr);
+extern BCPLWORD c2b_str(const char *cstr, BCPLWORD bstr);
+extern void copyaddrB2C(void*from, void*to);
+extern void copyaddrC2B(void*from, void*to);
 
 BCPLWORD decodeevent(SDL_Event*e, BCPLWORD *ptr) {
   if(e) {
@@ -180,6 +173,7 @@ BCPLWORD decodeevent(SDL_Event*e, BCPLWORD *ptr) {
       ptr[3] = (BCPLWORD)(e->button).y;
       return -1;
 
+#ifndef JSAvail
     case SDL_JOYAXISMOTION:    // 7
       ptr[1] = (BCPLWORD)(e->jaxis).which;  // Which joystick
       ptr[2] = (BCPLWORD)(e->jaxis).axis;   // Which axis
@@ -208,6 +202,7 @@ BCPLWORD decodeevent(SDL_Event*e, BCPLWORD *ptr) {
       ptr[2] = (BCPLWORD)(e->jbutton).button; // Which button
       ptr[3] = (BCPLWORD)(e->jbutton).state;  // What state
       return -1;
+#endif
 
     case SDL_QUIT:             // 12
       return -1;
@@ -223,7 +218,7 @@ BCPLWORD decodeevent(SDL_Event*e, BCPLWORD *ptr) {
 
     case SDL_VIDEOEXPOSE:      // 17
       // Screen needs to be redrawn
-      printf("VIDEOEXPOSE=%d\n", SDL_VIDEOEXPOSE);
+      //printf("VIDEOEXPOSE=%d\n", SDL_VIDEOEXPOSE);
       return -1;
 
     case SDL_USEREVENT:        // 24
@@ -236,158 +231,218 @@ BCPLWORD decodeevent(SDL_Event*e, BCPLWORD *ptr) {
 
 
 BCPLWORD sdlfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
+  // Note that the op in a[0] is always of the form sdl_...
   char tmpstr[256];
 
-  //printf("sdlfn: fno=%d a1=%d a2=%d a3=%d a4=%d\n",
-  //        a[0], a[1], a[2], a[3], a[4]);
+  //printf("sdlfn: fno=%d a1=%d a2=%d a3=%d a4=%d a5=%d\n",
+  //	 a[0], a[1], a[2], a[3], a[4], a[5]);
 
   switch(a[0]) {
   default:
-    printf("sdlfn: Unknown op: fno=%d a1=%d a2=%d a3=%d a4=%d\n",
-            a[0], a[1], a[2], a[3], a[4]);
+    printf("sdlfn: Unknown op:");
+    printf("fno=%ld ", (long)a[0]);
+    printf("a1=%ld ",  (long)a[1]);
+    printf("a2=%ld ",  (long)a[2]);
+    printf("a3=%ld ",  (long)a[3]);
+    printf("a4=%ld ",  (long)a[4]);
+    printf("a5=%ld\n", (long)a[5]);
     return 0;
 
   case sdl_avail: // Test whether SDL is available
     return -1;    // SDL is available
-
-  case gl_avail:  // Test whether OpenGL is available
-#ifdef GLavail
-    return -1;    // OpenGL is available
-#else
-    return  0;    // OpenGL is not available
-#endif
-
+    
   case sdl_init:  // Initialise all SDL features
-  { BCPLWORD res = (BCPLWORD) SDL_Init(SDL_INIT_EVERYTHING);
-      // Enable Unicode translation of keyboard events.
+    //printf("sdl_init\n");
+  {
+#ifdef JSAVAIL
+    int rc = SDL_Init(SDL_INIT_TIMER |
+                      SDL_INIT_AUDIO |
+                      SDL_INIT_VIDEO
+                     );
+#else
+    int rc = SDL_Init(SDL_INIT_EVERYTHING);
+#endif
+    // Enable Unicode translation of keyboard events.
     SDL_EnableUNICODE(1);
     SDL_JoystickEventState(SDL_ENABLE);
-    //printf("sdl_init\n");
-    return res;
+    return (BCPLWORD) rc;
   }
 
-  case sdl_setvideomode:  // width, height, bbp, flags
-  { SDL_Surface *scr;
-    //printf("Calling SetVideoMode(%d, %d, %d, %8x)\n", a[1], a[2], a[3], a[4]);
-    scr = SDL_SetVideoMode((int)a[1], (int)a[2], (int)a[3], (Uint32)a[4]);
+  case sdl_setvideomode:  // width, height, bbp, flags, scrptr
+  { // scrptr is a BCPL pointer to two BCPLWORDs to hold the
+    // machine address of the screen.
+    //printf("About to call STL_SetVideoMode\n");
+    SDL_Surface *scr = SDL_SetVideoMode((int)a[1],    // width
+					(int)a[2],    // height
+					(int)a[3],    // bbp
+					(Uint32)a[4]);// flags
+    //printf("About to call STL_Flip\n");
     SDL_Flip(scr);
-    return (BCPLWORD) scr;
-    //return (BCPLWORD) SDL_SetVideoMode((int)a[1], (int)a[2], (int)a[3], (Uint32)a[4]);
+    copyaddrC2B(&scr, &W[a[5]]);
+    return -1;  // Success
   }
 
   case sdl_quit:      // Shut down SDL
-    printf("sdl_quit\n");
+    //printf("sdl_quit\n");
     SDL_Quit();
     return -1;
 
   case sdl_locksurface: // surf
-    // Return 0 on success
+  { // Return 0 on success
     // Return -1 on failure
-    return (BCPLWORD) SDL_LockSurface((SDL_Surface*) a[1]);
-
+    SDL_Surface* surf;
+    copyaddrB2C(&W[a[1]], &surf);
+    return (BCPLWORD) SDL_LockSurface(surf);
+  }
+  
   case sdl_unlocksurface: // surf
-    SDL_UnlockSurface((SDL_Surface*) a[1]);
+  { // Return 0 on success
+    // Return -1 on failure
+    SDL_Surface* surf;
+    copyaddrB2C(&W[a[1]], &surf);
+    SDL_UnlockSurface(surf);
     return 0;
-
-  case sdl_getsurfaceinfo:
-  // surf, surfinfo -> [flag, format, w, h, pitch, pixels, cliprect, refcount]
-  { SDL_Surface *surf = (SDL_Surface*)a[1];
+  }
+  
+  case sdl_getsurfaceinfo: // surfptr, surfinfo
+  { // surfptr
+    // surfinfo -> [flag, format, format1,
+    //              w, h, pitch,
+    //              pixels, pixels1,
+    //              cliprectx, cliprecty, cliprectw, cliprecth,
+    //              refcount]
+    SDL_Surface* surf;
     BCPLWORD *info = &W[a[2]];
+    copyaddrB2C(&W[a[1]], &surf);
     info[ 0] = (BCPLWORD) (surf->flags);
-    info[ 1] = (BCPLWORD) (surf->format);
-    info[ 2] = (BCPLWORD) (surf->w);
-    info[ 3] = (BCPLWORD) (surf->h);
-    info[ 4] = (BCPLWORD) (surf->pitch);
-    info[ 5] = (BCPLWORD) (surf->pixels);
-    //info[ 6] = (BCPLWORD) (surf->clip_rect); // fields: x,y, w, h
-    info[ 7] = (BCPLWORD) (surf->refcount);
-    //printf("getsurfaceinfo: format=%d\n", info[1]);
+
+    copyaddrC2B(&(surf->format), &info[1]);     // Possible two word address
+
+    info[ 3] = (BCPLWORD) (surf->w);
+    info[ 4] = (BCPLWORD) (surf->h);
+    info[ 5] = (BCPLWORD) (surf->pitch);
+
+    //copyaddrC2B(&(surf->pixels), &info[6]);   // Possible two word address
+    
+    info[ 8] = (BCPLWORD) (surf->clip_rect.x);  // Clip rect x
+    info[ 9] = (BCPLWORD)  (surf->clip_rect.y);  // Clip rect y
+    info[10] = (BCPLWORD) (surf->clip_rect.w+321);  // Clip rect w
+    info[11] = (BCPLWORD) (surf->clip_rect.h+654);  // Clip rect h
+    info[ 12] = (BCPLWORD) (surf->refcount);
     return 0;        
   }
 
-  case sdl_getfmtinfo:
-  // fmt, pxlinfo -> [palette, bitspp, bytespp, rmask, gmask, rmask, amask,
-  //                  rloss, rshift, gloss, gshift, bloss, bshift, aloss, ashift,
-  //                  colorkey, alpha]
-  { SDL_PixelFormat *fmt = (SDL_PixelFormat*)(a[1]);
-    BCPLWORD *info = &(W[a[2]]);
+  case sdl_getfmtinfo:  // fmtptr, pxlinfo
+  // fmt
+  // pxlinfo -> [palette, bitspp, bytespp, rmask, gmask, rmask, amask,
+  //             rloss, rshift, gloss, gshift, bloss, bshift, aloss, ashift,
+  //             colorkey, alpha]
+  { SDL_Palette* palette;
+    SDL_PixelFormat *fmt;
+    BCPLWORD *info = &W[a[2]];
+    copyaddrB2C(&W[a[1]], &palette);
+    fmt = (SDL_PixelFormat*)(palette);
     //printf("getfmtinfo: format=%d\n", (BCPLWORD)fmt);
-    info[ 0] = (BCPLWORD) (fmt->palette);
-    info[ 1] = (BCPLWORD) (fmt->BitsPerPixel);
-    info[ 2] = (BCPLWORD) (fmt->BytesPerPixel);
-    info[ 3] = (BCPLWORD) (fmt->Rmask);
-    info[ 4] = (BCPLWORD) (fmt->Gmask);
-    info[ 5] = (BCPLWORD) (fmt->Bmask);
-    info[ 6] = (BCPLWORD) (fmt->Amask);
-    info[ 7] = (BCPLWORD) (fmt->Rshift);
-    info[ 8] = (BCPLWORD) (fmt->Gshift);
-    info[ 9] = (BCPLWORD) (fmt->Bshift);
-    info[10] = (BCPLWORD) (fmt->Ashift);
-    info[11] = (BCPLWORD) (fmt->Rloss);
-    info[12] = (BCPLWORD) (fmt->Gloss);
-    info[13] = (BCPLWORD) (fmt->Rloss);
-    info[14] = (BCPLWORD) (fmt->Aloss);
-    info[15] = (BCPLWORD) (fmt->colorkey);
-    info[16] = (BCPLWORD) (fmt->alpha);
+
+    copyaddrC2B(&(fmt->palette), &info[ 0]); // Possible two word address
+
+    info[ 2] = (BCPLWORD) (fmt->BitsPerPixel);
+    info[ 3] = (BCPLWORD) (fmt->BytesPerPixel);
+    info[ 4] = (BCPLWORD) (fmt->Rmask);
+    info[ 5] = (BCPLWORD) (fmt->Gmask);
+    info[ 6] = (BCPLWORD) (fmt->Bmask);
+    info[ 7] = (BCPLWORD) (fmt->Amask);
+    info[ 8] = (BCPLWORD) (fmt->Rshift);
+    info[ 9] = (BCPLWORD) (fmt->Gshift);
+    info[10] = (BCPLWORD) (fmt->Bshift);
+    info[11] = (BCPLWORD) (fmt->Ashift);
+    info[12] = (BCPLWORD) (fmt->Rloss);
+    info[13] = (BCPLWORD) (fmt->Gloss);
+    info[14] = (BCPLWORD) (fmt->Rloss);
+    info[15] = (BCPLWORD) (fmt->Aloss);
+    info[16] = (BCPLWORD) (fmt->colorkey);
+    info[17] = (BCPLWORD) (fmt->alpha);
 
     return 0;        
   }
 
-  case sdl_geterror:   // str -- fill str with BCPL string for the latest SDL error
+  case sdl_geterror: // str Fill str with BCPL string for the SDL error
   { char *str = SDL_GetError();
     printf("sdl_geterror: %s\n", str);
     return c2b_str(str, a[1]); // Convert to BCPL string format
   }
 
-  case sdl_updaterect: // surf, left, top, right, bottom
+  case sdl_updaterect: // surfptr, left, top, right, bottom
     return 0;     // Not yet available
 
-  case sdl_loadbmp:    // filename of a .bmp image
+  case sdl_loadbmp:    // filename, surfptr
   { char tmpstr[256];
-    b2c_str(a[1], tmpstr);
-    return (BCPLWORD) SDL_LoadBMP(tmpstr);
+    SDL_Surface *surf;
+    b2c_str(a[1], tmpstr);      // The bmp filename
+    surf = SDL_LoadBMP(tmpstr);
+    copyaddrC2B(&surf, &W[a[2]]);  // The surface
+    return -1; // Success
   }
 
-  case sdl_mksurface: //(format, w, h)
-  { SDL_PixelFormat *fmt = (SDL_PixelFormat*)(a[1]);
+  case sdl_mksurface: //(formatptr, w, h, surfptr)
+  { SDL_PixelFormat *fmt;
+    SDL_Surface *surf;
+    copyaddrB2C(&W[a[1]], &fmt);
     Uint32 rmask = fmt->Rmask;
     Uint32 gmask = fmt->Gmask;
     Uint32 bmask = fmt->Bmask;
     Uint32 amask = fmt->Amask;
-    //printf("rmask=%8x gmask=%8x bmask=%8x amask=%8x\n", rmask, gmask, bmask, amask);
-    return (BCPLWORD)SDL_CreateRGBSurface(
+    //printf("rmask=%8x gmask=%8x bmask=%8x amask=%8x\n",
+    //        rmask, gmask, bmask, amask);
+    surf = SDL_CreateRGBSurface(
                          SDL_SWSURFACE,
                          a[2], a[3], // Width, Height
                          32,     // Not using a palette
                          rmask, gmask, bmask, amask);
+    if(surf==0) return 0;       // Return FALSE
+    copyaddrC2B(&surf, &W[a[4]]);
+    return -1;                  // Return TRUE
   }
 
-  case sdl_blitsurface: // src, srcrect, dest, destrect
-    //printf("blitsurface: %d, %d, %d, %d)\n", a[1], a[2], a[3], a[4]);
-  { BCPLWORD *p = &W[a[4]];
+  case sdl_blitsurface: // srcptr, srcrect, destptr, destrect
+    //printf("blitsurface: %d, %d, %d, %d\n", a[1], a[2], a[3], a[4]);
+  { // Return 0 if successful
+    SDL_Surface *src;
+    copyaddrB2C(&W[a[1]], &src);
+    SDL_Rect *srcrect = 0; // Ignore the src rect
+    SDL_Surface *dest;
+    copyaddrB2C(&W[a[3]], &dest);
+    BCPLWORD *p = &W[a[4]];
     SDL_Rect dstrect = {p[0],p[1],p[2],p[3]};
-    //printf("x=%d, y=%d, w=%d, h=%d\n", p[0], p[1], p[2], p[3]);
-    return (BCPLWORD) SDL_BlitSurface((SDL_Surface*) a[1],
-                                      (SDL_Rect*)    0,
-                                      (SDL_Surface*) a[3],
+    //printf("blitsurface: %d %d %d %d\n", p[0],p[1],p[2],p[3]);
+    return (BCPLWORD) SDL_BlitSurface(src,
+				      srcrect, // =0
+				      dest,
                                       &dstrect);
   }
 
-  case sdl_setcolourkey: //(surf, key)
-    // If key=-1 unset colour key
+  case sdl_setcolourkey: //(surfptr, key)
+  { // If key=-1 unset colour key
     // otherwise set colour key to given value.
     // key must be in the pixel format of the given surface
+    // It returns 0 if successful
     //printf("sdl_setcolourkey: %8x\n", a[2]);
+    SDL_Surface *surf;
+    copyaddrB2C(&W[a[1]], &surf);
     if(a[2]==-1) {
-      return (BCPLWORD)SDL_SetColorKey((SDL_Surface*)a[1], 0, (Uint32)a[2]);
+      return (BCPLWORD)SDL_SetColorKey(surf, 0, (Uint32)a[2]);
     } else {
-      return (BCPLWORD)SDL_SetColorKey((SDL_Surface*)a[1], SDL_SRCCOLORKEY, (Uint32)a[2]);
+      return (BCPLWORD)SDL_SetColorKey(surf, SDL_SRCCOLORKEY, (Uint32)a[2]);
     }
-
-  case sdl_freesurface: // surf
-    SDL_FreeSurface((SDL_Surface*)a[1]);
+  }
+  
+  case sdl_freesurface: // surfptr
+  { SDL_Surface *surf;
+    copyaddrB2C(&W[a[1]], &surf);
+    SDL_FreeSurface(surf);
     return 0;
-
+  }
+  
   case sdl_setalpha:    // surf, flags, alpha
     return 0;     // Not yet available
 
@@ -407,13 +462,18 @@ BCPLWORD sdlfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
   case sdl_hidecursor:  // Hide the cursor
     return (BCPLWORD)SDL_ShowCursor(SDL_DISABLE);
 
-  case sdl_flip:        // surf -- Double buffered update of the screen
-    return (BCPLWORD) SDL_Flip((SDL_Surface*)a[1]);
-
-  case sdl_displayformat: // surf -- convert surf to display format
+  case sdl_flip:        // surfptr -- Double buffered update of the screen
+  { SDL_Surface *surf;
+    copyaddrB2C(&W[a[1]], &surf);
+    //printf("About to call SDL_Flip\n");
+    return (BCPLWORD) SDL_Flip(surf);
+  }
+  
+  case sdl_displayformat: // surfptr -- convert surf to display format
     return 0;     // Not yet available
 
-  case sdl_waitevent:    // (pointer) to [type, args, ... ] to hold details of the next event
+  case sdl_waitevent:    // (pointer) to [type, args, ... ] to hold details of
+                         // the next event
                  // return 0 if no events available
     return 0;     // Not yet available
 
@@ -428,7 +488,8 @@ BCPLWORD sdlfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
       return 0;
     }
 
-  case sdl_getmousestate: // pointer to [x, y] returns bit pattern of buttons currently pressed
+  case sdl_getmousestate: // pointer to [x, y] returns bit pattern of buttons
+                          // currently pressed
     return 0;     // Not yet available
 
   case sdl_loadwav:      // file, spec, buff, len
@@ -440,6 +501,7 @@ BCPLWORD sdlfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
   case sdl_wm_setcaption:      // surf, string
   { char tmpstr[256];
     b2c_str(a[1], tmpstr);
+    //printf("sdl_wm_setcaption: %s\n", tmpstr);
     SDL_WM_SetCaption(tmpstr, 0);
     return 0;
   }
@@ -456,10 +518,12 @@ BCPLWORD sdlfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
                            (p->blit_sw_CC)<<6 |
                            (p->blit_sw_A)<<7
                           );
-    info[ 1] = (BCPLWORD) (p->blit_fill);
-    info[ 2] = (BCPLWORD) (p->video_mem);
-    info[ 3] = (BCPLWORD) (p->vfmt);
-    info[ 4] = (BCPLWORD) (p->vfmt->BitsPerPixel);
+    //info[ 1] = (BCPLWORD) (p->blit_fill);
+    //info[ 2] = (BCPLWORD) (p->video_mem);
+
+    //copyaddrC2B((void*)(&(p->vfmt)), &info[3]); // Possible two word address
+
+    //info[ 5] = (BCPLWORD) (p->vfmt->BitsPerPixel);
     //printf("videoinfo: a[2]=%d %8X %8X %d %d %d\n",
     //          a[2], info[0], info[1], info[2], info[3], info[4]);
  
@@ -468,197 +532,126 @@ BCPLWORD sdlfn(BCPLWORD *a, BCPLWORD *g, BCPLWORD *W) {
 
 
   case sdl_maprgb:      // format, r, g, b
-  { 
-    return (BCPLWORD) SDL_MapRGB((SDL_PixelFormat*)(a[1]), a[2], a[3], a[4]); 
+  { SDL_PixelFormat *format;
+    copyaddrB2C(&W[a[1]], &format);
+    //printf("sdl_maprgb: r=%d g=%d b=%d\n", a[2], a[3], a[4]);
+    return (BCPLWORD) SDL_MapRGB(format, a[2], a[3], a[4]); 
   }
 
-  case sdl_drawline:
-  { SDL_Surface *surf = (SDL_Surface*)(a[1]);
-    //printf("\nDraw Line: %d %d %d %d %d %8x\n", a[1], a[2], a[3], a[4], a[5], a[6]);
-    Draw_Line(surf, a[2], a[3], a[4], a[5], a[6]);
-    return 0;
-  }
+  //case sdl_drawline:
+  //{ SDL_Surface *surf;
+  //  copyaddrB2C(&W[a[1]], &surf);
+  //  //printf("\nDraw Line: %d %d %d %d %d %8x\n", a[1], a[2], a[3], a[4], a[5], a[6]);
+  //  Draw_Line(surf, a[2], a[3], a[4], a[5], a[6]);
+  //  return 0;
+  //}
 
-  case sdl_drawhline:
-  case sdl_drawvline:
-  case sdl_drawcircle:
-  case sdl_drawrect:
-  case sdl_drawpixel:
-  case sdl_drawellipse:
-  case sdl_drawfillellipse:
-  case sdl_drawround:
-  case sdl_drawfillround:
-    return 0;
+  //case sdl_drawhline:
+  //case sdl_drawvline:
+  //case sdl_drawcircle:
+  //case sdl_drawrect:
+  //case sdl_drawpixel:
+  //case sdl_drawellipse:
+  //case sdl_drawfillellipse:
+  //case sdl_drawround:
+  //case sdl_drawfillround:
+  //  return 0;
 
-  case sdl_drawfillcircle:
-  { SDL_Surface *surf = (SDL_Surface*)(a[1]);
-    Draw_FillCircle(surf, a[2], a[3], a[4], a[5]);
-    return 0;
-  }
+    //  case sdl_drawfillcircle: // surfptr, x, y, r, colour
+    //{ SDL_Surface *surf;
+    // copyaddrB2C(&W[a[1]], &surf);
+    //Draw_FillCircle(surf, a[2], a[3], a[4], a[5]);
+    //return 0;
+    //}
     //  case sdl_drawfillrect:
     //return  Draw_FillRect((SDL_Surface*)a[1], 500,200, 50,70, 0xF0FF00);
 
-  case sdl_fillrect:
-  { SDL_Rect rect = {a[2],a[3],a[4],a[5]};
+  case sdl_fillrect: // surfptr, x, y, w, h, colour
+  { SDL_Surface *surf;
+    copyaddrB2C(&W[a[1]], &surf);
+    SDL_Rect rect = {a[2],a[3],a[4],a[5]};
     //printf("\nfillrect: surface=%d rect=(%d,%d,%d,%d) col=%8x\n",
     //       a[1], a[2], a[3], a[4], a[5], a[6]);
-    SDL_FillRect((SDL_Surface*)(a[1]), &rect, a[6]);
+    SDL_FillRect(surf, &rect, (Uint32)a[6]);
     return 0;
   }
 
-  case sdl_fillsurf:
+  case sdl_fillsurf: // surfptr, colour
+  { SDL_Surface *surf;
+    copyaddrB2C(&W[a[1]], &surf);
     //printf("\nfillsurf: surface=%d col=%8x\n",
     //        a[1], a[2]);
-    SDL_FillRect((SDL_Surface*)(a[1]), 0, a[2]);
+    SDL_FillRect(surf, 0, a[2]);
     return 0;
-
+  }
+  
 // Joystick functions
-  case sdl_numjoysticks:
+  case sdl_numjoysticks:       // 41 ()
     return SDL_NumJoysticks();
 
-  case sdl_joystickopen:       // 42 (index) => joy
-    return (BCPLWORD)SDL_JoystickOpen(a[1]);
-
-  case sdl_joystickclose:      // 43 (joy)
-    SDL_JoystickClose((SDL_Joystick *)a[1]);
+  case sdl_joystickopen:       // 42 (index, joyptr)
+  { SDL_Joystick *joystick;
+    joystick = SDL_JoystickOpen(a[1]);
+    copyaddrC2B(&joystick, &W[a[2]]);
     return 0;
-
-  case sdl_joystickname:       // 44 (index)
+  }
+  
+  case sdl_joystickclose:      // 43 (joyptr)
+  { SDL_Joystick *joystick;
+    copyaddrB2C(&W[a[1]], &joystick);
+    SDL_JoystickClose(joystick);
+    return 0;
+  }
+  
+  case sdl_joystickname:       // 44 (index, name)
   { const char *name = SDL_JoystickName(a[1]);
-    return c2b_str(name, a[1]);
+    return c2b_str(name, a[2]);
   }
 
-  case sdl_joysticknumaxes:    // 45 (joy)
-    return SDL_JoystickNumAxes((SDL_Joystick*)a[1]);
-
-  case sdl_joysticknumbuttons: // 46 (joy)
-    return SDL_JoystickNumButtons((SDL_Joystick*)a[1]);
-
-  case sdl_joysticknumballs:   // 47 (joy)
-    return SDL_JoystickNumBalls((SDL_Joystick*)a[1]);
-
-  case sdl_joysticknumhats:    // 47 (joy)
-    return SDL_JoystickNumHats((SDL_Joystick*)a[1]);
-
+  case sdl_joysticknumaxes:    // 45 (joyptr)
+  { SDL_Joystick *joystick;
+    copyaddrB2C(&W[a[1]], &joystick);
+    return (BCPLWORD)SDL_JoystickNumAxes(joystick);
+  }
+  
+  case sdl_joysticknumbuttons: // 46 (joyptr)
+  { SDL_Joystick *joystick;
+    copyaddrB2C(&W[a[1]], &joystick);
+    return SDL_JoystickNumButtons(joystick);
+  }
+  
+  case sdl_joysticknumballs:   // 47 (joyptr)
+  { SDL_Joystick *joystick;
+    copyaddrB2C(&W[a[1]], &joystick);
+    return SDL_JoystickNumBalls(joystick);
+  }
+  
+  case sdl_joysticknumhats:    // 47 (joyptr)
+  { SDL_Joystick *joystick;
+    copyaddrB2C(&W[a[1]], &joystick);
+    return SDL_JoystickNumHats(joystick);
+  }
+      
   case sdl_joystickeventstate: //49  sdl_enable=1 or sdl_ignore=0
     return SDL_JoystickEventState(a[1]);
 
-  case sdl_joystickgetbutton: // 55 (joy)
-    return SDL_JoystickGetButton((SDL_Joystick*)a[1], a[2]);
-
-  case sdl_joystickgetaxis: // 56 (joy)
-    return SDL_JoystickGetAxis((SDL_Joystick*)a[1], a[2]);
-
-  case sdl_joystickgethat: // 58 (joy)
-    return SDL_JoystickGetHat((SDL_Joystick*)a[1], a[2]);
-
-  case gl_setvideomode: // 200 (width, height)
-  { // Setup minimum bit sizes, a depth buffer and double buffering.
-    const SDL_VideoInfo* info = NULL;
-    int bpp = 0;
-    SDL_Surface *scr;
-
-    info = SDL_GetVideoInfo();
-    if(!info) return 0;
-    bpp = info->vfmt->BitsPerPixel;
-    printf("bpp=%d width=%d height=%d\n", bpp, a[1], a[2]);
-    SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 5);
-    SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 5);
-    SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 5);
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    printf("Calling SDL_SetVideoMode\n");
-    scr = SDL_SetVideoMode((int)a[1], (int)a[2], bpp, SDL_OPENGL);
-    return (BCPLWORD)scr;
+  case sdl_joystickgetbutton:  // 55 (joyptr)
+  { SDL_Joystick *joystick;
+    copyaddrB2C(&W[a[1]], &joystick);
+    return SDL_JoystickGetButton(joystick, a[2]);
   }
-
-#ifdef GLavail
-  case gl_ShadeModel:
-    //printf("gl_ShadeModel: a[1]=%d GL_SMOOTH=%d\n", a[1], GL_SMOOTH);
-    //glShadeModel((int)a[1]);
-    //glShadeModel(GL_SMOOTH);
-    return 0;
-  case gl_CullFace:
-    //printf("gl_CullFace: %d GL_BACK=%d\n", a[1], GL_BACK);
-    //glCullFace(a[1]);
-    //glCullFace(GL_BACK);
-    return 0;
-  case gl_FrontFace:
-    //printf("gl_FrontFace: %d\n", a[1]);
-    //printf("   GL_CCW=%d\n", GL_CCW);
-    //glFrontFace(a[1]);
-    //glFrontFace(GL_CCW);
-    return 0;
-  case gl_Enable:
-    //printf("gl_Enable: %d\n", a[1]);
-    //printf("   GL_CULLFACE=%d\n", GL_CULL_FACE);
-    glEnable(a[1]);
-    return 0;
-  case gl_ClearColor:
-    //printf("gl_ClearColor: %d %d %d %d\n", a[1], a[2], a[3], a[4]);
-    glClearColor(a[1]/255.0, a[2]/255.0, a[3]/255.0, a[4]/255.0);
-    return 0;
-  case gl_ViewPort:
-    printf("sdlfn: gl_Viewport: %d %d %d %d\n", a[1], a[2], a[3], a[4]);
-    glViewport(a[1], a[2], a[3], a[4]);
-    //glViewport(0, 0, 800, 500);
-    return 0;
-  case gl_MatrixMode:
-    //printf("gl_MatrixMode: %d\n", a[1]);
-    //printf("   GL_PROJECTION=%d\n", GL_PROJECTION);
-    //printf("   GL_MODELVIEW=%d\n", GL_MODELVIEW);
-    glMatrixMode(a[1]);
-    return 0;
-  case gl_LoadIdentity:
-    //printf("gl_LoadIdentity:\n");
-    glLoadIdentity();
-    return 0;
-  case glu_Perspective:
-    //printf("gl_Perspective: %d %d %d %d\n", a[1], a[2], a[3], a[4]);
-    //gluPerspective(((float)a[1])/1000000, ((float)a[2])/1000000,
-    //               ((float)a[3])/1000, ((float)a[4])/1000);  
-    //gluPerspective(60.0, 800.0/500.0, 1.0, 1024.0);
-    return 0;
-  case gl_Clear:
-    //printf("gl_Clear: #x%8X\n", a[1]);
-    //printf("   GL_COLOR_BUFFER_BIT=%8X\n", GL_COLOR_BUFFER_BIT);
-    //printf("   GL_DEPTH_BUFFER_BIT=%8X\n", GL_DEPTH_BUFFER_BIT);
-    glClear(a[1]);
-    //glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    return 0;
-  case gl_Translate:
-    //printf("gl_Translate: %d %d %d\n", a[1], a[2], a[3]);
-    glTranslatef(a[1]/1000.0, a[2]/1000.0, a[3]/1000.0);
-    return 0;
-  case gl_Rotate:
-    //printf("gl_Rotate: %d %d %d %d\n", a[1], a[2], a[3], a[4]);
-    glRotatef(a[1]/1000000.0, a[2]/1000.0, a[3]/1000.0, a[4]/1000.0);
-    return 0;
-  case gl_Begin:
-    //printf("gl_Begin: %d\n", a[1]);
-    //printf("   GL_TRIANGLES=%d\n", GL_TRIANGLES);
-    glBegin(a[1]);
-    return 0;
-  case gl_End:
-    //printf("gl_End:\n");
-    glEnd();
-    return 0;
-  case gl_Color4v:
-    //printf("gl_Color4v: %d\n", a[1]);
-    glColor4ub(W[a[1]], W[a[1]+1], W[a[1]+2], W[a[1]+3]);
-    return 0;
-  case gl_Vertex3v:
-    //printf("gl_Vertex3v: %d -> [%d %d %d]\n", a[1], W[a[1]], W[a[1]+1], W[a[1]+2]);
-    glVertex3f(W[a[1]]/1000.0, W[a[1]+1]/1000.0, W[a[1]+2]/1000.0);
-    return 0;
-  case gl_SwapBuffers:
-    //printf("gl_SwapBuffers:\n");
-    SDL_GL_SwapBuffers();
-    return 0;
-#endif
-
-// more to come ...
-
+  
+  case sdl_joystickgetaxis:    // 56 (joyptr)
+  { SDL_Joystick *joystick;
+    copyaddrB2C(&W[a[1]], &joystick);
+    return SDL_JoystickGetAxis(joystick, a[2]);
+  }
+  
+  case sdl_joystickgethat:     // 58 (joyptr)
+  { SDL_Joystick *joystick;
+    copyaddrB2C(&W[a[1]], &joystick);
+    return SDL_JoystickGetHat(joystick, a[2]);
+  }
   }
 }
 #endif

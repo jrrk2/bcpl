@@ -25,8 +25,10 @@ void main(int argc, char *argv[])
   //}
 
   printf("\n       3.");
-  for(i=0; i<=1000; i++) {
-    if(i%50==0) printf("\n%5d: ", (int)i);
+  //for(i=0; i<=6000; i++) {
+  for(i=1000000-20; i<=1000000; i++) {
+    //if(i%50==0)
+      printf("\n%7d: ", (int)i);
     printf("%1X", pihexdig(i));
   }
   printf("\n");

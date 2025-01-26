@@ -5,11 +5,11 @@ Martin Richards (c) March 2014
 
 08/04/2008
 Allowed MUL UMUL, DIV and UDIV to take an immediate integer operand
-that is stores in the data area (with sharing).
+that is stored in the data area (with sharing).
 
 #### Special Note ###########
 
-The Cintcode memory used to be allocated in cintsys.c using
+The Cintcode memory used to be allocated in cintmain.c using
 malloc(..). Under Windows this seems to create an area of memory that
 has read, write and execute permission as needed by the MC
 package. However, under some versions of Linux execution permission is

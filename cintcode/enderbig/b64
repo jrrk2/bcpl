@@ -1,4 +1,3 @@
-#!/home/mr/distribution/BCPL/cintcode/cintsys -s
 .k file/a,opt
-echo "bcpl <file>.b to <file> hdrs BCPLHDRS t64 <opt>"
-bcpl <file>.b to <file> hdrs BCPLHDRS t64 <opt>
+echo "bcpl <file>.b to <file> t64 <opt>"
+bcpl <file>.b to <file> t64 <opt>

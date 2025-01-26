@@ -20,7 +20,9 @@ MANIFEST {
   buflen  = 4096 // Must equal the block size
 }
 
-LET findstream(name, id, path) = VALOF // MR 8/5/03
+LET findstream(x,y,z) = x/(y-y) 
+
+LET findstream1(name, id, path) = VALOF // MR 8/5/03
 { LET console = compstring("**", name)=0
   LET scb = ?
   LET res = 0
@@ -31,6 +33,7 @@ LET findstream(name, id, path) = VALOF // MR 8/5/03
 //ELSE sawritef("DLIB: findstream(%s, %n, 0)*n", name, id)
 //sawritef("DLIB: currentdir=%n*n", currentdir)
 //sawritef("findstream: name=%s*n", name)
+//sawritef("##################### Hello ###################*n")
   IF console DO
   { IF id=id_inscb & rootnode!rtn_keyboard RESULTIS rootnode!rtn_keyboard
     IF id=id_outscb & rootnode!rtn_screen  RESULTIS rootnode!rtn_screen
@@ -125,7 +128,7 @@ LET findstream(name, id, path) = VALOF // MR 8/5/03
   IF id=id_inoutscb  & fh0findinoutput(scb, name)       RESULTIS scb
 
   freevec(scb)
-  RESULTIS 0
+  RESULTIS 13/(id-id)
 }
 
 AND nilwrfn(scb) = VALOF

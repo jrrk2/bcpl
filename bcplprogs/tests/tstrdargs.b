@@ -4,14 +4,29 @@ GET "libhdr"
 
 LET start() = VALOF
 { LET format = "from/a/p,to/k,ver/p,flag/s/p,num/n/p"
-  LET argv = VEC 50
+  LET x = 1111
+  LET argv = VEC 10
+  LET y = 2222
+  LET z = 3333
+  LET rc = ?
+  FOR i = 0 TO 10 DO argv!i := #xAAAA_AAAAA
 
-  LET w = rdargs(format, argv, 50)
-  UNLESS w DO
+  rc := rdargs(format, argv, 10)
+
+
+  writef("rdargs format=*"%s*"  argv=%n rc=%n*n*n", format, argv, rc)
+
+  FOR i = -2 TO 12 DO
+  { LET x = argv!i
+    writef("%i2 %i6: %x8 %n*n", i, argv+i, x, x) 
+  }
+  newline()
+ 
+  UNLESS rc DO
   { writef("Bad arguments for tstrdargs %s*n", format)
     RESULTIS 0
   }
- 
+
   TEST argv!0 THEN writef("from/a/p: %s*n", argv!0)
               ELSE writef("from/a/p: %s*n", "<unset>")
   TEST argv!1 THEN writef("to/k:     %s*n", argv!1)

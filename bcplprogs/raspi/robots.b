@@ -1,9 +1,16 @@
-/* This is a program that displays a number of robots designed to
+/*
+This is a program that displays some robots attempting to
 pick up bottles with their grabbers and deposit them in a pit.
 
 Implemented by Martin Richards (c) February 2015
 
 History:
+
+08/12/2016
+Trying a new algorithm for robot-robot collision avoidance.
+
+27/11/2016
+Currently teaching the robots to catch and dispose of the bottles.
 
 02/02/2015
 Initial implementation started based on bucket.b.
@@ -20,83 +27,94 @@ GET "libhdr"
 GET "sdl.h"
 
 MANIFEST {
-  One  =    1_00000 // The constant 1.000 scaled with 5 decimal
-                    // digits after the decimal point.
+  // Most arithmetic uses scaled numbers with 3 digits
+  // after the decimal point.
+
+  One  =    1_000 // The constant 1.000 scaled with 3 decimal
+                  // digits after the decimal point.
   OneK = 1000 * One
 
   spacevupb = 100000
 
-  pitradius       = 50_00000
-  bottleradius    =  5_00000
-  robotradius     = 18_00000
-  shoulderradius  =  3_00000
-  tipradius       =  2_00000
-  grablen         = 12_00000
+  pitradius       = 50_000
+  bottleradius    =  5_000
+  robotradius     = 18_000
+  shoulderradius  =  4_000
+  tipradius       =  2_000   // Tip of grabber arm
+  armthickness    = 2*tipradius
+  grablen         = 12_000
+  edgesize        = 60_000
 
-  // bottle selectors
-  b_cgx=0; b_cgy       // The first six must be in positions 0 to 5
+  grabbedpos      = bottleradius /     // (Typically = 0_500)
+                    ((robotradius - shoulderradius - 2*tipradius)/One)
+
+  //#########################    Robot geometry    #########################
+  //
+  //                   Y
+  //                   ^                 shoulder
+  //                   |                /
+  //               + + + + +     + + + /               tip
+  //          +        |       +   |   +              /
+  //        +          |      +  + o----a + + + + + d/      ------------- y = r1-r2
+  //      +            |       +   ++  ++           p +     |d1 = 2 x r3
+  //    +              r1        + + ++ b + + + + + c       ------------- y = r1-r2-d1
+  //   +    left       |           +   ++       ^
+  //  +                |           +    +       d2 = (r1-r2-d1) x grabpos/One
+  //  +                |           +    +       v              0.1<=grabpos<=1.0
+  //  +------r1--------O-----------+----+-----q------------> X
+  //  +                |           +    +     q = (r1+2xr4,0) centre of grabbed bottle
+  //  +                |           +    +              
+  //   +    right      |           +   ++                 r1 = robotradius    = 18.0
+  //    +              |         + + ++ b + + + + + c     r2 = shoulderradius =  4.0
+  //      +            |       +   ++  ++           p +   r3 = tipradius      =  2.0
+  //        +          |      +  + o----a + + + + + d     r4 = bottleradius   =  5.0
+  //          +        |       +   |   +
+  //               + + + + +     + + +  |<---d3---->|     d3 = grablen        = 12.0
+
+  // Bottle field selectors
+  b_cgx=0; b_cgy         // The first four must be in positions 0 to 3
   b_cgxdot; b_cgydot
-  b_costheta; b_sintheta
-  b_prevcgx; b_prevcgy
-  b_grabbed
-  b_robot     // 0 or the grabbing robot
-  b_dropped
+  b_grabbed   // If grabbed, b_robot is the grabbing robot
+  b_robot     // 0 or the robot that selected this bottle
+  b_dropped   // If true, the bottle has fallen into the pit
   b_id        // The bottle number
 
-  b_size
-  b_upb=b_size
+  b_upb=b_id
+  b_size      // Number of elements in a bottle node
 
   // robot selectors
-  r_cgx=0;     r_cgy       // The first six must be in positions 0 to 5
+  r_cgx=0;     r_cgy       // The first four must be in positions 0 to 3
   r_cgxdot;    r_cgydot
-  r_costheta;  r_sintheta  // Changed every time cgxdot or cgydot changes
   r_grabpos;   r_grabposdot
-  r_colour;    r_tipcolour
-  r_bottle                 // =0 or the grabbed bottle
-  // Coords of rotated robot shoulders
+  r_bottle                 // =0 or the selected bottle
+  r_inarea                 // =TRUE if the bottle in the grabber area
+                           // and the grabber is closing
+                           // if another bottle is found to be in the
+                           // grabber area, the grabber opens and if the
+                           // selected bottle was grabbed it is released.
+
+  // Coordinates of the robot shoulders
   r_lex;  r_ley;   r_rex;  r_rey  //    le       re
   r_lcx;  r_lcy;   r_rcx;  r_rcy  //    lc       rc
-  // Coords of rotated robot arms
+
+  // Coords of the robot arms
   r_ltax; r_ltay;  r_rtax; r_rtay //  ltd ltp ltc   rtc rtp rtd
   r_ltbx; r_ltby;  r_rtbx; r_rtby //
   r_ltcx; r_ltcy;  r_rtcx; r_rtcy //
   r_ltdx; r_ltdy;  r_rtdx; r_rtdy //
   r_ltpx; r_ltpy;  r_rtpx; r_rtpy //  lta     ltb   rtb     rta
 
-  r_bcx;  r_bcy  // Centre of gripped bottle
+  r_bcx;  r_bcy  // Centre of the grabber.
 
-  // The velocity of 
-  r_id        // The robot number
+  r_id           // The robot number
 
-  r_motionco
-  r_strategyco
-
-  r_size
-  r_upb=r_size
-
-  // Low level robot command
-  com_turnleft=1
-  com_turnleftslow
-  com_gostraight
-  com_turnrightslow
-  com_turnright
-  com_speedstop
-  com_speedveryslow
-  com_speedfast
-
-  com_speedslower
-  com_speedfaster
-
-  com_grab
-  com_release
-
-  com_grabbottle      // Go and grab a specified bottle
-
+  r_upb=r_id
+  r_size        // Number of elements in a robot node
 }
 
 GLOBAL {
   done:ug
-
+  debugging
   help         // Display help information
   stepping     // =FALSE if not stepping
   finished
@@ -107,13 +125,16 @@ GLOBAL {
 
   sps             // Steps per second, adjusted automatically
   
-  bottles
-  bottlev
-  robots
-  robotv
+  bottles         // Number of bottles
+  bottlev         // Vector of bottles
+                  // bottlev!0 holds the current number of bottles
+  robots          // Number of robots
+  robotv          // Vector of robots
+                  // robotv!0 holds the current number of robots
+
   // coords of the pit centre
-  pit_x; pit_y; pit_xdot; pit_ydot; pit_costheta; pit_sintheta
-  thepit // -> [ pitx, pity, pit_xdot, pit_ydot, pit_costheta, pit_sintheta]
+  pit_x; pit_y; pit_xdot; pit_ydot
+  thepit // -> [ pitx, pity, pit_xdot, pit_ydot]
   xsize  // Window size in pixels
   ysize
   seed
@@ -121,29 +142,43 @@ GLOBAL {
   spacev; spacep; spacet
   mkvec
 
-  bottlecount     // Decreases as bottle fall into the pit
-  robotcount      // Set by the -r command argument
+  bottlecount     // Number of bottles not yet in the pit
+  freebottles     // Number of free bottles -- not selected or dropped
 
   bottlesurfR     // Surface for a red bottle
+  bottlesurfR1
+  bottlesurfRok
+  
+  bottlesurfDR    // Surface for a dark red grabbed bottle
+  bottlesurfDR1
+  bottlesurfDRok
+
   bottlesurfK     // Surface for a black bottle (number 1)
+  bottlesurfK1
+  bottlesurfKok
+
   bottlesurfB     // Surface for a brown bottle (grabbed)
+  bottlesurfB1
+  bottlesurfBok
+  
   pitsurf         // Surface for the bucket base
+  pitsurf1
+  pitsurfok
   
   backcolour      // Background colour
   col_red; col_black; col_brown
+  col_darkred; col_darkblue; col_darkgreen
+  col_gray1; col_gray2; col_gray3; col_gray4
+
   pitcolour
   robotcolour
   robot1colour
-  grabcolour
+  grabbercolour
 
-  wall_wx         // West wall
-  wall_ex         // East wall
-  wall_sy         // South wall
-  wall_ny       // North wall
-
-  motioncofn      // eg deal with requests like grab bottle b
-  strategycofn    // eg find a bottle to grab, avoid other
-                  // robots and walls, choose a rout to the pit,
+  wall_wx         // West wall x coordinate
+  wall_ex         // East wall x coordinate
+  wall_sy         // South wall y coordinate
+  wall_ny         // North wall y coordinate
 
   priq        // Heap structure for the time queue
   priqn       // Number of items in priq
@@ -172,98 +207,70 @@ AND mk2(a, b) = VALOF
   RESULTIS p
 }
 
-LET incontact(p1,p2, d) = VALOF
-{ // THis return TRUE if points p1 and p2 are less than d apart.
-  LET x1, y1 = p1!0, p1!1
-  LET x2, y2 = p2!0, p2!1
-  // (x1,y1) and (x2,y2) are the centres of two circles
-  // The result is TRUE if these centres are less than d apart.
-  LET dx, dy = x1-x2, y1-y2
-IF d=pitradius & ABS dx <= d+100000 & ABS dy <= d+100000 DO
-{ writef("p1=(%n,%n) p2=(%n,%n) dx=%n dy=%n d=%n*n",
-         x1,y1, x2,y2, dx,dy, d)
-}
-  IF ABS dx > d | ABS dy > d RESULTIS FALSE
+AND incontact(p1, p2, dist) = VALOF
+{ // This returns TRUE if points p1 and p2 are no more than dist apart.
+  LET dx = ABS(p1!0-p2!0)
+  LET dy = ABS(p1!1-p2!1)
+
+//writef("incontact: x1=%9.3d  y1=%9.3d*n", p1!0, p1!1)
+//writef("incontact: x2=%9.3d  y2=%9.3d*n", p2!0, p2!1)
+//writef("incontact: dx=%9.3d  dy=%9.3d dist=%9.3d*n", dx, dy, dist)
+  IF dx > dist | dy > dist DO
+  { //writef("=> FALSE*n");
+    //abort(9104)
+    RESULTIS FALSE
+  }
+//writef("dx^2   =%12.3d*n", muldiv(dx,dx,One))
+//writef("dy^2   =%12.3d*n", muldiv(dy,dy,One))
+//writef("dist^2 =%12.3d*n", muldiv(dist,dist,One))
+//abort(9102)
   IF muldiv(dx,dx,One) + muldiv(dy,dy,One) >
-     muldiv(d,d,One) RESULTIS FALSE
+     muldiv(dist,dist,One) DO
+  { //writef("=> FALSE*n")
+    //abort(9105)
+    RESULTIS FALSE
+  }
+//writef("=> TRUE*n")
+//abort(9103)
   RESULTIS TRUE
 }
 
-AND bouncerr(p1, p2) BE
-{ // This deals with robot-robot bounces.
-  LET c = cosines(p2!0-p1!0, p2!1-p1!1) // Direction p1 to p2
-  LET s = result2
-  // Find the velocity of the centre of gravity
-  LET cgxdot = (p1!2+p2!2)/2
-  LET cgydot = (p1!3+p2!3)/2
-  // Calculate the velocity of object 1
-  // relative to the centre of gravity
-  LET rx1dot = p1!2 - cgxdot
-  LET ry1dot = p1!3 - cgydot
-  // Transform to (t,w) coordinates
-  LET t1dot = inprod(rx1dot,ry1dot,  c,s)
-  LET w1dot = inprod(rx1dot,ry1dot, -s,c)
-
-  IF t1dot<=0 RETURN
-
-  // Reverse t1dot with some loss of energy
-  t1dot := -t1dot/10
-
-  // Transform back to (x,y) coordinates relative to cg
-  rx1dot := inprod(t1dot,w1dot,  c,-s)
-  ry1dot := inprod(t1dot,w1dot,  s, c)
-
-  // Convert to world (x,y) coordinates
-  p1!0 := p1!0 + 5*rx1dot/sps
-  p1!1 := p1!1 + 5*ry1dot/sps
-  //p1!2 :=  rx1dot + cgxdot
-  //p1!3 :=  ry1dot + cgydot
-  //p1!4 := cosines(p1!2, p1!3)
-  //p1!5 := result2
-
-  p2!0 := p2!0 - 5*rx1dot/sps
-  p2!1 := p2!1 - 5*ry1dot/sps
-  //p2!2 := -rx1dot + cgxdot
-  //p2!3 := -ry1dot + cgydot
-  //p2!4 := cosines(p2!2, p2!3)
-  //p2!5 := result2
-}
-
 AND cbounce(p1, p2, m1, m2) BE
-{ // p1!0 and p1!1 are the x and y coordinates of two circular object.
+{ // p1!0 and p1!1 are the x and y coordinates of a circular object.
   // p1!2 and p1!3 are the corresponding velocities
   // p1!4 and p1!5 are the corresponding direction cosines
-  // p2!0 and p2!1 are the x and y coordinates of another object.
+  // p2!0 and p2!1 are the x and y coordinates of the other circular object.
   // p2!2 and p2!3 are the corresponding velocities
   // p2!4 and p3!5 are the corresponding direction cosines
   // m1 and m2 are the masses of the two objects in arbitrary units
   // m1=m2  if the collition is between two bottles or two robots.
   // m1=5 and m2=1 then p1 is a robot and p2 is a bottle.
+  // m1=1 and m2=0 then p1 is an infinitely heavy robot or grabbed bottle
+  //                and p2 is a bottle.
 
-  LET c = cosines(p2!0-p1!0, p2!1-p1!1) // Direction p1 to p2
+  LET c = cosines(p2!0-p1!0, p2!1-p1!1) // Direction from p1 to p2
   LET s = result2
 
   IF m2=0 DO
-  { // Object 1 is a robot and object 2 is a bottle.
-    // Robots are treated as infinitely heavy.
+  { // Object 1 is a robot or a grabbed bottle and object 2 is a bottle.
+    // The robots or grabbed bottle is treated as infinitely heavy.
     LET xdot = p2!2 - p1!r_cgxdot
     LET ydot = p2!3 - p1!r_cgydot
     // Transform to (t,w) coordinates
-    // where t is in the direction of the two centres
+    // where t is in the direction from the robot to the bottle
     LET tdot = inprod(xdot,ydot,  c, s)
     LET wdot = inprod(xdot,ydot, -s, c)
 
-//writef("robot-bottle bounce tdot=%n wdot=%n*n", tdot, wdot)
-    IF tdot>0 RETURN
+//writef("robot-bottle bounce tdot=%9.3d wdot=%9.3d*n", tdot, wdot)
+    IF tdot>0 RETURN // The robot and bottle are moving apart
 
-    // Object 2 is getting closer so reverse tdot (but not wdot)
+    // The bottle is getting closer so reverse tdot (but not wdot)
     // and transform back to world (x,y) coordinates.
     tdot := rebound(tdot) // Reverse tdot with some loss of energy
     // Transform back to real world (x,y) coordinates
     p2!2 := inprod(tdot, wdot, c, -s) + p1!r_cgxdot
     p2!3 := inprod(tdot, wdot, s,  c) + p1!r_cgydot
-    p2!4 := cosines(p2!2, p2!3)
-    p2!5 := result2
+    // Note that the robot or grabbed bottle motion is not changed.
     RETURN
   }
 
@@ -280,7 +287,7 @@ AND cbounce(p1, p2, m1, m2) BE
     LET t1dot = inprod(rx1dot,ry1dot,  c,s)
     LET w1dot = inprod(rx1dot,ry1dot, -s,c)
 
-    IF t1dot<=0 RETURN
+    IF t1dot<=0 RETURN // The objects are moving apart
 
     // Reverse t1dot with some loss of energy
     t1dot := rebound(t1dot)
@@ -292,25 +299,23 @@ AND cbounce(p1, p2, m1, m2) BE
     // Convert to world (x,y) coordinates
     p1!2 :=  rx1dot + cgxdot
     p1!3 :=  ry1dot + cgydot
-    p1!4 := cosines(p1!2, p1!3)
-    p1!5 := result2
 
     p2!2 := -rx1dot + cgxdot
     p2!3 := -ry1dot + cgydot
-    p2!4 := cosines(p2!2, p2!3)
-    p2!5 := result2
 
     // Apply a small repulsive force between the objects.
-    // This may not be necessary since there is no gravity.
-    p1!0 := p1!0 - muldiv(0_40000, c, One)
-    p1!1 := p1!1 - muldiv(0_40000, s, One)
-    p2!0 := p2!0 + muldiv(0_40000, c, One)
-    p2!1 := p2!1 + muldiv(0_40000, s, One)
+
+    p1!0 := p1!0 - muldiv(0_400, c, One)
+    p1!1 := p1!1 - muldiv(0_400, s, One)
+    p2!0 := p2!0 + muldiv(0_400, c, One)
+    p2!1 := p2!1 + muldiv(0_400, s, One)
 
     RETURN
   }
 
-  { // Object 1 is a robot and object 2 is a bottle
+  { // m1~=m2 and neither are zero.
+    // Object 1 is a robot and object 2 is a bottle
+    // and the robot is not infinitely heavy.
     // Find the velocity of the centre of gravity
     LET cgxdot = (p1!2*m1+p2!2*m2)/(m1+m2)
     LET cgydot = (p1!3*m1+p2!3*m2)/(m1+m2)
@@ -326,23 +331,22 @@ AND cbounce(p1, p2, m1, m2) BE
     LET t2dot = inprod(rx2dot,ry2dot,  c,s)
     LET w2dot = inprod(rx2dot,ry2dot, -s,c)
 
-//IF t1dot<=0 DO
 IF FALSE DO
 { 
-  writef("dir  =(%10.5d,%10.5d)*n", c, s)
-  writef("p1   =(%10.5d,%10.5d)*n", p1!0, p1!1)
-  writef("p2   =(%10.5d,%10.5d)*n", p2!0, p2!1)
-  writef("p1dot=(%10.5d,%10.5d) m1=%n*n", p1!2, p1!3, m1)
-  writef("p2dot=(%10.5d,%10.5d) m2=%n*n", p2!2, p2!3, m2)
-  writef("cgdot=(%10.5d,%10.5d)*n", cgxdot, cgydot)
-  writef("r1dot=(%10.5d,%10.5d)*n", rx1dot, ry1dot)
-  writef("r2dot=(%10.5d,%10.5d)*n", rx2dot, ry2dot)
-  writef("t1dot=(%10.5d,%10.5d)*n", t1dot, w1dot)
-  writef("t2dot=(%10.5d,%10.5d)*n", t2dot, w2dot)
-  writef("t1dot=%10.5d is the speed of the robot towards the centre of gravity*n", t1dot)
+  writef("dir  =(%10.3d,%10.3d)*n", c, s)
+  writef("p1   =(%10.3d,%10.3d)*n", p1!0, p1!1)
+  writef("p2   =(%10.3d,%10.3d)*n", p2!0, p2!1)
+  writef("p1dot=(%10.3d,%10.3d) m1=%n*n", p1!2, p1!3, m1)
+  writef("p2dot=(%10.3d,%10.3d) m2=%n*n", p2!2, p2!3, m2)
+  writef("cgdot=(%10.3d,%10.3d)*n", cgxdot, cgydot)
+  writef("r1dot=(%10.3d,%10.3d)*n", rx1dot, ry1dot)
+  writef("r2dot=(%10.3d,%10.3d)*n", rx2dot, ry2dot)
+  writef("t1dot=(%10.3d,%10.3d)*n", t1dot, w1dot)
+  writef("t2dot=(%10.3d,%10.3d)*n", t2dot, w2dot)
+  writef("t1dot=%10.3d is the speed towards the centre of gravity*n", t1dot)
   abort(1000)
 }
-    IF t1dot<=0 RETURN
+    IF t1dot<=0 RETURN // The robot and bottle are moving apart
 
     // Reverse t1dot and t2dot with some loss of energy
     t1dot := rebound(t1dot)
@@ -357,52 +361,41 @@ IF FALSE DO
     // Convert to world (x,y) coordinates
     p1!2 := rx1dot + cgxdot
     p1!3 := ry1dot + cgydot
-    // Calculate cosine and sine of new direction of motion
-    p1!4 := cosines(p1!2, p1!3)
-    p1!5 := result2
 
     p2!2 := rx2dot + cgxdot
     p2!3 := ry2dot + cgydot
-    // Calculate cosine and sine of new direction of motion
-    p2!4 := cosines(p2!2, p2!3)
-    p2!5 := result2
   }
 }
 
-AND rebound(vel) = vel/10 - vel // Returns the rebound speed of a bounce
-
-AND setdir(p) BE
-{ // p -> [x, y, xdot, ydot, costheta, sintheta]
-  // It sets costheta and sintheta based on xdot and ydot.
-  // If xdot=ydot=0, costheta and sintheta remain unchanged.
-  LET xdot, ydot = p!2, p!3
-  IF xdot=0=ydot RETURN
-  p!4 := cosines(xdot, ydot)
-  p!5 := result2
-}
+AND rebound(vel) = vel/8 - vel // Returns the rebound speed of a bounce
 
 AND cosines(x, y) = VALOF
 { // This function returns the cosine and sine of the angle between
   // the line from (0,0) to (x, y) and the x axis.
-  // The result is the cosine and result2 is the sine. 
+  // The result is the cosine and result2 is the sine.
+  LET c, s, a = ?, ?, ? 
   LET d = ABS x + ABS y
-  LET c = muldiv(x, One, d)  // Approximate cos and sin
-  LET s = muldiv(y, One, d)  // Direction good, length not.
-  LET a = muldiv(c,c,One)+muldiv(s,s,One) // 0.5 <= a <= 1.0
-  d := 1_00000 // With this initial guess only 3 iterations
-               // of Newton-Raphson are required.
-//writef("a=%8.5d  d=%8.5d  d^2=%8.5d*n", a, d, muldiv(d,d,One))
+  UNLESS d DO
+  { result2 := 0
+    RESULTIS One
+  }
+  c := muldiv(x, One, d)  // Approximate cos and sin
+  s := muldiv(y, One, d)  // Direction good, length not.
+  a := muldiv(c,c,One)+muldiv(s,s,One) // 0.5 <= a <= 1.0
+  d := 1_000 // With this initial guess only 3 iterations
+             // of Newton-Raphson are required.
+//writef("a=%8.3d  d=%8.3d  d^2=%8.3d*n", a, d, muldiv(d,d,One))
   d := (d + muldiv(a, One, d))/2
-//writef("a=%8.5d  d=%8.5d  d^2=%8.5d*n", a, d, muldiv(d,d,One))
+//writef("a=%8.3d  d=%8.3d  d^2=%8.3d*n", a, d, muldiv(d,d,One))
   d := (d + muldiv(a, One, d))/2
-//writef("a=%8.5d  d=%8.5d  d^2=%8.5d*n", a, d, muldiv(d,d,One))
+//writef("a=%8.3d  d=%8.3d  d^2=%8.3d*n", a, d, muldiv(d,d,One))
   d := (d + muldiv(a, One, d))/2
-//writef("a=%8.5d  d=%8.5d  d^2=%8.5d*n", a, d, muldiv(d,d,One))
+//writef("a=%8.3d  d=%8.3d  d^2=%8.3d*n", a, d, muldiv(d,d,One))
 
   s := muldiv(s, One, d) // Corrected cos and sin
   c := muldiv(c, One, d)
-//writef("dx=%10.5d  dy=%10.5d => cos=%8.5d sin=%8.5d*n", dx, dy, c, s)
-
+//writef("x=%8.3d  y=%8.3d => cos=%8.3d sin=%8.3d*n", x, y, c, s)
+//abort(3589)
   result2 := s
   RESULTIS c
 }
@@ -410,478 +403,789 @@ AND cosines(x, y) = VALOF
 AND inprod(dx, dy, c, s) = muldiv(dx, c, One) + muldiv(dy, s, One)
 
 LET step() BE
-{ msecsnow := sdlmsecs() - msecs0
+{ // This function deals with the motion of all the robots and bottles
+  // and their interractions with each other and the wall and the pit.
+
+  msecsnow := sdlmsecs() - msecs0
   // Deal with crossing midnight assuming now is no more than
   // 24 hours since the start of the run.
   IF msecsnow<0 DO msecsnow := msecsnow + (24*60*60*1000)
 
   //writef("step: entered*n")
-  IF bottlecount=0 DO finished := TRUE
+  //IF bottlecount=0 DO finished := TRUE
 
   // Robots always point in their directions of motion given by
-  // cgxdot and cgydot. The direction cosines costheta and sintheta
-  // are calculated using setdir by robotcoords before returning from
-  // step.  Interaction between robots and the walls, the pit, and
-  // other robots affect cgxdot and cgydot.
- 
-  // Bottle bounces
-  FOR i = 1 TO bottlev!0 DO
-  { LET bi = bottlev!i  // bi -> [cgx, cgy, cgxdot, cgydot, costheta, sintheta]
+  // cgxdot and cgydot. A robot with a selected bottle will rotate
+  // towards its bottle and be given sufficient speed it to catch
+  // it up.  Interaction between robots and the walls, the pit,
+  // and other robots affect cgxdot and cgydot.
 
-    UNLESS bi!b_dropped DO
-    { LET xi = bi!b_cgx
-      LET yi = bi!b_cgy
-      // Test for bottle west wall bounces
-      IF xi < wall_wx + bottleradius + 2*robotradius DO
-      { IF xi < wall_wx + bottleradius DO
-        { xi := wall_wx + bottleradius
-          bi!b_cgx := xi
-         bi!b_cgxdot := - bi!b_cgxdot
-        }
-        bi!b_cgxdot := bi!b_cgxdot + 20_00000/sps
-      }
-      // Test for bottle east wall bounces
-      IF xi > wall_ex - bottleradius - 2*robotradius DO
-      { IF xi > wall_ex - bottleradius DO
-        { xi := wall_ex - bottleradius
-          bi!b_cgx := xi
-          bi!b_cgxdot := - bi!b_cgxdot
-        }
-        bi!b_cgxdot := bi!b_cgxdot - 20_00000/sps
-      }
-      // Test for bottle south wall bounces
-      IF yi < wall_sy + bottleradius + 2*robotradius DO
-      { IF yi < wall_sy + bottleradius DO
-        { yi := wall_sy + bottleradius
-          bi!b_cgy := yi
-          bi!b_cgydot := - bi!b_cgydot
-        }
-        bi!b_cgydot := bi!b_cgydot + 20_00000/sps
-      }
-      // Test for bottle north wall bounces
-      IF yi > wall_ny - bottleradius - 2*robotradius DO
-      { IF yi > wall_ny - bottleradius DO
-        { yi := wall_ny - bottleradius
-          bi!b_cgy := yi
-          bi!b_cgydot := - bi!b_cgydot
-        }
-        bi!b_cgydot := bi!b_cgydot - 20_00000/sps
-      }
-      // Test for bottle-bottle bounces
-      FOR j = i+1 TO bottlev!0 DO
-      { LET bj = bottlev!j
-        IF bj!b_dropped LOOP
-        IF incontact(bi, bj, bottleradius+bottleradius) DO
-          cbounce(bi, bj, 1, 1)
-      }
-    }
-  }
+  //abort(9001)
 
-  // Test for robot bounces
-  FOR i = 1 TO robotv!0 DO
-  { LET r = robotv!i
-    LET x = r!r_cgx
-    LET y = r!r_cgy
+  // (1) Deal with robot bounces and collisions with the walls and
+  //     pit slope.
 
-    // Test for robot west wall bounces
-    IF x < wall_wx + 3*robotradius DO
-    { IF x < wall_wx + robotradius DO
-      { r!r_cgx := wall_wx + robotradius
-        r!r_cgxdot :=  - r!r_cgxdot
-      }
-      r!r_cgxdot := r!r_cgxdot + 12_00000/sps
+  FOR rib = 1 TO robotv!0 DO
+  { LET r = robotv!rib
+    LET x, y = r!r_cgx, r!r_cgy
+
+    LET dw = x - wall_wx  // Distance from west wall
+    AND dn = wall_ny - y  // Distance from north wall
+    AND de = wall_ex - x  // Distance from east wall
+    AND ds = y - wall_sy  // Distance from south wall
+
+    // Limit the speed of the robot
+
+    IF ABS r!r_cgxdot > 40_000 | ABS r!r_cgydot > 40_000 DO
+      r!r_cgxdot, r!r_cgydot := r!r_cgxdot*97/100, r!r_cgydot*97/100
+
+    // Ensure the robot is always moving.
+
+    WHILE ABS r!r_cgxdot + ABS r!r_cgydot < 1_000 DO
+    { //sawritef("R%i2: Random nudge: xdot=%8.3d ydot=%8.3d*n",
+      //          r!r_id, r!r_cgxdot, r!r_cgydot)
+      r!r_cgxdot := r!r_cgxdot + randno(201) - 100
+      r!r_cgydot := r!r_cgydot + randno(201) - 100
     }
 
-    // Test for robot east wall bounces
-    IF x > wall_ex - 3*robotradius DO
-    { IF x > wall_ex - robotradius DO
-      { r!r_cgx := wall_ex - robotradius
-        r!r_cgxdot :=  - r!r_cgxdot
-      }
-      r!r_cgxdot := r!r_cgxdot - 12_00000/sps
+    // Test if the robot is closest to the west wall
+    IF dw<edgesize & dw<=dn & dw<=ds DO
+    { // (x,y) is closest to the west wall
+      TEST dw < robotradius
+      THEN r!r_cgxdot, r!r_cgx := -r!r_cgxdot, wall_wx + robotradius
+      ELSE r!r_cgxdot := r!r_cgxdot + 4_000
     }
-    // Test for robot south wall bounces
-    IF y < wall_sy + 3*robotradius DO
-    { IF y < wall_sy + robotradius DO
-      { r!r_cgy := wall_sy + robotradius
-        r!r_cgydot :=  - r!r_cgydot
-      }
-      r!r_cgydot := r!r_cgydot + 12_00000/sps
+
+    // Test if the robot is closest to the north wall
+    IF dn<edgesize & dn<=de & dn<=dw DO
+    { // (x,y) is closest to the north wall
+      TEST dn < robotradius
+      THEN r!r_cgydot, r!r_cgy := -r!r_cgydot, wall_ny - robotradius
+      ELSE r!r_cgydot := r!r_cgydot - 4_000
     }
-    // Test for robot north wall bounces
-    IF y > wall_ny - 3*robotradius DO
-    { IF y > wall_ny - robotradius DO
-      { r!r_cgy := wall_ny - robotradius
-        r!r_cgydot :=  - r!r_cgydot
-      }
-      r!r_cgydot := r!r_cgydot - 12_00000/sps
+
+    // Test if the robot is closest to the east wall
+    IF de<edgesize & de<=ds & de<=dn DO
+    { // (x,y) is closest to the east wall
+      TEST de < robotradius
+      THEN r!r_cgxdot, r!r_cgx := -r!r_cgxdot, wall_ex - robotradius
+      ELSE r!r_cgxdot := r!r_cgxdot - 4_000
     }
-    // Test for robot pit bounces
-    IF FALSE & incontact(r, thepit, 3*robotradius+pitradius) DO
-    { LET dx = r!r_cgx - pit_x
-      LET dy = r!r_cgy - pit_y
-      // Calculate the dirction from the pit centre to the robot.
-      LET c = cosines(dx, dy)
+
+    // Test if the robot is closest to the south wall
+    IF ds<edgesize & ds<=de & ds<=dw DO
+    { // (x,y) is closest to the south wall
+      TEST ds < robotradius
+      THEN r!r_cgydot, r!r_cgy := -r!r_cgydot, wall_sy + robotradius
+      ELSE r!r_cgydot := r!r_cgydot + 4_000
+    }
+
+    IF incontact(r, thepit, pitradius+edgesize) DO
+    { // If the robot is on the pit slope.
+      LET c = cosines(x-pit_x, y-pit_y)
       LET s = result2
-      r!r_cgxdot := r!r_cgxdot + muldiv(2_00000/sps, c, One)
-      r!r_cgydot := r!r_cgydot + muldiv(2_00000/sps, s, One)
-      IF i=-1 DO
-      { writef("Robot %n is near the pit*n", i)
-        writef("Robot %n cg (%10.5d,%10.5d)*n", i, r!r_cgx, r!r_cgy)
-        writef("Pit centre  (%10.5d,%10.5d)*n", pit_x, pit_y)
-      }
-    }
-
-    // Test for robot-bottle bounces
-    FOR j = 1 TO bottlev!0 DO
-    { LET b = bottlev!j
-      UNLESS b!b_dropped DO
-      { UNLESS incontact(r, b, 8*robotradius) LOOP
-        // This robot is near this bottle
-IF i=0 DO writef("robot %n near bottle %n*n", i, j)
-
-        // Test for robot body-bottle bounce
-        IF incontact(r, b, robotradius+bottleradius) DO
-        { // They are in contact so make the bottle bounce off
-          //IF i=1 DO writef("Robot %n in contact with bottle %n*n", i, j)
-          //cbounce(r, b, 10, 1) // Robot is 10 times heavier than a bottle
-          cbounce(r, b, 1, 0) // Robot is heavy
-        }
-
-        // Test for left shoulder-bottle bounce
-        { LET sx, sy, sxdot, sydot, sct, sst =
-              r!r_lcx, r!r_lcy,
-              r!r_cgxdot, r!r_cgydot, 0, 0
-          LET s = @sx
-          IF incontact(s, b, shoulderradius+bottleradius) DO
-          { // They are in contact so make the bottle bounce off
-            //IF i=1 DO writef("Robot %n in contact with bottle %n*n", i, j)
-            cbounce(s, b, 1, 0) // Robot is heavy
-          }
-        }
-
-        // Test for right shoulder-bottle bounce
-        { LET sx, sy, sxdot, sydot, sct, sst =
-              r!r_rcx, r!r_rcy,
-              r!r_cgxdot, r!r_cgydot, 0, 0
-          LET s = @sx 
-          IF incontact(s, b, shoulderradius+bottleradius) DO
-          { // They are in contact so make the bottle bounce off
-            //IF i=1 DO writef("Robot %n in contact with bottle %n*n", i, j)
-            //cbounce(s, b, 10, 1) // Shoulder is 10 times heavier than a bottle
-            cbounce(s, b, 1, 0) // Robot is heavy
-          }
-        }
-
-        // Test for robot left tip bounce
-        { LET sx, sy, sxdot, sydot, sct, sst =
-              r!r_ltcx, r!r_ltcy,
-              r!r_cgxdot, r!r_cgydot, 0, 0
-          LET s = @sx 
-          IF incontact(s, b, tipradius+bottleradius) DO
-          { // They are in contact so make the bottle bounce off
-            //IF i=1 DO writef("Robot %n in contact with bottle %n*n", i, j)
-            cbounce(s, b, 1, 0) // Robot is heavy
-          }
-        }
-
-        // Test for robot right tip bounce
-        { LET sx, sy, sxdot, sydot, sct, sst =
-              r!r_rtcx, r!r_rtcy,
-              r!r_cgxdot, r!r_cgydot, 0, 0
-          LET s = @sx 
-          IF incontact(s, b, tipradius+bottleradius) DO
-          { // They are in contact so make the bottle bounce off
-            //IF i=1 DO writef("Robot %n in contact with bottle %n*n", i, j)
-            //cbounce(s, b, 10, 1) // Shoulder is 10 times heavier than a bottle
-            cbounce(s, b, 1, 0) // Robot is heavy
-          }
-        }
-
-        // Test for robot grabber bounces
-        { // Make the robot's centre to origin
-          LET bx = b!b_cgx - r!r_cgx
-          LET by = b!b_cgy - r!r_cgy
-          LET c = r!r_costheta // Direction cosines of the robot
-          LET s = r!r_sintheta
-          // Rotate clockwise the bottle position about the new origin
-          LET tx = inprod(bx, by,  c,  s)
-          LET ty = inprod(bx, by, -s,  c)
-          // Deal with bounces of the arm edges
-          LET thickness = 2*tipradius // Arm thickness
-          // Calculate the y position of the right edge of the left arm
-          LET y3 = muldiv(robotradius-shoulderradius-thickness,
-                          r!r_grabpos, One)
-          LET y4 = y3 + thickness  // Left edge of left arm
-          LET y2 = -y3             // Left edge of right arm
-          LET y1 = y2 - thickness  // Rightt edge of right arm
-IF i=0 DO // Debugging aid
-{ writef("robot  %i2 cg=(%10.5d %10.5d)*n", i, r!r_cgx, r!r_cgy)
-  writef("bottle %i2 cg=(%10.5d %10.5d)*n", j, b!b_cgx, b!b_cgy)
-  writef("bx=%10.5d by=%10.5d*n", bx, by)
-  writef("tx=%9.5d grablen=%9.5d*n", tx, grablen)
-  writef("ty=%9.5d*n", ty)
-  writef("y1=%9.5d y1=%9.5d y1=%9.5d y1=%9.5d*n", y1, y2, y3, y4)
-}
-          IF robotradius <= tx <= robotradius+grablen DO
-          { // Bounces and grabbing are both possible
-            IF y1 - bottleradius <= ty <= y1 DO
-            { // Bottle collision with right edge of right arm
-              //LET rtdot = inprod(r!r_cgxdot, r!r_cgydot, c, s)
-              LET rwdot = inprod(r!r_cgxdot, r!r_cgydot,-s, c)
-              LET btdot = inprod(b!b_cgxdot, b!b_cgydot, c, s)
-              LET bwdot = inprod(b!b_cgxdot, b!b_cgydot,-s, c)
-              LET v = bwdot-rwdot
-              IF v>0 DO
-              { bwdot := rebound(v) + rwdot
-                // Trandform bottle velocity to world coords
-                b!b_cgxdot := inprod(btdot,bwdot, c, -s)
-                b!b_cgydot := inprod(btdot,bwdot, s,  c)
-              }
-IF i=0 DO
-{ writef("robot %n collision bottle %n right edge of right arm*n", i, j)
-  abort(1000)
-}
-            }
-            IF y2 <= ty <= y2 + bottleradius DO
-            { // Bottle collision with left edge of right arm
-              //LET rtdot = inprod(r!r_cgxdot, r!r_cgydot, c, s)
-              LET rwdot = inprod(r!r_cgxdot, r!r_cgydot,-s, c)
-              LET btdot = inprod(b!b_cgxdot, b!b_cgydot, c, s)
-              LET bwdot = inprod(b!b_cgxdot, b!b_cgydot,-s, c)
-              LET v = bwdot-rwdot
-              IF v<0 DO
-              { bwdot := rebound(v) + rwdot
-                // Trandform bottle velocity to world coords
-                b!b_cgxdot := inprod(btdot,bwdot, c, -s)
-                b!b_cgydot := inprod(btdot,bwdot, s,  c)
-              }
-              //IF tydot>0 DO tydot := rebound(tydot)
-IF i=0 DO
-{ writef("robot %n collision bottle %n left edge of right arm*n", i, j)
-  abort(1000)
-}
-            }
-            IF y3 - bottleradius <= ty <= y3 DO
-            { // Bottle collision with right edge of left arm
-              //LET rtdot = inprod(r!r_cgxdot, r!r_cgydot, c, s)
-              LET rwdot = inprod(r!r_cgxdot, r!r_cgydot,-s, c)
-              LET btdot = inprod(b!b_cgxdot, b!b_cgydot, c, s)
-              LET bwdot = inprod(b!b_cgxdot, b!b_cgydot,-s, c)
-              LET v = bwdot-rwdot
-              IF v>0 DO
-              { bwdot := rebound(v) + rwdot
-                // Trandform bottle velocity to world coords
-                b!b_cgxdot := inprod(btdot,bwdot, c, -s)
-                b!b_cgydot := inprod(btdot,bwdot, s,  c)
-              }
-IF i=0 DO
-{ writef("robot %n collision bottle %n right edge of left arm*n", i, j)
-  abort(1000)
-}
-            }
-            IF y4 <= ty <= y4 + bottleradius DO
-            { // Bottle collision with left edge of left arm
-              //LET rtdot = inprod(r!r_cgxdot, r!r_cgydot, c, s)
-              LET rwdot = inprod(r!r_cgxdot, r!r_cgydot,-s, c)
-              LET btdot = inprod(b!b_cgxdot, b!b_cgydot, c, s)
-              LET bwdot = inprod(b!b_cgxdot, b!b_cgydot,-s, c)
-              LET v = bwdot-rwdot
-              IF v<0 DO
-              { bwdot := rebound(v) + rwdot
-                // Trandform bottle velocity to world coords
-                b!b_cgxdot := inprod(btdot,bwdot, c, -s)
-                b!b_cgydot := inprod(btdot,bwdot, s,  c)
-              }
-IF i=0 DO
-{ writef("robot %n collision bottle %n left edge of left arm*n", i, j)
-  abort(1000)
-}
-            }
-            IF y2 <= ty <= y3 DO
-            { // Bottle is the grab area
-              // First test for a bounce off the grabber base
-              IF robotradius <= tx <= robotradius+bottleradius DO
-              { LET rtdot = inprod(r!r_cgxdot, r!r_cgydot, c, s)
-                LET btdot = inprod(b!b_cgxdot, b!b_cgydot, c, s)
-                LET bwdot = inprod(b!b_cgxdot, b!b_cgydot,-s, c)
-                LET v = btdot-rtdot
-                IF v<0 DO
-                { btdot := rebound(v) + rtdot
-                  // Trandform bottle velocity to world coords
-                  b!b_cgxdot := inprod(btdot,bwdot, c, -s)
-                  b!b_cgydot := inprod(btdot,bwdot, s,  c)
-                }
-              }
-              IF y3-y2 <= 2*bottleradius & r!r_grabposdot<0 DO
-              { // The bottle has just been grabbed
-                grabbottle(r, b)
-              }
-IF i=0 DO
-{ writef("robot %n bottle %n in grab area*n", i, j)
-  abort(2000)
-}
-            }
-          } 
-
-
-        }
-
-        
-      }
-    }
-
-    // Test for robot-robot interaction
-    FOR j = i+1 TO robotv!0 DO
-    { LET p = robotv!j
-      IF incontact(r, p, 6*robotradius) DO
-      { // If robots get close they repel each other
-        LET x1, y1 = r!r_cgx, r!r_cgy
-        LET x2, y2 = p!r_cgx, p!r_cgy
-        LET c = cosines(x1-x2, y1-y2)
-        LET s = result2
-        IF i=-1 DO
-        { writef("Robot %n in contact with robot %n*n", i, j)
-          writef("Robot %n cg (%10.5d,%10.5d)*n", i, r!r_cgx, r!r_cgy)
-          writef("Robot %n cg (%10.5d,%10.5d)*n", j, p!r_cgx, p!r_cgy)
-        }
-        r!r_cgxdot := r!r_cgxdot +
-                      inprod(20_00000, 0,  c, -s)/sps
-        r!r_cgydot := r!r_cgydot +
-                      inprod(20_00000, 0,  s,  c)/sps
-        p!r_cgxdot := p!r_cgxdot -
-                      inprod(20_00000, 0,  c, -s)/sps
-        p!r_cgydot := p!r_cgydot -
-                      inprod(20_00000, 0,  s,  c)/sps
-        robotcoords(r)
-        robotcoords(p)
-      }
+      r!r_cgxdot := r!r_cgxdot + inprod(1_000,0, c,-s)
+      r!r_cgydot := r!r_cgydot + inprod(1_000,0, s, c)
     }
   }
-  
-  // Robot motion
-  FOR i = 1 TO robotv!0 DO
-  { LET r = robotv!i  // r -> [cgx, cgy, cgxdot, cgydot, costheta, sintheta]
-    LET grabposdot = r!r_grabposdot
-    LET grabpos    = r!r_grabpos + grabposdot/sps
 
-    r!r_cgx      := r!r_cgx + r!r_cgxdot/sps
-    r!r_cgy      := r!r_cgy + r!r_cgydot/sps
+  // (2) Deal with bottle bounces and collisions with the walls,
+  //     pit slope. Drop bottles that are above the pit and
+  //     decrement bottlecount and freebottles appropriately.
+  //     If the bottle was owned start opening its start
+  //     opening owner's grabber, if not fully open.
 
-    IF grabpos < 0_10000 DO grabpos, grabposdot := 0_10000, 0
-    IF grabpos > 1_00000 DO grabpos, grabposdot := 1_00000, 0
-    r!r_grabpos, r!r_grabposdot := grabpos, grabposdot    
-  }
+  FOR bid = 1 TO bottlev!0 DO
+  { LET b = bottlev!bid
 
-  // Bottle motion
-  FOR i = 1 TO bottlev!0 DO
-  { LET b = bottlev!i  // b -> [cgx, cgy, cgxdot, cgydot]
-    UNLESS b!b_dropped DO
-    { LET cgxdot = b!b_cgxdot
-      LET cgydot = b!b_cgydot
-      b!b_cgx := b!b_cgx + cgxdot/sps
-      b!b_cgy := b!b_cgy + cgydot/sps
+    IF b!b_dropped LOOP
 
-      IF incontact(b, thepit, 2*pitradius-bottleradius) DO
-      { // Deal with bottle-pit interactions
+    // Limit the speed of the bottle
+
+    IF ABS b!b_cgxdot > 35_000 | ABS b!b_cgydot > 35_000 DO
+      b!b_cgxdot, b!b_cgydot := b!b_cgxdot*97/100, b!b_cgydot*97/100
+
+    // Test if the bottle is within the pit slope circle.
+
+    IF incontact(b, thepit, pitradius+edgesize) DO
+    { // The bottle is within the pit slope circle. 
+
+      IF incontact(b, thepit, pitradius-bottleradius) DO
+      { // The bottle is actually above the pit so must be dropped.
+
+        // Note that freebottles is the count of how many bottles are
+        // neither selected nor dropped.
+        // bottlecount is the number of bottles that have not yet dropped.
+
+        LET owner = b!b_robot // Find the owner, if any.
+
+        IF owner DO
+        { owner!r_bottle := 0              // Deselect the bottle.
+          owner!r_inarea := FALSE          // Only TRUE if the selected bottle
+                                           // is in the area.
+          UNLESS owner!r_grabpos= 1_000 DO // Start opening the owner's
+            owner!r_grabposdot := +0_600   // grabber if necessary.
+          b!b_grabbed := FALSE             // Ensure the bottle is not grabbed.
+          b!b_robot := 0                   // The bottle has no owner.
+          freebottles := freebottles + 1   // The bottle is no longer owned.
+        }
+
+        // The bottle had no owner and is being dropped into the pit
+        // so decrement freebottles and bottlecount
+        freebottles := freebottles - 1
+        bottlecount := bottlecount - 1
+        b!b_dropped := TRUE
+
+        LOOP // This bottle has gone, so consider another bottle, if any.
+      }
+
+      // The bottle is not above the pit but is on the pit slope.
+
+      { // Deal with bottle-pit slope interactions
         // Calculate the direction from the pit centre to the bottle.
-        LET dir_x = cosines(b!b_cgx-pit_x, b!b_cgy-pit_y)
-        LET dir_y = result2
-//writef("bottle=%n dx=%10.5d dy=%10.5d  dir_x=%10.5d dir_y=%10.5d*n",
-//        i, b!b_cgx-pit_x, b!b_cgy-pit_y, dir_x, dir_y)
+        LET dx = cosines(b!b_cgx-pit_x, b!b_cgy-pit_y)
+        LET dy = result2
+//writef("B%i2: dx=%10.3d dy=%10.3d  dx=%10.3d dy=%10.3d*n",
+//        bid, b!b_cgx-pit_x, b!b_cgy-pit_y, dx, dy)
 
         // Apply a constant force away from the pit centre.
-        b!b_cgxdot := cgxdot + muldiv(2_00000, dir_x, One)
-        b!b_cgydot := cgydot + muldiv(2_00000, dir_y, One)
+        b!b_cgxdot := b!b_cgxdot + muldiv(10_000, dx, One)
+        b!b_cgydot := b!b_cgydot + muldiv(10_000, dy, One)
       }
-      UNLESS  b!b_grabbed IF incontact(b, thepit, pitradius-bottleradius) DO
-      { b!b_dropped := TRUE
-        bottlecount := bottlecount-1
+
+      // This bottle is within the pit slope circle so cannot be
+      // on a wall edge.
+      LOOP
+    }
+
+    // This bottle may be near a wall edge.
+
+    { LET x = b!b_cgx
+      LET y = b!b_cgy
+
+      // Bottle interaction with the walls
+      LET dw = x - wall_wx  // Distance from west wall
+      AND dn = wall_ny - y  // Distance from north wall
+      AND de = wall_ex - x  // Distance from east wall
+      AND ds = y - wall_sy  // Distance from south wall
+
+      // Test if the bottle closest to the west wall.
+      IF dw<edgesize & dw<=dn & dw<=ds DO
+      { // (x,y) is closest to the west wall
+        TEST dw < bottleradius
+        THEN b!b_cgxdot, b!b_cgx := -b!b_cgxdot, wall_wx + bottleradius
+        ELSE b!b_cgxdot := b!b_cgxdot + 20_000
+      }
+
+      // Test if the bottle closest to the north wall.
+      IF dn<edgesize & dn<=de & dn<=dw DO
+      { // (x,y) is closest to the north wall
+        TEST dn < bottleradius
+        THEN b!b_cgydot, b!b_cgy := -b!b_cgydot, wall_ny - bottleradius
+        ELSE b!b_cgydot := b!b_cgydot - 20_000
+      }
+
+      // Test if the bottle closest to the east wall.
+      IF de<edgesize & de<=ds & de<=dn DO
+      { // (x,y) is closest to the east wall
+        TEST de < bottleradius
+        THEN b!b_cgxdot, b!b_cgx := -b!b_cgxdot, wall_ex - bottleradius
+        ELSE b!b_cgxdot := b!b_cgxdot - 20_000
+      }
+
+      // Test if the bottle closest to the south wall.
+      IF ds<edgesize & ds<=de & ds<=dw DO
+      { // (x,y) is closest to the south wall
+        TEST ds < bottleradius
+        THEN b!b_cgydot, b!b_cgy := -b!b_cgydot, wall_sy + bottleradius
+        ELSE b!b_cgydot := b!b_cgydot + 20_000
+      }
+    }
+    // Consider another bottle, if any.
+  }
+
+  // (3) Deal with robot-robot bounces and collision avoidance.
+
+  FOR rid1 = 1 TO robotv!0 DO
+  { // Test for robot-robot interaction -- collision avoidance and bouncing.
+    LET r1 = robotv!rid1
+    LET x1, y1 = r1!r_cgx, r1!r_cgy
+
+    FOR rid2 = rid1+1 TO robotv!0 DO
+    { LET r2 = robotv!rid2  // Another robot
+      LET x2, y2 = r2!r_cgx, r2!r_cgy
+
+      IF incontact(r1, r2, 12*robotradius) DO
+      { // These two robots are close enough for collision avoidance
+        // to be applied, or possibly perform a simple bounce.
+        //sawritef("R%i2 is in avoidance range with R%i2*n", rid1, rid2)
+
+        // But if they are touching perform a simple bounce.
+        TEST incontact(r1, r2, 2*robotradius)
+        THEN { // The robots are in contact so perform a simple bounce.
+               //sawritef("R%i2 is bouncing off R%i2*n", rid1, rid2)
+               cbounce(r1, r2, 1, 1)
+               // cbounce does not move the robots
+//abort(9109)
+             }
+        ELSE { // The robots are in range and not touching
+               // so perform collision avoidance adjustment,
+               // if necessary.
+
+               LET dx = x2-x1  // Position of r2 relative to r1
+               LET dy = y2-y1
+
+               // Subtract the velocity of r2 from both r1 and r2
+               // effectively make r2 stationary.
+               LET relvx = r1!r_cgxdot - r2!r_cgxdot
+               LET relvy = r1!r_cgydot - r2!r_cgydot
+
+               // Compute the direction cosines of the relative velocity
+               LET c = cosines(relvx, relvy)
+               LET s = result2
+
+               // Rotate about r to make the relative velocity lie in
+               // the X axis, and calculate where this will leave r2.
+               LET sepx = muldiv(c, dx, One) + muldiv(s, dy, One)
+               AND sepy = muldiv(c, dy, One) - muldiv(s, dx, One)
+
+               // sepx is the distance to travel before reaching the closest
+               //      approach
+               // sepy is the closest approach distance.
+
+               IF rid1=-1 DO
+               { writef("R%n: is avoidance range with R%n*n", rid1, rid2)
+                 writef("R%n:  cg (%8.3d,%8.3d)      velocity = (%8.3d,%8.3d)*n",
+                         rid1, x1, y1,  r1!r_cgxdot, r1!r_cgydot)
+                 writef("R%n:  cg (%8.3d,%8.3d)      velocity = (%8.3d,%8.3d)*n",
+                         rid2, x2, y2, r2!r_cgxdot, r2!r_cgydot)
+                 writef("(dx,dy)=(%8.3d,%8.3d)  Rel velocity = (%8.3d,%8.3d)*n",
+                         dx, dy, relvx, relvy)
+                 writef("Rel velocity direction cosines         (%8.3d,%8.3d)*n",c,s)
+                 writef("sepx = %8.3d  sepy = %8.3d minsep = %8.3d*n",
+                         sepx, sepy, 6*robotradius)
+
+                 abort(9100)
+               }
+
+               IF rid1=-1 & sepx>0 DO
+                 writef("R%i2 and R%i2: ABS sepy = %9.3d  6**robotradius=%9.3d*n",
+                         rid1, rid2, ABS sepy, 6*robotradius)
+
+               IF sepx>0 & ABS sepy < 6*robotradius DO
+               { // The robots are getting closer and will get too close
+                 // so an adjustment must be made
+                 // The forces depend on the robot's speed
+                 LET f1 = (ABS r1!r_cgxdot + ABS r1!r_cgydot)*12/100
+                 LET f2 = (ABS r2!r_cgxdot + ABS r2!r_cgydot)*12/100
+
+                 LET fx1 = +muldiv(f1, s, One)
+                 AND fy1 = -muldiv(f1, c, One)
+                 LET fx2 = +muldiv(f2, s, One)
+                 AND fy2 = -muldiv(f2, c, One)
+
+                 IF sepy<0 DO
+                 { fx1, fy1 := -fx1, -fy1 // Apply forces in the right direction
+                   fx2, fy2 := -fx2, -fy2
+                 }
+                 // Apply force (fx1,fy1) to robot r1. Note that the direction of
+                 // (fx1,fy1) is (-s,c)
+                 // Robot r2 receives its force in the opposite direction.
+
+                 r1!r_cgxdot, r1!r_cgydot := r1!r_cgxdot+fx1, r1!r_cgydot+fy1
+                 r2!r_cgxdot, r2!r_cgydot := r2!r_cgxdot-fx2, r2!r_cgydot-fy2
+
+                 // This changes the velocities of both robots but not their
+                 // positions.
+
+                 IF rid1=-1 DO
+                 { //writef("R%i2 and %i2: ABS sepy = %9.3d  6**robotradius=%9.3d*n",
+                   //        rid1, rid2, ABS sepy, 6*robotradius)
+                   writef("Applying fx1=%9.3d  fy1=%9.3d to R%n*n", fx1, fy1, rid1)
+                   writef("Applying fx2=%9.3d  fy2=%9.3d to R%n*n", fx2, fy2, rid2)
+                   //abort(631)
+                 }
+
+                 // Do not move the robots yet.
+               }
+             }
       }
     }
   }
+
+
+
+  // (4) For each robot, set inarea=false then look at every bottle.
+  //     Deal with its bounces off the robot body, shoulders,
+  //     and grabber.
+  //     If a bottle is in the grabber area and the grabber is fully
+  //     open and inarea=false, cause it to become the robot's selected
+  //     bottle, set inarea=true and start closing the grabber, but if
+  //     inarea was true there are two or more bottles in the grabber
+  //     area so start opening the grabber to let one or more escape.
+  //     If inarea=true and grabposdot<0 and grappos<=grabbedpos set
+  //     grabbed to true and set grabposdot=0.
+
+  FOR rid = 1 TO robotv!0 DO
+  { LET r = robotv!rid
+    LET b = r!r_bottle  // The currently selected bottle
+    LET inareacount = 0 // Count of the number of bottle in the grabber area
+                        // If >0 b will be a bottle in the grabber area
+
+    UNLESS b IF freebottles & r!r_grabpos=1_000 DO
+    { // This robot can select a bottle
+//sawritef("R%n: has no selected bottle, freebottles=%n and grabpos=%6.3*n",
+//          rid, freebottles, r!r_grabpos)
+
+      FOR bid = 1 TO bottlev!0 DO
+      { b := bottlev!bid
+
+        UNLESS b!b_dropped | b!b_robot DO
+        { // Bottle b is neither dropped nor owned by another
+          // robot, so select it.
+          r!r_bottle := b
+          r!r_inarea := FALSE  // This should not be necessary.
+          b!b_robot := r
+          freebottles := freebottles - 1
+//sawritef("R%n: selects B%n, freebottles=%n*n", rid, bid, freebottles)
+          BREAK
+        }
+      }
+    }
+    
+    // This robot has a selected if one was available.
+
+    // Now deal with robot-bottle interraction.
+    // This requires the robots coordinates to be calculated.
+    robotcoords(r)
+
+    FOR bid = 1 TO bottlev!0 DO
+    { LET b = bottlev!bid
+
+      IF b!b_dropped LOOP // Ignore dropped bottles
+
+       // Ignore this bottle unless it is close to the robot.
+      UNLESS incontact(r, b, 3*robotradius) LOOP
+
+      IF rid=-1 DO
+      { writef("R%n is close to B%n*n", rid, bid)
+        abort(3002)
+      }
+
+      // Test if the bottle has hit the body of the robot.
+      IF incontact(r, b, robotradius+bottleradius) DO
+      { // If so make the bottle bounce off.
+        IF rid=-1 DO
+          writef("R%n body bounce with B%n*n", rid, bid)
+        cbounce(r, b, 1, 0) // The robot is infinitely heavy
+      }
+
+      // Test for left shoulder-bottle bounce
+      { LET sx, sy, sxdot, sydot =
+            r!r_lcx, r!r_lcy,          // Left shoulder centre
+            r!r_cgxdot, r!r_cgydot     // Motion ignoring rate of rotation.
+        LET s = @sx                    // Centre of left choulder.
+        IF incontact(s, b, shoulderradius+bottleradius) DO
+        { // They are in contact so make the bottle bounce off
+          IF rid=-1 DO
+            writef("R%n left shoulder contact with B%n*n", rid, bid)
+          cbounce(s, b, 1, 0) // Robot is inifinitely heavy
+        }
+      }
+
+      // Test for right shoulder-bottle bounce
+      { LET sx, sy, sxdot, sydot =
+            r!r_rcx, r!r_rcy,
+            r!r_cgxdot, r!r_cgydot
+        LET s = @sx 
+        IF incontact(s, b, shoulderradius+bottleradius) DO
+        { // They are in contact so make the bottle bounce off
+          IF rid=-1 DO
+            writef("R%n right shoulder contact with B%n*n", rid, bid)
+          cbounce(s, b, 1, 0) // Robot is infinitely heavy
+        }
+      }
+
+      // Test for robot left tip bounce
+      { LET sx, sy, sxdot, sydot =
+            r!r_ltcx, r!r_ltcy,
+            r!r_cgxdot, r!r_cgydot
+        LET s = @sx 
+        IF incontact(s, b, tipradius+bottleradius) DO
+        { // They are in contact so make the bottle bounce off
+          IF rid=-1 DO
+            writef("R%n left tip contact with B%n*n", rid, bid)
+          cbounce(s, b, 1, 0) // Robot is heavy
+        }
+      }
+
+      // Test for robot right tip bounce
+      { LET sx, sy, sxdot, sydot =
+            r!r_rtcx, r!r_rtcy,
+            r!r_cgxdot, r!r_cgydot
+        LET s = @sx 
+        IF incontact(s, b, tipradius+bottleradius) DO
+        { // They are in contact so make the bottle bounce off
+          IF rid=-1 DO
+            writef("R%n right tip contact with B%n*n", rid, bid)
+          cbounce(s, b, 1, 0) // Robot is heavy
+        }
+      }
+
+      // Test for robot grabber bounces
+
+      { // Make the robot's centre the origin
+        LET bx = b!b_cgx - r!r_cgx
+        LET by = b!b_cgy - r!r_cgy
+
+        LET c = cosines(r!r_cgxdot, r!r_cgydot) // Direction cosines of the robot
+        LET s = result2
+
+        // Rotate clockwise the bottle position about the new origin
+        LET tx = inprod(bx, by,  c,  s)
+        LET ty = inprod(bx, by, -s,  c)
+
+        // Deal with bounces of the arm edges
+
+        // Calculate the y positions of the arm edges.
+        LET y3 = muldiv(robotradius-shoulderradius-armthickness,
+                        r!r_grabpos, One) // Right edge of the left  arm
+        LET y4 = y3 + armthickness        // Left  edge of the left  arm
+        LET y2 = -y3                      // Left  edge of the right arm
+        LET y1 = -y4                      // Right edge of the right arm
+
+IF rid=-1 DO // Debugging aid
+{ writef("R%n:  cg=(%8.3d %8.3d)*n", rid, r!r_cgx, r!r_cgy)
+  writef("B%n:  cg=(%8.3d %8.3d)*n", bid, b!b_cgx, b!b_cgy)
+  writef("bx=%8.3d by=%8.3d*n", bx, by)
+  writef("tx=%8.3d ty=%h.3d grablen=%8.3d*n", tx, ty, grablen)
+  writef("x1=%8.3d x2=%8.3d*n", robotradius, robotradius+grablen)
+  writef("y1=%8.3d y2=%8.3d y3=%8.3d y4=%8.3d*n", y1, y2, y3, y4)
+abort(1234)
 }
 
-AND grabbottle(r, b) BE
-{ LET mx = robotradius = 3*bottleradius/2
-  LET my = 0
-  LET c = cosines(r!r_cgxdot, r!r_cgydot)
-  LET s = result2
+        IF robotradius <= tx <= robotradius+grablen DO
+        { // Bounces and grabbing are both possible
 
-  // Set the bottle's position and velocity
-  b!b_cgx    := inprod(mx,my,  c, s) + r!r_cgx
-  b!b_cgy    := inprod(mx,my, -s, c) + r!r_cgy
-  b!b_cgxdot := r!r_cgxdot
-  b!b_cgydot := r!r_cgydot
+IF rid=-1 DO
+{ sawritef("R%n: has B%n parallel to grabbers*n", rid, bid)
+  abort(1235)
+}
+          IF y1 - bottleradius <= ty <= y1 DO
+          { // Bottle bounce with outside edge of right arm
+            //LET rtdot = inprod(r!r_cgxdot, r!r_cgydot, c, s)
+            LET rwdot = inprod(r!r_cgxdot, r!r_cgydot,-s, c)
+            LET btdot = inprod(b!b_cgxdot, b!b_cgydot, c, s)
+            LET bwdot = inprod(b!b_cgxdot, b!b_cgydot,-s, c)
+            LET v = bwdot-rwdot
+IF rid=-1 DO
+{ sawritef("B%n: in contact with outside edge of right grabber arm*n", bid)
+  abort(1236)
+}
+            IF v>0 DO
+            { bwdot := rebound(v) + rwdot
+              // Transform bottle velocity to world coords
+              b!b_cgxdot := inprod(btdot,bwdot, c, -s)
+              b!b_cgydot := inprod(btdot,bwdot, s,  c)
+            }
+          }
 
-  b!b_grabbed    := TRUE
-  b!b_robot      := r     // The grabbing robot
-  r!r_bottle     := b     // The grabbed bottle
-  r!r_grabposdot := 0     // Stop the grabber 
-writef("Robot %n grabbed Bottle %n*n", r!r_id, b!b_id)
-//abort(3000)
+          IF y2 <= ty <= y2 + bottleradius DO
+          { // Bottle bounce with the inside edge of right arm
+            LET rtdot = inprod(r!r_cgxdot, r!r_cgydot, c, s)
+            LET rwdot = inprod(r!r_cgxdot, r!r_cgydot,-s, c)
+            LET btdot = inprod(b!b_cgxdot, b!b_cgydot, c, s)
+            LET bwdot = inprod(b!b_cgxdot, b!b_cgydot,-s, c)
+            LET v = bwdot-rwdot // Speed of bottle away from the right arm
+IF rid=-1 DO
+{ sawritef("B%n: in contact with inside edge of right grabber arm*n", bid)
+  sawritef("rxdot=%8.3d rydot=%8.3d*n", r!r_cgxdot, r!r_cgydot)
+  sawritef("bxdot=%8.3d bydot=%8.3d*n", b!b_cgxdot, b!b_cgydot)
+  sawritef("c=    %8.3d s=    %8.3d*n", c, s)
+  sawritef("rtdot=%8.3d rwdot=%8.3d*n", rtdot, rwdot)
+  sawritef("btdot=%8.3d bwdot=%8.3d*n", btdot, bwdot)
+  sawritef("v=    %8.3d*n", v)
+  abort(1236)
+}
+            IF v<0 DO
+            { bwdot := rebound(v) + rwdot
+              // Transform bottle velocity to world coords
+IF rid=-1 DO
+  sawritef("bxdot=%8.3d bydot=%8.3d*n", b!b_cgxdot, b!b_cgydot)
+              b!b_cgxdot := inprod(btdot,bwdot, c, -s)
+              b!b_cgydot := inprod(btdot,bwdot, s,  c)
+IF rid=-1 DO
+{ sawritef("bxdot=%8.3d bydot=%8.3d*n", b!b_cgxdot, b!b_cgydot)
+  abort(1239)
+}
+            }
+            //IF tydot>0 DO tydot := rebound(tydot)
+          }
+
+          IF y3 - bottleradius <= ty <= y3 DO
+          { // Bottle collision with right edge of left arm
+            //LET rtdot = inprod(r!r_cgxdot, r!r_cgydot, c, s)
+            LET rwdot = inprod(r!r_cgxdot, r!r_cgydot,-s, c)
+            LET btdot = inprod(b!b_cgxdot, b!b_cgydot, c, s)
+            LET bwdot = inprod(b!b_cgxdot, b!b_cgydot,-s, c)
+            LET v = bwdot-rwdot
+IF rid=-1 DO
+{ sawritef("B%n: in contact with right edge of left grabber*n", bid)
+  abort(1237)
+}
+            IF v>0 DO
+            { bwdot := rebound(v) + rwdot
+              // Transform bottle velocity to world coords
+              b!b_cgxdot := inprod(btdot,bwdot, c, -s)
+              b!b_cgydot := inprod(btdot,bwdot, s,  c)
+            }
+          }
+
+          IF y4 <= ty <= y4 + bottleradius DO
+          { // Bottle collision with left edge of left arm
+            //LET rtdot = inprod(r!r_cgxdot, r!r_cgydot, c, s)
+            LET rwdot = inprod(r!r_cgxdot, r!r_cgydot,-s, c)
+            LET btdot = inprod(b!b_cgxdot, b!b_cgydot, c, s)
+            LET bwdot = inprod(b!b_cgxdot, b!b_cgydot,-s, c)
+            LET v = bwdot-rwdot
+IF rid=-1 DO
+{ sawritef("B%n in contact with left edge of left grabber*n", bid)
+  abort(1236)
 }
 
-AND releasebottle(r) BE IF r!r_bottle DO
-{ LET b = r!r_bottle
-  LET mx = robotradius + 3*bottleradius/2
-  LET my = 0
-  LET c = cosines(r!r_cgxdot, r!r_cgydot)
-  LET s = result2
+            IF v<0 DO
+            { bwdot := rebound(v) + rwdot
+              // Transform bottle velocity to world coords
+              b!b_cgxdot := inprod(btdot,bwdot, c, -s)
+              b!b_cgydot := inprod(btdot,bwdot, s,  c)
+            }
+          }
 
-  // Set the bottle's position and velocity
-  b!b_cgx    := inprod(mx,my, c,-s) + r!r_cgx
-  b!b_cgy    := inprod(mx,my, s, c) + r!r_cgy
-  b!b_cgxdot := r!r_cgxdot
-  b!b_cgydot := r!r_cgydot
+          IF y2 <= ty <= y3 DO
+          { // Bottle b is the grabber area
 
-  b!b_grabbed    := FALSE
-  b!b_robot      := 0     // No grabbing robot
-  r!r_bottle     := 0     // No grabbed bottle
-writef("Robot %n released Bottle %n*n", r!r_id, b!b_id)
-//abort(4000)
- }
+IF rid=-1 DO
+{ sawritef("B%n: is in R%n's grabber area*n", bid, rid)
+  abort(2233)
+}
+            inareacount := inareacount + 1
 
-AND initpitsurf(col) = VALOF
+            UNLESS b!b_robot DO
+            { // The bottle is not dropped and does not have
+              // an owner, select it.
+            
+              IF r!r_bottle DO
+              { // De-select this robot's current bottle
+                LET sb = r!r_bottle
+                sb!b_robot := 0
+                sb!b_grabbed := FALSE
+                r!r_bottle := 0
+                r!r_inarea := FALSE
+                freebottles := freebottles + 1
+              }
+
+              r!r_bottle := b
+              r!r_inarea := TRUE
+              b!b_robot := r
+              b!b_grabbed := FALSE
+              freebottles := freebottles - 1
+            }
+
+
+            // Test for a bounce off the grabber base
+            IF robotradius <= tx <= robotradius+bottleradius DO
+            { LET rtdot = inprod(r!r_cgxdot, r!r_cgydot, c, s)
+              LET btdot = inprod(b!b_cgxdot, b!b_cgydot, c, s)
+              LET bwdot = inprod(b!b_cgxdot, b!b_cgydot,-s, c)
+              LET v = btdot-rtdot
+IF rid=-1 DO
+{ sawritef("B%n is in contact R%n,s grabber base*n", bid, rid)
+  sawritef("grabbedpos = %8.3d*n", grabbedpos)
+  abort(2235)
+}
+              IF v<0 DO
+              { btdot := rebound(v) + rtdot
+                // Transform bottle velocity to world coords
+                b!b_cgxdot := inprod(btdot,bwdot, c, -s)
+                b!b_cgydot := inprod(btdot,bwdot, s,  c)
+              }
+            }
+          }
+        }
+      }
+    }    // End of bottle loop
+
+    // If the selected bottle is the only bottle in this robot's
+    // grabber area set inarea to TRUE.
+    r!r_inarea := inareacount=1
+  }
+
+  // (5) Deal with all the bottle-bottle bounces.
+
+  FOR bid1 = 1 TO bottlev!0 DO
+  { LET b1 = bottlev!bid1  // b1 -> [cgx, cgy, cgxdot, cgydot]
+
+    UNLESS b1!b_dropped DO
+    { // Test for bottle-bottle bounces
+      FOR bid2 = bid1+1 TO bottlev!0 DO
+      { LET b2 = bottlev!bid2  // b2 -> [cgx, cgy, cgxdot, cgydot]
+        IF b2!b_dropped LOOP
+        IF incontact(b1, b2, bottleradius+bottleradius) DO
+          cbounce(b1, b2, 1, 1)
+      }
+    }
+  }
+  //abort(9002)
+
+  // Move the robots and their grabber arms.
+  // All bottles have been seen.
+  FOR rid = 1 TO robotv!0 DO
+  { LET r = robotv!rid
+    LET b = r!r_bottle
+    LET inarea = r!r_inarea // =TRUE if b is the only bottle in
+                            // this robot's grabber area
+    LET grabpos, grabposdot = r!r_grabpos, r!r_grabposdot
+
+    UNLESS inarea | b!b_grabbed IF grabposdot=0 & grabpos<1_000 DO
+    {  grabposdot := +0_600
+       r!r_grabposdot := grabposdot 
+    }
+
+    IF grabposdot DO
+    { grabpos := grabpos+grabposdot/sps
+      r!r_grabpos := grabpos
+
+      TEST grabposdot > 0
+      THEN { IF grabpos >= 1_000 DO r!r_grabpos, r!r_grabposdot := 1_000, 0
+           }
+      ELSE { IF grabpos <= grabbedpos & inarea DO
+             { // The grabber has just captured the selected bottle
+               grabpos        := grabbedpos
+               r!r_grabpos    := grabpos
+               r!r_grabposdot :=  0
+               b!b_grabbed    := TRUE
+             }
+           }
+
+      // If the grabber is fully closed start opening it.
+      IF grabpos <= 0_100 DO r!r_grabpos, r!r_grabposdot := 0_100, 0_600
+    }
+
+    IF inarea & r!r_grabpos=1_000 & r!r_grabposdot=0 DO
+      r!r_grabposdot := -0_600
+
+    // Encourage the robot to move towards its selected bottle, if any.
+    IF r!r_bottle &
+       edgesize < r!r_cgx < screenxsize*One-edgesize &
+       edgesize < r!r_cgy < screenysize*One-edgesize DO
+    { LET b = r!r_bottle // The possibly grabbed selected bottle
+
+      UNLESS b!b_grabbed | b!b_dropped DO
+      { // The bottle is selected, not grabbed and not dropped
+        // so make the robot move towards it
+        LET dx = b!b_cgx - r!r_bcx
+        LET dy = b!b_cgy - r!r_bcy
+        // Calculate the direction from the robot to the bottle
+        LET ct = cosines(dx, dy)
+        LET st = result2
+
+        // Calculate the speed of the bottle
+        LET vx, vy = b!b_cgxdot, b!b_cgydot
+
+        // Calculate the direction of motion
+        LET bcv = cosines(vx, vy)
+        LET bsv = result2
+        LET speed = vx=0=vy -> 0,
+                    ABS vx > ABS vy -> muldiv(vx, One, bcv),
+                                       muldiv(vy, One, bsv)
+
+        // Increase the speed depending on the distance from the bottle
+        speed := speed + 15_000
+
+        // Increase the speed if the robot is not close to the bottle
+        UNLESS incontact(r, b, 2*robotradius) DO speed := speed + 56_000
+
+        // Make the robot move towards the bottle
+        r!r_cgxdot := (29 * r!r_cgxdot + muldiv(speed, ct, One)) / 30
+        r!r_cgydot := (29 * r!r_cgydot + muldiv(speed, st, One)) / 30
+      }
+
+      IF b!b_grabbed DO
+      { // Cause the robot to move towards the pit
+        LET dx = pit_x - r!r_cgx
+        LET dy = pit_y - r!r_cgy
+        LET cp = cosines(dx, dy)
+        LET sp = result2
+
+        // Make the robot move towards the pit
+        r!r_cgxdot := (29 * r!r_cgxdot + muldiv(60_000, cp, One)) / 30
+        r!r_cgydot := (29 * r!r_cgydot + muldiv(60_000, sp, One)) / 30
+        b!b_cgxdot, b!b_cgxdot := r!r_cgxdot, r!r_cgxdot
+      }
+    }    
+
+    r!r_cgx := r!r_cgx + r!r_cgxdot/sps
+    r!r_cgy := r!r_cgy + r!r_cgydot/sps
+  }
+
+  // Move the bottles
+  FOR bid = 1 TO bottlev!0 DO
+  { LET b = bottlev!bid
+
+    IF b!b_dropped LOOP
+
+    b!b_cgx := b!b_cgx + b!b_cgxdot/sps
+    b!b_cgy := b!b_cgy + b!b_cgydot/sps
+  }
+}
+
+AND initpitsurf(col, surfptr) = VALOF
 { // Allocate the pit surface
-  LET height = 2*pitradius/One + 2
+  LET r1 = pitradius/One
+  LET r2 = r1 + edgesize/One
+  LET height = 2*r2 + 2
   LET width  = height
-  LET colkey = maprgb(64,64,64)
-  LET surf = mksurface(width, height)
+  LET colkey = maprgb(1,1,1)
+  LET surfok = mksurface(width, height, surfptr)
 
-  selectsurface(surf, width, height)
+  UNLESS surfok RESULTIS FALSE
+  
+  selectsurface(surfptr, width, height)
   fillsurf(colkey)
-  setcolourkey(surf, colkey)
+  setcolourkey(surfptr, colkey)
+
+  setcolour(col_gray1)
+  drawfillcircle(r2, r2+1, r2)
 
   setcolour(col)
-  drawfillcircle(pitradius/One, pitradius/One+1, pitradius/One)
+  drawfillcircle(r2, r2+1, r1)
 
-  RESULTIS surf
+  RESULTIS TRUE
 }
 
-AND initbottlesurf(col) = VALOF
+AND initbottlesurf(col, surfptr) = VALOF
 { // Allocate a bottle surface
   LET height = 2*bottleradius/One + 2
   LET width  = height
-  LET colkey = maprgb(64,64,64)
-  LET surf = mksurface(width, height)
+  LET colkey = maprgb(1,1,1)
+  LET surfok = mksurface(width, height, surfptr)
 
-  selectsurface(surf, width, height)
+  selectsurface(surfptr, width, height)
   fillsurf(colkey)
-  setcolourkey(surf, colkey)
+  setcolourkey(surfptr, colkey)
 
   setcolour(col)
   drawfillcircle(bottleradius/One, bottleradius/One+1, bottleradius/One)
 
-  RESULTIS surf
+  RESULTIS TRUE
 }
 
 AND sine(theta) = VALOF
-// theta =     0 for 0 degrees
-//       = 64000 for 90 degrees
-// Returns a value in range -1000 to 1000
-{ LET a = theta  /  1000
-  LET r = theta MOD 1000
+// theta =  0_000 for  0 degrees
+//       = 64_000 for 90 degrees
+// Returns a value in range -1_000 to +1_000
+{ LET a = theta  /  1_000
+  LET r = theta MOD 1_000
   LET s = rawsine(a)
   RESULTIS s + (rawsine(a+1)-s)*r/1000
 }
@@ -890,7 +1194,7 @@ AND cosine(x) = sine(x+64_000)
 
 AND rawsine(x) = VALOF
 { // x is scaled d.ddd with 64.000 representing 90 degrees
-  // The result is scaled d.ddddd, ie 1_00000 represents 1.00000
+  // The result is scaled d.ddd, ie 1_000 represents 1.000
   LET t = TABLE   0,   25,   49,   74,   98,  122,  147,  171,
                 195,  219,  243,  267,  290,  314,  337,  360,
                 383,  405,  428,  450,  471,  493,  514,  535,
@@ -905,13 +1209,12 @@ AND rawsine(x) = VALOF
   UNLESS (x&64)=0  DO a := 64-a
   a := t!a
   UNLESS (x&128)=0 DO a := -a
-  RESULTIS a * 100
+  RESULTIS a
 }
 
 AND robotcoords(r) BE
 { // This function calculates the orientation of the robot
   // and the coordinates of all its key points
-  LET c, s, ns  = ?, ?, ?
   LET x, y = r!r_cgx, r!r_cgy
   LET r1 = robotradius
   LET r2 = shoulderradius
@@ -919,10 +1222,9 @@ AND robotcoords(r) BE
   LET d1 = 2*r3
   LET d2 = muldiv(r!r_grabpos, r1-r2-d1, One)
   LET d3 = grablen
-  setdir(r)
-  c := r!r_costheta
-  s := r!r_sintheta
-  ns := -s
+  LET c  = cosines(r!r_cgxdot, r!r_cgydot)
+  LET s  = result2
+  LET ns = -s
 
   r!r_lcx  := x + inprod( c,ns, r1-r2, r1-r2) // Left side
   r!r_lcy  := y + inprod( s, c, r1-r2, r1-r2)
@@ -961,11 +1263,13 @@ AND robotcoords(r) BE
   r!r_bcy  := y + inprod( s, c, robotradius+2*bottleradius, 0)
 }
 
-AND drawrobot(i) BE
-{ LET r = robotv!i
+AND drawrobot(r) BE
+{ LET b = r!r_bottle
+
   robotcoords(r)
 
-  setcolour(r!r_colour)
+  setcolour(r!r_id=1 -> robot1colour, robotcolour)
+
   // Body
   drawfillcircle(r!r_cgx/One, r!r_cgy/One, robotradius/One)
   // Left shoulder
@@ -973,98 +1277,145 @@ AND drawrobot(i) BE
   // Right shoulder
   drawfillcircle(r!r_rcx/One, r!r_rcy/One, shoulderradius/One)
 
-  setcolour(grabcolour)
+  IF debugging DO
+  { // Plot the robot number centred in the robot
+    setcolour(col_black)
+    drawf(r!r_cgx/One-(r!r_id>=10->9,3), r!r_cgy/One-6, "%n", r!r_id)
+  }
+
+  setcolour(grabbercolour)
   // Grabber base
-  drawquad(r!r_lcx/One, r!r_lcy/One,
-           r!r_lex/One, r!r_ley/One,
-           r!r_rex/One, r!r_rey/One,
-           r!r_rcx/One, r!r_rcy/One)
+  drawquad(r!r_lcx/One, r!r_lcy/One,    //   lc--le
+           r!r_lex/One, r!r_ley/One,    //   |    |
+           r!r_rex/One, r!r_rey/One,    //   |    |
+           r!r_rcx/One, r!r_rcy/One)    //   rc--re
   // Left arm
-  drawquad(r!r_ltax/One, r!r_ltay/One,
-           r!r_ltbx/One, r!r_ltby/One,
-           r!r_ltcx/One, r!r_ltcy/One,
+  drawquad(r!r_ltax/One, r!r_ltay/One,  //   lta--------ltd
+           r!r_ltbx/One, r!r_ltby/One,  //   |            |
+           r!r_ltcx/One, r!r_ltcy/One,  //   ltb--------ltc
            r!r_ltdx/One, r!r_ltdy/One)
   drawfillcircle(r!r_ltpx/One, r!r_ltpy/One, tipradius/One)
   // Right arm
-  drawquad(r!r_rtax/One, r!r_rtay/One,
-           r!r_rtbx/One, r!r_rtby/One,
-           r!r_rtcx/One, r!r_rtcy/One,
+  drawquad(r!r_rtax/One, r!r_rtay/One,  //   rta--------rtd
+           r!r_rtbx/One, r!r_rtby/One,  //   |            |
+           r!r_rtcx/One, r!r_rtcy/One,  //   rtb--------rtc
            r!r_rtdx/One, r!r_rtdy/One)
   drawfillcircle(r!r_rtpx/One, r!r_rtpy/One, tipradius/One)
+
+//sawritef("debugging=%n b=%n grabbed=%n dropped=%n*n",
+//          debugging, b, b!b_grabbed, b!b_dropped)
+ IF debugging UNLESS b!b_grabbed | b!b_dropped DO
+ { setcolour(col_red)
+   moveto(r!r_bcx/One, r!r_bcy/One)
+   drawto(b!b_cgx/One, b!b_cgy/One)
+//updatescreen()
+//abort(1000)
+ }
 }
 
-AND drawbottle(i) BE
-{ LET b = bottlev!i
-  LET bottlesurf = bottlesurfR  // Normally red
-  IF b!b_dropped RETURN
+AND drawbottle(b) BE UNLESS b!b_dropped DO
+{ LET r = b!b_robot // Owning robot,if any
+  LET surf, surf1 = bottlesurfR, bottlesurfR1
 
-  IF i=1 DO bottlesurf := bottlesurfK
+  IF b!b_id=1  DO surf, surf1 := bottlesurfK, bottlesurfK1
+  IF b!b_robot DO surf, surf1 := bottlesurfDR, bottlesurfDR1
 
   IF b!b_grabbed DO
-  { LET r = b!b_robot
-    bottlesurf := bottlesurfB
-    // Set the bottle coords
-    b!b_cgx := r!r_bcx 
-    b!b_cgy := r!r_bcy 
+  { surf, surf1 := bottlesurfB, bottlesurfB1
+    b!b_cgx := r!r_bcx // If grabbed the bottle is at the centre
+    b!b_cgy := r!r_bcy // of the robot's grabber.
   }
 
-  blitsurf(bottlesurf, screen, (b!b_cgx-bottleradius)/One,
-                               (b!b_cgy+bottleradius)/One)
+  blitsurf(@surf, @screen, (b!b_cgx-bottleradius)/One,
+                           (b!b_cgy+bottleradius)/One)
+
+  IF debugging DO
+  { // Plot the bottle number near the bottle
+    setcolour(col_black)
+    drawf(b!b_cgx/One+10, b!b_cgy/One-6, "%n", b!b_id)
+  }
 }
 
 AND plotscreen() BE
-{ selectsurface(screen, screenxsize, screenysize)
+{ LET d = edgesize/One
+  selectsurface(@screen, screenxsize, screenysize)
   fillsurf(backcolour)
+  selectsurface(@screen, xsize, ysize)
 
-  // Allocate the surfaces if necessary
-  UNLESS bottlesurfR DO bottlesurfR := initbottlesurf(col_red)
-  UNLESS bottlesurfK DO bottlesurfK := initbottlesurf(col_black)
-  UNLESS bottlesurfB DO bottlesurfB := initbottlesurf(col_brown)
-  UNLESS pitsurf DO pitsurf := initpitsurf(pitcolour)
-
-  selectsurface(screen, xsize, ysize)
+  setcolour(col_gray1)
+  drawquad(0,0, d,d, d,screenysize-d, 0,screenysize)
+  setcolour(col_gray2)
+  drawquad(0, screenysize,
+           d, screenysize-d,
+           screenxsize-d, screenysize-d,
+           screenxsize, screenysize)
+  setcolour(col_gray3)
+  drawquad(screenxsize, screenysize,
+           screenxsize-d, screenysize-d,
+           screenxsize-d, d,
+           screenxsize, 0)
+  setcolour(col_gray4)
+  drawquad(0,0, d,d, screenxsize-d,d, screenxsize,0)
 
   // The pit
-  blitsurf(pitsurf, screen,
-           (pit_x-pitradius)/One, (pit_y+pitradius)/One)
+  blitsurf(@pitsurf, @screen,
+           (pit_x-pitradius-edgesize)/One, (pit_y+pitradius+edgesize)/One)
+//sawritef("pit_x=%n pit_y=%n pitradius=%n*n", pit_x, pit_y, pitradius)
+//updatescreen()
+//abort(1000)
+  selectsurface(@screen, xsize, ysize)
+//abort(800)
 
-  selectsurface(screen, xsize, ysize)
-
-  // Must draw the robots first in case there are grabbed bottles
-  FOR i = 1 TO robotv!0  DO drawrobot(i)
-
-  FOR i = 1 TO bottlev!0 DO drawbottle(i)
+  FOR i = 1 TO robotv!0  DO drawrobot(robotv!i)
+//updatescreen()
+//abort(1000)
+  FOR i = 1 TO bottlev!0 DO drawbottle(bottlev!i)
+//updatescreen()
+//abort(1000)
+//abort(802)
 
   setcolour(maprgb(255,255,255))
   
+  IF debugging DO
+  { //drawf(30, 380, "sps         = %i2", sps)
+    drawf(80, 365, "freebottles = %i2", freebottles)
+    drawf(80, 350, "bottlecount = %i2", bottlecount)
+  }
+
   IF help DO
-  { plotf(30, 150, "Q  -- Quit")
-    plotf(30, 135, "P  -- Pause/Continue")
-    plotf(30, 120, "H  -- Toggle help information")
-    plotf(30, 105, "G  -- Grab")
-    plotf(30,  90, "R  -- Release")
-    plotf(30,  75, "D  -- Toggle debugging")
-    plotf(30,  60, "U  -- Toggle usage")
-    plotf(30,  45, "Arrow keys -- Control the blue robot")
+  { drawf(30, 165, "H -- Toggle help information")
+    drawf(30, 150, "Q -- Quit")
+    drawf(30, 135, "X -- Enter the debugger")
+    drawf(30, 120, "P -- Pause/Continue")
+    drawf(30, 105, "G -- Close the grabber of the Dark green robot")
+    drawf(30,  90, "R -- Open the grabber of the Dark green robot")
+    drawf(30,  75, "D -- Toggle debugging")
+    drawf(30,  60, "U -- Toggle usage")
+    drawf(30,  45, "W -- Write debugging info")
+    drawf(30,  30, "Arrow keys -- Control the dark green robot")
   }
 
   setcolour(maprgb(255,255,255))
   
-
   IF displayusage DO
-    plotf(30, 245, "CPU usage = %i3%% sps = %n", usage, sps)
-
+    drawf(30, 345, "CPU usage = %i3%% sps = %n", usage, sps)
+//updatescreen()
+//abort(803)
   IF debugging DO
   { LET r = robotv!1
-    LET b = bottlev!1
-    plotf(30, 220, "Robot1  x=%10.5d  y=%10.5d xdot=%10.5d  ydot=%10.5d",
+    LET sb = r!r_bottle
+    LET b = bottlev!0 -> bottlev!1, 0
+    drawf(80, 120, "R1: x=%8.3d y=%8.3d xdot=%8.3d ydot=%8.3d",
           r!r_cgx, r!r_cgy, r!r_cgxdot, r!r_cgydot)
-    plotf(30, 205, " costheta=%10.5d       sintheta=%10.5d",
-          r!r_costheta, r!r_sintheta)
-    plotf(30, 175, "    grabpos=%10.5d       grabposdot=%10.5d",
-          r!r_grabpos, r!r_grabposdot)
-    plotf(30, 160, "Bottle1 x=%10.5d  y=%10.5d xdot=%10.5d  ydot=%10.5d",
-          b!b_cgx, b!b_cgy, b!b_cgxdot, b!b_cgydot)
+    IF b DO
+      drawf(80, 105, "B1: x=%8.3d y=%8.3d xdot=%8.3d ydot=%8.3d",
+            b!b_cgx, b!b_cgy, b!b_cgxdot, b!b_cgydot)
+    //drawf(80, 85, "    grabpos=%8.3d       grabposdot=%8.3d",
+    //      r!r_grabpos, r!r_grabposdot)
+    //IF sb DO
+    //  drawf(80, 45, "Selected B%i2 grabbed=%n",
+    //        (sb -> sb!b_id, 0), (sb -> sb!b_grabbed, FALSE))
+//abort(5678)
   }
 }
 
@@ -1074,35 +1425,62 @@ AND processevents() BE WHILE getevent() SWITCHON eventtype INTO
 
   CASE sdle_keydown:
     SWITCHON capitalch(eventa2) INTO
-    { DEFAULT:  LOOP
-
-      CASE 'Q': done := TRUE
+    { DEFAULT:
+      CASE 'H': help := ~help
                 LOOP
 
-      CASE '?':
-      CASE 'H': help := ~help
+
+      CASE 'Q': done := TRUE
                 LOOP
 
       CASE 'D': debugging := ~debugging
                 LOOP
 
+      CASE 'X': sawritef("User requested entry to the debugger*n")
+                sawritef("robotv=%n bottlev=%n*n", robotv, bottlev)
+                abort(9999)
+                LOOP
+
       CASE 'U': displayusage := ~displayusage
+                LOOP
+
+      CASE 'W': sawritef("Bottles      = %n*n", bottles)
+                sawritef("Free bottles = %n*n", freebottles)
+                sawritef("Robots       = %n*n", robots)
+                FOR i = 1 TO bottlev!0 DO
+                { LET b = bottlev!i
+                  UNLESS b LOOP
+                  sawritef("Bottle %i2: ", b!b_id)
+                  IF b!b_robot DO sawritef(" robot  %i2", b!b_robot!r_id)
+                  IF b!b_grabbed DO sawritef(" grabbed")
+                  sawritef("*n")
+                }
+
+                FOR i = 1 TO robotv!0 DO
+                { LET r = robotv!i
+                  UNLESS r LOOP
+                  sawritef("Robot  %i2: ", r!r_id)
+                  IF r!r_bottle DO sawritef(" bottle %i2", r!r_bottle!b_id)
+                  IF r!r_inarea DO sawritef(" bottle in area")
+                  sawritef("*n")
+                }
+
+                abort(1000)
                 LOOP
 
       CASE 'G': // Grab
               { LET r = robotv!1
-                // Close grabber unless a bottle is already grabbed
-                //UNLESS r!r_bottle DO
-                  r!r_grabposdot := -1_00000
+                LET b = r!r_bottle
+                // Start closing unless a bottle is already grabbed
+                UNLESS b & b!b_grabbed DO r!r_grabposdot := -0_600
                 LOOP
               }
 
       CASE 'R': // Release
               { LET r = robotv!1
-                r!r_grabposdot := +1_00000
-//writef("Releasing grabber of robot 1 bottle node %n*n", r!r_bottle)
-//abort(5000)
-                IF r!r_bottle DO releasebottle(r)
+                LET b = r!r_bottle
+                r!r_grabposdot := +0_300
+                IF b & b!b_grabbed DO b!b_grabbed := FALSE
                 LOOP
               }
 
@@ -1115,25 +1493,19 @@ AND processevents() BE WHILE getevent() SWITCHON eventtype INTO
 
       CASE sdle_arrowup:
               { LET r = robotv!1
-                r!r_cgxdot := r!r_cgxdot + 
-                              muldiv(9_00000, r!r_costheta, One)
-                r!r_cgydot := r!r_cgydot + 
-                              muldiv(9_00000, r!r_sintheta, One)
-                setdir(r)
-//writef("costheta=%10.5d sintheta=%10.5d*n", r!r_costheta, r!r_sintheta)
-//abort(5000)
+                LET c = cosines(r!r_cgxdot, r!r_cgydot)
+                LET s = result2
+                r!r_cgxdot := r!r_cgxdot + muldiv(5_000, c, One)
+                r!r_cgydot := r!r_cgydot + muldiv(5_000, s, One)
                 LOOP
               }
 
       CASE sdle_arrowdown:
               { LET r = robotv!1
-                r!r_cgxdot := r!r_cgxdot - 
-                              muldiv(9_00000, r!r_costheta, One)
-                r!r_cgydot := r!r_cgydot -
-                              muldiv(9_00000, r!r_sintheta, One)
-                setdir(r)
-//writef("costheta=%10.5d sintheta=%10.5d*n", r!r_costheta, r!r_sintheta)
-//abort(5000)
+                LET c = cosines(r!r_cgxdot, r!r_cgydot)
+                LET s = result2
+                r!r_cgxdot := r!r_cgxdot - muldiv(4_000, c, One)
+                r!r_cgydot := r!r_cgydot - muldiv(4_000, s, One)
                 LOOP
               }
 
@@ -1145,7 +1517,6 @@ AND processevents() BE WHILE getevent() SWITCHON eventtype INTO
                 LET ds  = sine(4_000)
                 r!r_cgxdot := inprod(xdot,ydot, dc, ds)
                 r!r_cgydot := inprod(xdot,ydot,-ds, dc)
-                setdir(r)
                 LOOP
               }
 
@@ -1157,7 +1528,6 @@ AND processevents() BE WHILE getevent() SWITCHON eventtype INTO
                 LET ds  = - sine(4_000)
                 r!r_cgxdot := inprod(xdot,ydot, dc, ds)
                 r!r_cgydot := inprod(xdot,ydot,-ds, dc)
-                setdir(r)
                 LOOP
               }
     }
@@ -1168,59 +1538,82 @@ AND processevents() BE WHILE getevent() SWITCHON eventtype INTO
     LOOP
 }
 
-AND nearedge(x, y, size) = VALOF
-{ size := 8*size
-
-//  writef("nearedge: x=%n y=%n size=%n xsize**One=%n ysize**One=%n*n",
-//         x, y, size, xsize*One, ysize*One)
-//abort(1000)
-  UNLESS size < x < xsize*One - size  RESULTIS TRUE
-  UNLESS size < y < ysize*One - size  RESULTIS TRUE
-//writef("=> TRUE*n")
+AND nearedge(x, y, dist) = VALOF
+{ //writef("nearedge: x=%n y=%n dist=%n xsize=%n ysize=%n*n",
+  //        x/One, y/One, dist/One, xsize, ysize)
+//abort(2000)
+  UNLESS dist < x < xsize*One - dist  RESULTIS TRUE
+  UNLESS dist < y < ysize*One - dist  RESULTIS TRUE
+//writef("=> FALSE*n")
+//abort(2001)
   RESULTIS FALSE
 }
 
-AND nearpit(x, y, size) = VALOF
+AND nearthepit(x, y, dist) = VALOF
 { LET cx = pit_x
-  LET cy = pit_y //ysize*One/2
+  LET cy = pit_y
   LET dx = ABS(x - cx)
   LET dy = ABS(y - cy)
-  size := size + pitradius
-  IF dx < size | dy < size RESULTIS TRUE
+//writef("nearthepit: x=%n y=%n cx=%n cy=%n dist=%n*n",
+//        x/One, y/One, cx/One, cy/One, dist/One)
+//abort(3000)
+  IF dx < dist & dy < dist RESULTIS TRUE
+//writef("=> FALSE*n")
+//abort(3001)
   RESULTIS FALSE
 }
 
-AND nearbottle(x, y, size) = VALOF
-{ size := 2*(size + bottleradius)
-  FOR i = 1 TO bottlev!0 DO
-  { LET b = bottlev!i
-    LET bx = b!b_cgx
-    LET by = b!b_cgy
-    LET dx = ABS(x - bx)
-    LET dy = ABS(y - by)
-//writef("nearbottle: i=%i2 x=%n y=%n bx=%n by=%n size=%n*n", i, x, y, bx, by, size)
-    IF dx+dy < size RESULTIS TRUE
-  }
+AND nearbottle(x, y, b, dist) = VALOF
+{ // Return TRUE if (x,y) is near bottle b.
+  // (x,y) is the position of either a robot or a bottle.
+  LET bx = b!b_cgx
+  LET by = b!b_cgy
+  LET dx = ABS(x - bx)
+  LET dy = ABS(y - by)
+//writef("nearbottle: bid=%n x=%n y=%n bx=%n by=%n dx+dy=%n dist=%n*n",
+//        b!b_id, x/One, y/One, bx/One, by/One, (dx+dy)/One, dist/One)
+//abort(4000)
+  IF dx < dist & dy < dist RESULTIS TRUE
+
 //writef("=>FALSE*n")
-//abort(1000)
+//abort(4001)
+  RESULTIS FALSE
+
+}
+
+AND nearanybottle(bid, x, y, dist) = VALOF
+{ // Return TRUE if (x,y) near a bottle other than bottle bid
+  // If bid=0, (x,y) is the position of a robot.
+  FOR i = 1 TO bottlev!0 UNLESS i=bid IF nearbottle(x, y, bottlev!i, dist)
+     RESULTIS TRUE
   RESULTIS FALSE
 }
 
-AND nearrobot(x, y, size) = VALOF
-{ size := 2*(size + robotradius)
+AND nearrobot(x, y, r, dist) = VALOF
+{ // Return TRUE if (x,y) is near robot r.
+  // (x,y) is the position of either a robot or a bottle.
+  LET rx = r!r_cgx
+  LET ry = r!r_cgy
+  LET dx = ABS(x - rx)
+  LET dy = ABS(y - ry)
+//sawritef("nearrobot: rib=%i2 x=%n y=%n rx=%n ry=%n dx+dy=%n dist=%n*n",
+//          r!r_id, x/One, y/One, rx/One, ry/One, (dx+dy)/One, dist/One)
+//abort(5000)
+  IF dx < dist & dy < dist RESULTIS TRUE
+
+//sawritef("=>FALSE*n")
+//abort(5001)
+  RESULTIS FALSE
+}
+
+AND nearanyrobot(rid, x, y, dist) = VALOF
+{ // Return TRUE if (x,y) near a robot other than robot rid
+  // If rid=0, (x,y) is the position of a bottle.
   FOR i = 1 TO robotv!0 DO
-  { LET r = robotv!i
-    LET rx = r!r_cgx
-    LET ry = r!r_cgy
-    LET dx = ABS(x - rx)
-    LET dy = ABS(y - ry)
-//writef("nearrobot: i=%i2 x=%n y=%n bx=%n by=%n size=%n*n", i, x, y, bx, by, size)
-    IF dx+dy < size RESULTIS TRUE
-  }
-//writef("=>FALSE*n")
-//abort(1000)
+    UNLESS i=rid IF nearrobot(x, y, robotv!i, dist) RESULTIS TRUE
   RESULTIS FALSE
 }
+
 
 LET start() = VALOF
 { LET argv = VEC 50
@@ -1228,18 +1621,23 @@ LET start() = VALOF
   LET comptime  = 0 // Amount of cpu time per frame
   LET day, msecs, filler = 0, 0, 0
   //datstamp(@day)
-  seed := msecs     // Set seed based on time of day
+  seed := 5 //msecs       // Set seed based on time of day
   //msecs0 := msecs   // Set the starting time
   //msecsnow := 0
 
-  UNLESS rdargs("-b/n,-r/n,-sx/n,-sy/n,-s/n",
+  UNLESS rdargs("-b/n,-r/n,-sx/n,-sy/n,-s/n,-d/s",
                 argv, 50) DO
   { writef("Bad arguments for robots*n")
     RESULTIS 0
   }
 
-  bottles := 40
-  robots  := 7
+  bottles := 35
+  robots  :=  7
+  //bottles := 20
+  //robots  :=  6
+  //bottles := 1
+  //robots  := 1
+
   xsize   := 700
   ysize   := 500
 
@@ -1248,12 +1646,17 @@ LET start() = VALOF
   IF argv!2 DO xsize   := !(argv!2) // -sx/n
   IF argv!3 DO ysize   := !(argv!3) // -sy/n
   IF argv!4 DO seed    := !(argv!4) // -s/n
+  debugging := argv!5               // -d/s
 
-  IF bottles <   1 DO bottles :=   1
+  help := FALSE
+
+  IF bottles <   0 DO bottles :=   0
   IF bottles > 100 DO bottles := 100
   IF robots  <   1 DO robots  :=   1
   IF robots  >  30 DO robots  :=  30
 
+  freebottles := bottles
+  bottlecount := bottles
   setseed(seed)
 
   UNLESS sys(Sys_sdl, sdl_avail) DO
@@ -1278,14 +1681,15 @@ LET start() = VALOF
     LET p = @x
     FOR dy = 0 TO One BY One/100 DO
     { ydot := dy
-      setdir(p)
-      rsq := inprod(c,c, s,s)
-      writef("dx=%9.5d  dy=%9.5d cos=%9.5d sin=%9.5d rsq=%9.5d*n",
+      c := cosines(xdot, ydot)
+      s := result2
+      rsq := inprod(c,s, c,s)
+      writef("dx=%8.3d  dy=%8.3d cos=%8.3d sin=%8.3d rsq=%8.3d*n",
               One, dy, c, s, rsq)
       IF e1 < rsq DO e1 := rsq
       IF e2 > rsq DO e2 := rsq
     }
-    writef("Errors +%7.5d  -%7.5d*n", e1-One, One-e2)
+    writef("Errors +%7.3d  -%7.3d*n", e1-One, One-e2)
 abort(1000)
     RESULTIS 0
   }
@@ -1295,16 +1699,28 @@ abort(1000)
   priqn, priqupb := 0, 200
 
   initsdl()
-  mkscreen("Robots", xsize, ysize)
+  mkscreen("Robots -- Press H for Help", xsize, ysize)
 
-  backcolour      := maprgb(120,120,120)
+  backcolour      := maprgb(100,100,100)
   col_red         := maprgb(255,  0,  0)
+  col_darkred     := maprgb(196,  0,  0)
   col_black       := maprgb(  0,  0,  0)
   col_brown       := maprgb(100, 50, 20)
+  col_gray1       := maprgb(110,110,110)
+  col_gray2       := maprgb(120,120,120)
+  col_gray3       := maprgb(130,130,130)
+  col_gray4       := maprgb(140,140,140)
   pitcolour       := maprgb( 20, 20,100)
   robotcolour     := maprgb(  0,255,  0)
   robot1colour    := maprgb(  0,120, 40)
-  grabcolour      := maprgb(200,200, 40)
+  grabbercolour   := maprgb(200,200, 40)
+//abort(1000)
+  bottlesurfRok  := initbottlesurf(col_red,     @bottlesurfR)
+  bottlesurfDRok := initbottlesurf(col_darkred, @bottlesurfDR)
+  bottlesurfKok  := initbottlesurf(col_black,   @bottlesurfK)
+  bottlesurfBok  := initbottlesurf(col_brown,   @bottlesurfB)
+  pitsurfok      := initpitsurf(pitcolour,      @pitsurf)
+//abort(1000)
 
   pit_x, pit_y := xsize*One/2, ysize*One/2
   pit_xdot, pit_ydot := 0, 0
@@ -1318,32 +1734,49 @@ abort(1000)
     LET x = ?
     LET y = ?
 
+    UNLESS r DO
+    { sawritef("More space needed*n")
+      abort(999)
+    }
+
+    FOR j = 0 TO r_upb DO r!j := 0
+
+    FOR k = 1 TO 200 DO
     { x := randno(xsize*One)
       y := randno(ysize*One)
       UNLESS nearedge (x, y, robotradius) |
-             nearpit  (x, y, robotradius) |
-             nearrobot(x, y, robotradius) BREAK
-    } REPEAT
+             nearthepit  (x, y, pitradius+2*robotradius) |
+             nearanyrobot(i, x, y, 3*robotradius) BREAK
+//writef("R%i2: x=%8.3d y=%8.3d no good*n", i, x, y)
+//abort(1000)
+      IF k>150 DO
+      { writef("Too many robots to place*n")
+        abort(999)
+      }
+    }
+
+writef("R%i2: x=%8.3d y=%8.3d good*n", i, x, y)
+//abort(1005)
 
     robotv!0 := i
     robotv!i := r
+
     // Position
     r!r_cgx        := x
     r!r_cgy        := y
+
     // Motion
-    r!r_cgxdot     := randno(40_00000) - 20_00000
-    r!r_cgydot     := randno(40_00000) - 20_00000
-    r!r_costheta   := cosines(r!r_cgxdot, r!r_cgydot)
-    r!r_sintheta   := result2
+    r!r_cgxdot     := randno(40_000) - 20_000
+    r!r_cgydot     := randno(40_000) - 20_000
+
     // grabber
-    r!r_grabpos    := 1_00000   // grabber open
-    r!r_grabposdot := 0_00000
+    r!r_grabpos    := 1_000     // The grabber is fully open
+    r!r_grabposdot := 0_000
     r!r_bottle     := 0         // No grabbed bottle
-    r!r_colour     := i=1 -> robot1colour, robotcolour
     r!r_id := i
     robotcoords(r)
   }
-
+//abort(1001)
   // Initialise bottlev
   bottlev := mkvec(bottles)
   bottlev!0 := 0
@@ -1352,34 +1785,47 @@ abort(1000)
     LET x = ?
     LET y = ?
 
+    UNLESS b DO
+    { sawritef("More space needed*n")
+      abort(999)
+    }
+
+    FOR j = 0 TO b_upb DO b!j := 0
+
+    //FOR k = 1 TO 1000 DO
     { // Choose a random position for the next bottle
       x := randno(xsize*One)
       y := randno(ysize*One)
-      UNLESS nearedge  (x, y, bottleradius) |
-             nearpit   (x, y, bottleradius) |
-             nearrobot (x, y, robotradius)  |
-             nearbottle(x, y, bottleradius) BREAK
+//sawritef("Calling nearedge*n")
+      UNLESS nearedge  (x, y, 4*bottleradius) |
+             nearthepit(x, y, 4*bottleradius) |
+             nearanyrobot (0, x, y, 2*robotradius)  |
+             nearanybottle(i, x, y, 4*bottleradius) BREAK
+      //IF k > 200 DO
+      //{ writef("Too many bottles to place*n")
+      //  abort(999)
+      //  BREAK
+      //}
     } REPEAT
 
     bottlev!0   := i
     bottlev!i   := b
     b!b_cgx     := x
     b!b_cgy     := y
-    b!b_cgxdot  := randno(50_00000) - 25_00000
-    b!b_cgydot  := randno(50_00000) - 25_00000
+    b!b_cgxdot  := randno(50_000) - 25_000
+    b!b_cgydot  := randno(50_000) - 25_000
     b!b_grabbed := FALSE
     b!b_robot   := 0         // No grabbing robot
     b!b_dropped := FALSE
     b!b_id      := i
   }
-
-  help := FALSE //TRUE
+//abort(1002)
 
   stepping := TRUE     // =FALSE if not stepping
   usage := 0
-  debugging := FALSE
+  //debugging := FALSE
   displayusage := FALSE
-  sps := 40 // Initial setting
+  sps := 10 // Initial setting
   stepmsecs := 1000/sps
 
   wall_wx := 0
@@ -1388,24 +1834,26 @@ abort(1000)
   wall_sy    := 0                     // South wall
   wall_ny := (screenysize-1)*One      // North wall
 
-// Lots of initialisation ####################################
-  bottlesurfR := 0
-  bottlesurfK := 0
-  bottlesurfB := 0
-  pitsurf := 0
-
   done := FALSE
 
+//{ LET r1, r2 = robotv!1, robotv!2
+//r1!r_cgx, r1!r_cgy := 400_000,               100_000
+//r2!r_cgx, r2!r_cgy := 400_000+robotradius*5, 100_000+00_000
+//r1!r_cgxdot, r1!r_cgydot := 10_000,            0_000
+//r2!r_cgxdot, r2!r_cgydot := 0,                -1_000
+//}
+
+//abort(1003)
   UNTIL done DO
   { LET t0 = sdlmsecs()
     LET t1 = ?
 
-
     processevents()
 
     IF stepping DO step()
-
+//abort(922)
     usage := 100*comptime/stepmsecs
+
     plotscreen()
     updatescreen()
 
@@ -1413,6 +1861,7 @@ abort(1000)
     { TEST usage>90
       THEN sps := sps-1
       ELSE sps := sps+1
+      IF sps<1 DO sps := 1 // To stop division by zero
       stepmsecs := 1000/sps
     }
 
@@ -1425,121 +1874,15 @@ abort(1000)
   writef("*nQuitting*n")
   sdldelay(0_200)
 
-  IF bottlesurfR DO freesurface(bottlesurfR)
-  IF bottlesurfK DO freesurface(bottlesurfK)
-  IF bottlesurfB DO freesurface(bottlesurfB)
-  IF pitsurf     DO freesurface(pitsurf)
+  IF bottlesurfR  DO freesurface(@bottlesurfR)
+  IF bottlesurfDR DO freesurface(@bottlesurfDR)
+  IF bottlesurfK  DO freesurface(@bottlesurfK)
+  IF bottlesurfB  DO freesurface(@bottlesurfB)
+  IF pitsurf      DO freesurface(@pitsurf)
 
   closesdl()
 
+fin:
   IF spacev DO freevec(spacev)
   RESULTIS 0
 }
-
-// ################### Priority Queue functions ######################
-
-AND prq() BE
-{ FOR i = 1 TO priqn DO writef(" %i4", priq!i!0)
-  newline()
-}
-
-AND insertevent(event) BE
-{ priqn := priqn+1        // Increment number of events
-  upheap(event, priqn)
-}
-
-AND upheap(event, i) BE
-{ LET eventtime = event!0
-
-  { LET p = i/2           // Parent of i
-    UNLESS p & eventtime < priq!p!0 DO
-    { priq!i := event
-      RETURN
-    }
-    priq!i := priq!p      // Demote the parent
-    i := p
-  } REPEAT
-}
-
-AND downheap(event, i) BE
-{ LET j, min = 2*i, ? // j is left child, if present
-
-  IF j > priqn DO
-  { upheap(event, i)
-    RETURN
-  }
-  min := priq!j!0
-  // Look at other child, if it exists
-  IF j<priqn & min>priq!(j+1)!0 DO j := j+1
-  // promote earlier child
-  priq!i := priq!j
-  i := j
-} REPEAT
-
-AND getevent1() = VALOF
-{ LET event = priq!1        // Get the earliest event
-  LET last  = priq!priqn    // Get the event at the end of the heap
-  UNLESS priqn>0 RESULTIS 0 // No events in the priority queue
-  priqn := priqn-1          // Decrement the heap size
-  downheap(last, 1)         // Re-insert last event
-  RESULTIS event
-}
-
-AND waitfor(msecs) BE
-{ // Make an event item into the priority queue
-  LET eventtime, co = msecsnow+msecs, currco
-  insertevent(@eventtime)   // Insert into the priority queue
-  cowait()                  // Wait for the specified time
-}
-
-// ###################### Queueing functions #########################
-/*
-AND prwaitq(node) BE
-{ LET p = wkqv!node
-  IF -1 <= p <= 0 DO { writef("wkq for node %n: %n*n", node, p); RETURN }
-  writef("wkq for node %n:", node)
-  WHILE p DO
-  { writef(" %n", p!1)
-    p := !p
-  }
-  newline()
-}
-
-AND qitem(node) BE
-{ // Make a queue item
-  LET link, co = 0, currco
-  LET p = wkqv!node
-  UNLESS p DO
-  { // The node was not busy
-    wkqv!node := -1  // Mark node as busy
-    IF tracing DO
-      writef("%i8: node %i4: node not busy*n", simtime, node)
-    RETURN
-  }
-  // Append item to the end of this queue
-  IF tracing DO
-    writef("%i8: node %i4: busy so appending message to end of work queue*n",
-            simtime, node)
-  TEST p=-1
-  THEN wkqv!node := @link     // Form a unit list
-  ELSE { WHILE !p DO p := !p  // Find the end of the wkq
-         !p := @link          // Append to end of wkq
-       }
-  cowait() // Wait to be activated (by dqitem)
-}
-
-AND dqitem(node) BE
-{ LET item = wkqv!node // Current item (~=0)
-  UNLESS item DO abort(999)
-  TEST item=-1
-  THEN wkqv!node := 0                  // The node is no longer busy
-  ELSE { LET next = item!0
-         AND co   = item!1
-         wkqv!node := next -> next, -1 // De-queue the item
-         callco(co)                    // Process the next message
-       }
-}
-*/
-
-
-

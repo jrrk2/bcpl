@@ -1,12 +1,15 @@
 // This is the BCPL to Cintcode compiler
 
-// Implemented by Martin Richards (c) May 2009
+// Implemented by Martin Richards (c) Oct 2021
 
-// Note: ../cintcode/ is used so that the compiler can be
-// compiled in a directory parallel to cintcode (such as natbcpl).
+// The compiler is now compiled as three sections.
 
-GET "../cintcode/com/bcplfe.b"
+GET "com/bcplsyn.b"
 
 .
 
-GET "../cintcode/com/bcplcgcin.b"
+GET "com/bcpltrn.b"
+
+.
+
+GET "com/bcplcgcin.b"

@@ -5,44 +5,95 @@ for computing the dominator tree of a flowgraph.
 This implementation compares the efficiency of three different
 implementations of eval and link.
 
-Ref:
+Implemented in BCPL by Martin Richards (c) April 2001
+
+Revised: 18 July 2017
+
+References:
+
 Lengauer,T. and Tarjan R.E.
 A Fast Algorithm for Finding Dominators in a Flowgraph.
 ACM Trans on Programming Languages and Systems, Vol 1, No. 1, July 1979.
+From now on called LT79.
+
+Tarjan R.E.
+Applications of path Compression on Balanced Trees
+Journal of the ACM, Vol 26, No 4 October 1979, pp 690-715
+From now on called T79
+This paper helps to explain how the sophicated version of 
+LINK in LT79 works.
 
 Also influenced by
 Muchnick, S.S.
 Advanced Compiler Design Implementation
 Morgan Kaufmann Publishers, 1997
 
-Implemented in BCPL by Martin Richards (c) April 2001
+The sophisticated algorithm is better than the O(n log n) one,
+provided the graph is large enough and has at least about 3 times as
+many edges as vertices. If lt is called with no first arguments it
+generates the following output showing the performance in terms of
+Cintcode instructions executions of the three versions of the
+algorithm when applied to various test graphs.
 
-The sophisticated algorithm is better than the O(n log n) one, provided
-the graph is large enough and has at least about 3 times as many edges as
-vertices. Try the calls:
 
-Call                              Instruction Counts
-    Nodes   Edges Seed     v.simple     simple   sophisticated
+                                  Instruction Counts
+ Nodes    Edges  Seed     v.simple    simple  sophisticated
 
-lt   1000    1500   1       311671      285439       328346
-lt   1000    2000   1       543460      333994       369395
-lt   1000    2500   1      1568707      398925       404413
-lt   1000    3000   1      3357486      473709       434642
-lt   1000    5000   1      7942067      675828       570509
-lt   1000   10000   1     18072476     1131823       905586
-lt  10000   50000   1    475843115     7083489      5736513
-lt  10000  100000   1   1353711323    11785784      9103018
-lt 100000  400000   1            -    60774694     51198153
+  1000     1500    1        284778    272290         321548
+  1000     2000    1        455077    317213         358242
+  1000     2500    1       1180615    376591         388715
+  1000     3000    1       2440693    444899         416557
+  1000     5000    1       5680715    630141         542019
+  1000    10000    1      12848321   1048970         850534
+ 10000    50000    1     334314578   6613341        5431447
+ 10000   100000    1     949582133  10926989        8540733
+100000   400000    1             -  56924002       48580972
 
-lt 100000  123289   1 f          -    26591295     33179341
+100000   123289    1 f    24591918  25380331       32042009
 
 For the last few I entered the interpreter by:
 
-       cintsys -m 200000
+       cintsys -m 40000000
 
-and obeyed the command:
+and executed after obeying the command:
 
-       stack 200000
+       stack 500000
+
+In LT79, vertices of the given flow graph are represented by vertex
+numbers which are subscripts of various arrays that hold values
+associated with each vertex.  The arrays are called semi, ancestor,
+label, child, size, parent, pred, succ, bucket and vertex. The number
+of vertices is given by n and all arrays have subscripts ranging from
+1 to n except label, semi and size that range from zero to n. Most of
+these fields hold vertex numbers but the semi field holds the discovery
+time of the semi dominator. vertex(semi(v)) will yield the vertex
+number of the semi dominator when needed. The elements of vertex are
+set by the depth first search function dfs. If i is the DFS discovery
+time of vertex number v, then vertex(i)=v. The elements label(0),
+semi(0) and size(0) are each set to zero. This simplifies the
+treatment of special cases in the program.
+
+In this BCPL implementation, vertices are represented by pointers to
+vertex nodes that have fields holding information about each vertex.
+If v points to a vertex node then Id!v, Parent!v, Dom!v, Semi!v,
+Ancestor!v, Best!v, Succ!v, Pred!v, Bucket!v and Size!v hold the
+values associated with the vertex. In LT79 succ, pred and bucket are
+possibly empty sets of vertex numbers. In the BCPL version, these are
+implemented as lists. If p points to an element in such a list, p!0
+points to the next element of the list and p!1 is the pointer to a
+vertex node. A null pointer is represented by zero. In the BCPL
+version, the label values use the selector Best. The three fields
+size, label and semi require special treatment.
+
+size(v)  inLT79 is implemented in BCPL by v -> Size!v, 0
+label(v) inLT79 is implemented in BCPL by v -> Best!v, 0
+semi(v)  inLT79 is implemented in BCPL by v -> Semi!v, 0
+
+Just as in LT79 care is needed to distinquish between the vertex
+number as supplied in the given flow graph and its discovery time,
+both are in the range 1 to n. Note that semi(v) yields a discovery
+time not a vertex number.
+
 */
 
 GET "libhdr"
@@ -50,36 +101,53 @@ GET "libhdr"
 MANIFEST {
 
 // Structure of a node
-Id=0     // DFS discovery time -- used as id in the algorithm
-Parent   // DFS tree parent
-Dom      // Immediate dominator
-Semi     // Semi dominator
-Ancestor // Set in link and used in eval
-Best     // The node in the ancestor tree with min sdom
-Succ     // List of successors
-Pred     // List of predecessors
-Bucket   // List of nodes whose semidominators are this node
-Size
-Child
-NodeSize
+
+// node -> [id,parent,dom,semi,ancestor,best,succ,pred,bucket,size,child]
+
+Id=0     // DFS discovery time of this vertex.
+Parent   // DFS tree parent vertex. For the root node this field is zero.
+Dom      // Immediate dominator -- the closest node to this node
+         // that is on every path from the root to this node.
+         // For the root node this field is zero.
+Semi     // The discovery time of the semi dominator vertex.
+         // The semi dominator vertex is the vertex with the earliest
+         // discovery time that has a path to this node only passing
+         // through vertices with later discovery times than this node.
+Ancestor // Set by link and used in eval.
+Best     // Pointer to the node in the ancestor path having a
+         // semidominator with earliest discovery time. 
+Succ     // List of immediate successors of this node in the
+         // given flow graph.
+Pred     // List of immediate predecessors of this node in the
+         // given flow graph. This list is created by dfs.
+Bucket   // List of vertices whose semi dominators are this vertex.
+
+// The following two fields are only used in the sophisticated version
+// of LINK and EVAL. They are only valid in root vertices of trees in
+// the forest.
+Size     // The total number of nodes in the tree rooted at this node and
+         // all those in the child chain.
+Child    // Next node in the child chain.
+
+NodeSize // The number of fields in a vertex node.
 NodeUpb=NodeSize-1
 }
 
 GLOBAL {
-vertex:ug       // Vector of nodes in dfs order
+vertex:ug       // Vector of vertex nodes in dfs order
 
 root            // Root of the flow graph
-nodes           // Number of nodes in the graph
-edges           // Number of edges in the graph
+nodes           // The number of nodes in the graph
+edges           // The number of edges in the graph
 
 newvec; initspace; freespace; mkNode; mk2; freelist
 dfs
 eval; link
-dominators      // set the dom field of each node to
-                // its immediate dominator
-edge            // add an edge when building a graph
+dominators      // Set the dom field of each node to
+                // its immediate dominator.
+edge            // Add an edge when building a graph
 mkdefaultgraph1 // make the default graph as in the paper
-mkdefaultgraph2 // make the default graph as in the paper
+mkdefaultgraph2 // make the another simple graph.
 mkgraph         // make a random flow graph
 prnodes
 prstruct
@@ -87,8 +155,8 @@ hashgraph
 hashtree
 prevhash
 
-spacev; spacep; spacet  // Pointers in the free space
-mk2list                 // free list of mk2 nodes
+spacev; spacep; spacet  // Pointers in the free space.
+mk2list                 // The free list of mk2 nodes.
 debug                   // debug flag
 flow                    // flow flag
 loadp
@@ -110,6 +178,7 @@ LET newvec(upb) = VALOF
 
 LET initspace(nodes, edges) BE
 { LET upb = nodes*(NodeSize + 2) + edges*5 + 2
+  // Allocate a generous amount of space for the given problem.
   spacev := getvec(upb)
   spacet := spacev+upb
   spacep := spacet
@@ -125,21 +194,25 @@ LET initspace(nodes, edges) BE
 }
 
 LET freespace() BE
-{ freevec(spacev)
+{ IF debug DO
+    writef("*nSpace used %n out of %n*n", spacet-spacep, spacet-spacev)
+  freevec(spacev)
   freevec(vertex)
 }
 
 LET mkNode() = VALOF
-{ LET p = newvec(NodeUpb)
+{ // Only used when creating test graphs for the dominator function.
+  LET p = newvec(NodeUpb)
   UNLESS p DO { writef("Out of space*n"); abort(999) }
   FOR i = 0 TO NodeUpb DO p!i := 0
   nodes := nodes+1
-  Id!p := nodes
+  // These values in vertex will all be be changed when dfs runs. 
   vertex!nodes := p
 }
 
 AND mk2(x, y) = VALOF
-{ LET p = mk2list
+{ // Create a list element [x,y] using the free list if possible.
+  LET p = mk2list
   TEST p THEN mk2list := !p
          ELSE p := newvec(1)
   !p, p!1 := x, y
@@ -147,233 +220,345 @@ AND mk2(x, y) = VALOF
 }
 
 AND freelist(p) BE
-{ LET rest = mk2list
+{ // Put the elements of list p into the free list.
+  LET rest = mk2list
   mk2list := p
   WHILE !p DO p := !p
   !p := rest
 }
 
+// dfs is a translation of DFS defined on page 139 of LT79,
+// slightly modified to count the number of edges in the
+// flow graph.
+
 LET dfs(v) BE  // DFS on previously unseen vertex v
-{ LET p = Succ!v
+{ // When first entered v is the root and
+  // nodes=0 and edges=0.
+  // When dfs completes the Semi field of every vertex will hold
+  // its discoery time.
+  LET p = Succ!v // List of successor vertices
   nodes := nodes+1
-  vertex!nodes := v      // vertex holds nodes in discovery time order
-  Id!v         := nodes  // Set the discovery time of this node
-  Semi!v       := v      // Initialise semi
+  vertex!nodes := v      // vertex holds pointers to vertex nodes
+                         // in discovery time order.
+  Id!v         := nodes  // This holds the discovery time of this node.
+  Semi!v       := nodes  // Initialise semi to the discovery time.
   Best!v       := v      //            best
   Ancestor!v   := 0      // and        ancestor
   Child!v      := 0
   Size!v       := 1
 
-  WHILE p DO         // Apply DFS to all unseen successors
-  { LET w = p!1      // w = a successor
+  WHILE p DO         // Apply DFS to all unseen successors.
+  { LET w = p!1      // w ia a successor of v
     p := !p
-    UNLESS Semi!w DO
-    { Parent!w := v  // Put edge into the DFS spanning tree
-      dfs(w)
+    UNLESS Semi!w DO // Semi!w=0 if w has not yet been visited, so
+    { Parent!w := v  // set its Parent field
+      dfs(w)         // and apply dfs to it.
     }
-    Pred!w := mk2(Pred!w, v) // Add v to list of predecessors
-    edges := edges+1
+    Pred!w := mk2(Pred!w, v) // Add v to list of predecessors of w.
+    edges := edges+1         // Count the number of edges so far.
   }
 }
 
-// The very simple version of eval and link
+AND compress(v) BE
+{ // Make all the Ancestor fields in the Ancestor path point to
+  // its root, and update every Best field appropriately, ie make
+  // each point to the vertex in the Ancestor chain with a
+  // semi dominator having the earliest discovery time.
+  LET a = Ancestor!v
+  UNLESS Ancestor!a RETURN // We can only compress paths of length 2 or more.
+  compress(a)
+  IF Semi!(Best!a) < Semi!(Best!v) DO Best!v := Best!a
+  Ancestor!v := Ancestor!a
+}
+
+// The very simple version of eval and link not using
+// compression or tree balancing.
 
 AND eval1(v) = VALOF
-{ LET a = Ancestor!v
-//writef("eval1: v=%n a=%n*n", v, a)
-  UNLESS a RESULTIS v
+{ // Return the pointer to the node in the Ancestor chain having
+  // semi dominator with the earliest discovery time. The Ancestor
+  // chain will eventually be a path from v to the semidominator
+  // of v. In the unoptimised version, eval follows the Ancestor
+  // chain (which are all DFS parent links) from v to the
+  // semidominator. In optimised versions of eval, the length of
+  // the Ancestor chain is reduced by bypassing vertices whose
+  // semidominators have discovery times that are too large.
+
+  LET a = Ancestor!v
+  UNLESS a DO
+  { RESULTIS v
+  }
   WHILE Ancestor!a DO
-  { IF Id!(Semi!v) > Id!(Semi!a) DO v := a
+  { IF Semi!v > Semi!a DO v := a
     a := Ancestor!a
   }
   RESULTIS v
 }
   
 AND link1(v, w) BE
-{ IF debug DO writef("link1: %n --> %n*n", Id!v, Id!w)
+{ // v will be the DFS parent of w.
+  // This function sets the ancestor link from w to v.
+
   Ancestor!w := v
 }
 
-// The Simple version of compress, eval and link
-// using compression but no balancing
-AND compress2(v) BE
-{ LET a = Ancestor!v
-  UNLESS Ancestor!a RETURN
-  compress2(a)
-  IF Id!(Semi!(Best!a)) < Id!(Semi!(Best!v)) DO Best!v := Best!a
-  Ancestor!v := Ancestor!a
-}
+// The Simple version of eval and link
+// using compression but no tree balancing.
 
 AND eval2(v) = VALOF
-{ IF Ancestor!v DO compress2(v)
+{ // Only call compress if v has an ancestor.
+  UNLESS Ancestor!v RESULTIS v
+  compress(v)
   RESULTIS Best!v
 }
 
 AND link2(v, w) BE
-{ IF debug DO writef("link2: %n --> %n*n", Id!v, Id!w)
+{ // Same as link1
   Ancestor!w := v
 }
 
-// The Sophisticated version of compress, eval and link
-// using compression and balancing
+// The Sophisticated version of eval and link
+// using compression and tree balancing.
 
-AND compress3(v) BE
-{ LET a = Ancestor!v
-  UNLESS Ancestor!a RETURN
-  compress3(a)
-  IF Id!(Semi!(Best!a)) < Id!(Semi!(Best!v)) DO Best!v := Best!a
-  Ancestor!v := Ancestor!a
-}
-
-AND eval3(v) = VALOF
-{ LET a, b = ?, ?
+AND eval3(v) = VALOF // Based on EVAL in p140 of the LT67 paper.
+{ // Note that the field Best is called label in the LT67 paper.
+  // This seems to be ok.
+  LET a, b = ?, ?
   UNLESS Ancestor!v RESULTIS Best!v
-  compress3(v)
+  compress(v)
   a, b := Best!(Ancestor!v), Best!v
-  RESULTIS Id!(Semi!a) < Id!(Semi!b) -> a, b
+  // Return the pointer to the vertex having the earlier discovery time.
+  RESULTIS Semi!a < Semi!b -> a, b
 }
 
 AND link3(v, w) BE
-{ LET s = ?
-  LET c = Child!w
+{ // Note that the field Best is called label in the LT67 paper.
+  // This function is a translation of LINK on p140 of
+  // the LT67 paper.
+  // Note that
+  // size(v)  is tranlated as v -> Size!v, 0
+  // label(v) is tranlated as v -> Best!v, 0
+  // semi(v)  is tranlated as v -> Semi!v, 0
+  // When link is called v will be the DFS tree parent of w.
+  // Both v and w are root vertices of forests consisting of
+  // lists of trees linked by child pointers. If we call
+  // semi!(Best!v) the best value of any vertex v, the child
+  // chains have the property that the best values of the
+  // tree roots are monotonically decreasing. Just before
+  // link is called the best value of of w may have been
+  // reduced, so the child chain from w may need correction
+  // to reinstate its monotonicity.
+ 
+  LET s = w
 
-  IF debug DO writef("link3: %n --> %n*n", Id!v, Id!w)
+  { // Vertex w was processed just before this call of link(v, w). 
+    // This may have caused Semi!(Best!w) to be reduced.
+    // The child chain from w may need correction to reinstate
+    // monotonicity.
+    LET cs  = Child!s            // cs   = child(s)
+    LET bcs = cs -> Best!cs, 0   // bcs  = best(child(s))
 
-  IF c & Id!(Semi!(Best!w)) < Id!(Semi!(Best!c)) DO
-  { // Vertex w was processed just before this call link(v, w). 
-    // Id!(Semi!w) may be smaller than the last time link was called.
-    // This affect the validity of the child chain. This is corrected
-    // by the following WHILE loop.
+    TEST cs & 
+         Semi!(Best!w) < Semi!bcs        // bcs=0 only if cs=0
+    THEN { // The child of s exists and the best value of this
+           // vertex is too large so a correction must be made.
+           // This involves combining the first two tree in the
+           // child chain making the root of the larger tree the
+           // root of the combination. The root of the other tree
+           // is given an ancestor link to the new root. The size
+           // of the root is corrected, if necessary, and s made
+           // to point to this root. This operation reduces the
+           // length of the child chain by one. This operation is
+           // repeated by the REPEAT loop until either s has no
+           // child or the best value of s is greater then or
+           // equal to the best value of the child. The whole
+           // process keeps the trees in the forest balanced.
+           LET ccs  = Child!cs           // ccs  = child(child(s))
+           LET ss   = Size!s             // sc   = size(s)
+           LET scs  = Size!cs            // scs  = size(child(s)
+           LET sccs = ccs -> Size!ccs, 0 // sccs = size(child(child(s))
+           // Note that ss       is the size of the forest s.
+           //      and  ss-scs   is the size of the first tree.
+           //      and  scs-sccs is the size of the second tree.
 
-    WHILE c & Child!c & Id!(Semi!(Best!w)) < Id!(Semi!(Best!(Child!c))) DO
-    { // Combine c and cc to form new child of w
-      LET cc  = Child!c           // cc = child(r1)
-      LET ccc = Child!cc          // cc = child(child(r1))
+           TEST ss-scs >= scs-sccs // The first two tree sizes.
+           THEN { // Make s the new root.
+                  Ancestor!cs := s // The first is larger or equal.
+                  Child!s := ccs
+                }
+           ELSE { // Make child!s the new root.
+                  Size!cs := ss    // The second is larger.
+                  Ancestor!s := cs
+                  s := cs
+                }
+         }
+    ELSE { BREAK
+         }
+  } REPEAT
 
-      LET sc = Size!c             // sc   = size(r1)
-      LET scc = Size!cc           // scc  = size(child(r1)
-      LET sccc = 0
-      IF ccc DO sccc := Size!ccc  // sccc = size(child(child(r1))
+  // Correct Best!s if necessary.
+  Best!s := Best!w
 
-      TEST sc - scc >= scc - sccc // Compare the subtree sizes
-      THEN { Ancestor!cc := c;  Child!c := ccc }
-      ELSE { Ancestor!c := cc;  Child!w := cc; Size!cc := sc; c := cc }
-    }
-    Best!c := Best!w
+  // Combine the two forests making v the root and giving 
+  // it the child chain of the smaller forest. The child
+  // chain of the other forest is collapsed by giving all
+  // its vertices anscestor links to v. This mechanism
+  // keeps the forest balanced.
+
+  IF Size!v < Size!w DO
+  { LET t = s
+    s := Child!v
+    Child!v := t
   }
-
-  s := w
-  IF Size!v < Size!w DO { LET t = s; s := Child!v; Child!v := t }
   Size!v := Size!v + Size!w
-  WHILE s DO { Ancestor!s := v; s := Child!s }
-  IF debug DO prforest()
+
+  WHILE s DO
+  { Ancestor!s := v
+    s := Child!s
+  }
 }
 
 AND dominators(r) BE
 { 
-// Step1:
+// Step1:   of the LT69 algorithm
+
+  // Perform a DPS over the flow graph setting the parent
+  // links and predecessor lists of all the vertices.
   nodes, edges := 0, 0
   dfs(r)
-  writef("nodes = %n  edges = %n*n", nodes, edges)
-
-  IF debug DO
-  { writef("Nodes after step1*n")
-    prnodes(nodes)
-  }
+  //writef("nodes = %n  edges = %n*n", nodes, edges)
 
   FOR i = nodes TO 2 BY -1 DO
-  { LET w = vertex!i
-    LET p = Pred!w         // p is the list of predecessors
+  { // Process the nodes in DFS tree reverse pre order.
+    LET w = vertex!i  // w is the node with discovery time i.
+    LET p = Pred!w    // p is the list of predecessors of
+                      // vertex w in the flow graph.
     LET q = ?
 
-// step2:
-//writef("step2 i=%n p=%n*n", i, p)
-//abort(1000)
+// Step2:   of the LT69 algorithm
 
     WHILE p DO
-    { LET v = p!1          // For each predecessor v
-      LET u = eval(v)
-      IF debug DO
-        writef("Step 2:  node %i4  eval(%i4)=%i4*n", Id!w, Id!v, Id!u)
-      IF Id!(Semi!u) < Id!(Semi!w) DO Semi!w := Semi!u
-      p := !p             // look for next predecessor
+    { LET v = p!1      // v is the next predecessor of w.
+      LET u = eval(v)  // u is the vertex with the earliest
+                       //    semidominatorin the Ancestor
+                       //    chain from v.
+
+      IF Semi!u < Semi!w DO
+        Semi!w := Semi!u
+      p := !p          // Look for next predecessor
     }
     // Add w to the Bucket of Semi(w) ready for step 3
-    Bucket!(Semi!w) := mk2(Bucket!(Semi!w), w)
+    // Bucket!t will hold a list of all vertices having
+    // semidominator t 
+    Bucket!(vertex!(Semi!w)) := mk2(Bucket!(vertex!(Semi!w)), w)
 
     p := Parent!w
-    link(p, w)           // add edge (p,w) to the forest
 
-// Step3:
+    link(p, w)         // Add edge (p,w) to the forest
+
+// Step3:   of the LT69 algorithm
 
     q := Bucket!p
 
     WHILE q DO
-    { LET v = q!1 // for each v in bucket(parent(w))
+    { LET v = q!1 // For each v in bucket(parent(w))
       LET u = eval(v)
-      Dom!v := Id!(Semi!u) < Id!(Semi!v) -> u, p
-      IF debug DO writef("Step 3: set Dom(%i4) to %i4*n",
-                                          Id!v,   Id!(Dom!v))
+      Dom!v := Semi!u < Semi!v -> u, p // p is the parent of w
       q := !q
     }
+
     IF Bucket!p DO { freelist(Bucket!p); Bucket!p := 0 }
   }
 
-  IF debug DO
-  { writes("*nNodes after step 3:*n")
-    prnodes(nodes)
-  }
-
-// Step4:
+// Step4:   of the LT69 algorithm
 
   FOR i = 2 TO nodes DO  // Do step 4 -- nodes in dfs order
   { LET w = vertex!i
-    UNLESS Dom!w = Semi!w DO
-    { IF debug DO writef("Step 4: change Dom(%i4) from %i4 to %i4*n",
-                                     Id!w, Id!(Dom!w), Id!(Dom!(Dom!w)))
-      Dom!w := Dom!(Dom!w)
-    }
+    UNLESS Dom!w = vertex!(Semi!w) DO Dom!w := Dom!(Dom!w)
   }
+  // The root has no dominator
   Dom!(vertex!1) := 0
-
-  IF debug DO { writes("*nStep 4: Final result*n"); prres(nodes) }
 }
 
 AND start() = VALOF
-{ LET argv = VEC 50
-  LET seed = setseed(12345)  // get previous seed
-  LET n, e = 0, 0
+{ LET n, e = 0, 0
+  LET format = "NODES/N,EDGES/N,SEED/N,TO/K,D=DEBUG/S,F=FLOW/S"
+  LET seed = setseed(12345)  // Get previous seed
+  LET argv = VEC 50
 
   stdout := output()
   tostream := stdout
   
-  UNLESS rdargs("NODES,EDGES,SEED,TO/K,D=DEBUG/S,F=FLOW/S", argv, 50) DO
+  UNLESS rdargs(format, argv, 50) DO
   { writef("Bad arguments for lt*n")
     RESULTIS 20
   }
 
   debug := FALSE
-  IF argv!0 DO n     := str2numb(argv!0)    // NODES
-  IF argv!1 DO e     := str2numb(argv!1)    // EDGES
-  IF argv!2 DO seed  := str2numb(argv!2)    // SEED
+
+  IF argv!0 DO n     := !argv!0    // NODES/N
+  IF argv!1 DO e     := !argv!1    // EDGES/N
+  IF argv!2 DO seed  := !argv!2    // SEED/N
   IF argv!3 DO
-  { tostream := findoutput(argv!3)          // TO
+  { tostream := findoutput(argv!3) // TO/K
     UNLESS tostream DO
     { writef("trouble with stream %s*n", argv!3)
       RESULTIS 20
     }
   }
-  debug := argv!4                           // DEBUG
-  flow  := argv!5                           // FLOW
+  debug := argv!4                  // DEBUG/S
+  flow  := argv!5                  // FLOW/S
 
-  IF e < n-1 DO e := n-1
+  IF e < n-1 DO e := n-1 // Ensure that there are enough edges.
 
   selectoutput(tostream)
 
-  check(0)             // Inititalise prevhash
-  IF n<=10000 DO try(1, n, e, seed, flow)
-  try(2, n, e, seed, flow)
-  try(3, n, e, seed, flow)
+  TEST argv!0
+  THEN { // Test the algorithms on a user specified graph.
+         check(0)   // Inititalise the previous hash value
+
+         // The very simple version is too slow for graphs with
+         // more than about 200000 edges.
+
+         IF e<200_000 DO try(1, n, e, seed, flow)
+         try(2, n, e, seed, flow)
+         try(3, n, e, seed, flow)
+       }
+  ELSE { // Test the algorithms on a set of graphs.
+         // Check that there is sufficient Cintcode memory and that
+         // the stack is large enough.
+         newline()
+         IF rootnode!rtn_memsize < 40_000_000 DO
+         { writef("The Cintcode memory of %n words is too small.*n",
+                  rootnode!rtn_memsize)
+           writef("Enter the system using: cintsys -m 40000000*n")
+           GOTO fin
+         }
+         IF currco!co_size < 500_000 DO
+         { writef("The stack size of %n words is too small.*n",
+                   currco!co_size)
+           writef("Execute the command: stack 500000*n")
+           writef("before calling lt*n")
+           GOTO fin
+         }
+
+         writef("                                  Instruction*
+                * Counts*n")
+         writef(" Nodes    Edges  Seed     v.simple    simple*
+                *  sophisticated*n*n")
+         trygraph(  1000,   1500, 1, FALSE)
+         trygraph(  1000,   2000, 1, FALSE)
+         trygraph(  1000,   2500, 1, FALSE)
+         trygraph(  1000,   3000, 1, FALSE)
+         trygraph(  1000,   5000, 1, FALSE)
+         trygraph(  1000,  10000, 1, FALSE)
+         trygraph( 10000,  50000, 1, FALSE)
+         trygraph( 10000, 100000, 1, FALSE)
+         trygraph(100000, 400000, 1, FALSE)
+         newline()
+         trygraph(100000, 123289, 1, TRUE)
+         newline()
+       }
 
 fin:
   IF tostream & tostream ~= stdout DO
@@ -405,7 +590,7 @@ AND try(t, n, e, seed, f) BE
             eval, link := eval2, link2
             mess :=  "simple"
             ENDCASE
-    CASE 3: // Very simple version
+    CASE 3: // Sophisticated version
             eval, link := eval3, link3
             mess :=  "sophisticated"
             ENDCASE
@@ -415,24 +600,76 @@ AND try(t, n, e, seed, f) BE
 
   root := newgraph(n, e)
 
-  writef("Finding dominator tree*n")
-  writef("using %s version of eval*n", mess)
+  writef("Finding dominator tree using the %s version of eval*n",
+          mess)
 
-  writef("*n*nInstruction count = %n*n",
-           instrcount(dominators, root))
+  writef("*nInstruction count = %n*n",
+          instrcount(dominators, root))
 
-  FOR i = 1 TO 4 DO // Print a few immediate dominators
-  { LET w = 2*nodes/3 + i
-    IF w > nodes BREAK
-    writef("Dom!%n = %n*n", w, Id!(Dom!(vertex!w)))
+  writef("Some dominators:")
+  { LET count = 0
+    LET step = nodes < 20 -> 1, nodes/20
+    LET i = step
+    WHILE i <= nodes DO
+    { LET d = i>1 -> Id!(Dom!(vertex!i)), 0
+      IF count MOD 5 = 0 DO newline()
+      writef(" %i8:%i8", i, d)
+      count := count+1
+      i := i+step
+    }
   }
 
   { LET h1, h2 = hashgraph(), hashtree()
-    writef("Graph hash: %n  Dominator Tree hash: %n*n", h1, h2)
-    check(h1+h2) // Check that the hash values are the same as before
+    writef("*nGraph hash: %n  Dominator Tree hash: %n*n", h1, h2)
+    check(h1+h2) // Check the hash values are the same as before
   }
 
   freespace()
+}
+
+AND tryversion(t, n, e, seed, f) = VALOF
+{ LET newgraph = f -> mkflow, mkgraph
+  LET count = 0
+
+  setseed(seed)
+
+  SWITCHON t INTO
+  { DEFAULT:
+    CASE 1: // Very simple version
+            eval, link := eval1, link1
+            ENDCASE
+    CASE 2: // Simple version
+            eval, link := eval2, link2
+            ENDCASE
+    CASE 3: // Sophisticated version
+            eval, link := eval3, link3
+            ENDCASE
+  }
+
+  root := newgraph(n, e)
+
+  count := instrcount(dominators, root)
+
+  { LET h1, h2 = hashgraph(), hashtree()
+    check(h1+h2) // Check the hash values are the same as before
+  }
+
+  freespace()
+  RESULTIS count
+}
+
+AND trygraph(n, e, seed, f) BE
+{ LET count = ?
+
+  check(0)   // Inititalise the previous hash value
+
+  writef("%i6 %i8    %n %s ", n, e, seed, f->"f ","  ")
+  TEST e<200_000
+  THEN writef(" %9i", tryversion(1, n, e, seed, f))
+  ELSE writef("         -")
+  writef(" %9i", tryversion(2, n, e, seed, f))
+  writef("      %9i", tryversion(3, n, e, seed, f))
+  newline()
 }
 
 AND edge(i, j) BE
@@ -442,7 +679,7 @@ AND edge(i, j) BE
 }
 
 AND mkdefaultgraph1() = VALOF
-{ // Make the graph used in the paper
+{ // Make the graph used in the paper.
   initspace(13, 21)
   nodes, edges := 0, 0
   FOR i = 1 TO 13 DO mkNode(i)
@@ -465,7 +702,7 @@ AND mkdefaultgraph1() = VALOF
 }
 
 AND mkdefaultgraph2() = VALOF
-{ // Make the graph used in my talk
+{ // Make the graph used in my talk.
   initspace(25, 38)
   nodes, edges := 0, 0
   FOR i = 1 TO 25 DO mkNode(i)
@@ -501,51 +738,51 @@ AND mktree1(n) = n<=0 -> 0, VALOF
   LET v = mkNode() // Make a root node
 
   IF n>1 DO
-  { // k = the number of nodes in the left branch of the random tree
+  { // k = the number of nodes to make in the left branch.
     //LET k = 0 
     //LET k = 1 
     LET k = n/10 
     //LET k = n/3
     //LET k = n/2
     //LET k = randno(n-1)
-    LET c = mktree1(k)     // Make the left tree
+    LET c = mktree1(k)     // Make the left branch.
     IF c DO edge(v, c)
-    c := mktree1(n-k-1)    // Make the right tree
+    c := mktree1(n-k-1)    // Make the right branch.
     IF c DO edge(v, c)
   }
   RESULTIS v
 }
 
 AND mktree2(n) = VALOF
-{ // Make a random tree with a given number of nodes
+{ // Make a random tree with a given number of nodes.
   vertex!1 := 0
   FOR i = 1 TO n DO
   { mkNode()
-    IF i>1 DO edge(randno(i-1), i) // give node i a random parent
+    IF i>1 DO edge(randno(i-1), i) // Give node i a random parent.
   }
   RESULTIS vertex!1
 }
 
 AND mkgraph(n, e) = VALOF
-{ // Make a random flow graph
+{ // Make a random flow graph with n vertices and e edges.
   initspace(n, e)
 
   nodes, edges := 0, 0
-  mktree2(n)           // First create a tree
+  mktree2(n)    // First create a random tree with n vertices.
 
-  // Then add some additional random edges
+  // Then add additional random edges until there are e edges.
   UNTIL edges>=e DO
   { LET p = randno(n)
     LET q = p + randno(200) - 100
     UNLESS 1<=q<=n LOOP
-    edge(p, q)  // Add edge to nearby node
+    edge(p, q)  // Add edge to nearby vertex.
   }
 
-  RESULTIS vertex!1  // return the root
+  RESULTIS vertex!1  // return the root.
 }
 
 AND mkflow(n) = VALOF
-{ // Make a random flow graph (program like) with exactly n nodes
+{ // Make a random flow graph with exactly n nodes.
   initspace(n, 2*n)
 
   vertex!1 := 0
@@ -556,7 +793,7 @@ AND mkflow(n) = VALOF
   loadp := 1   // Position of next instruction to compile
   trnC(n-1)    // Compile C; return in n-1 nodes
   genj("stop")
-  RESULTIS vertex!1  // return the root
+  RESULTIS vertex!1  // Return the root
 }
 
 AND trnC(n) BE
@@ -568,18 +805,18 @@ AND trnC(n) BE
 
   IF n=1 DO
   { IF prob(5) & clab DO
-    { genfl("continue", clab)          //     continue  Lclab 
+    { genfl("continue", clab)      //     continue  Lclab 
       RETURN
     }
-    IF prob(5) & blab DO               //     break  Lblab
+    IF prob(5) & blab DO           //     break     Lblab
     { genfl("break", blab)
       RETURN
     }
     IF prob(5) & glab DO
-    { genfl("goto", glab)              //     goto  Lglab 
+    { genfl("goto", glab)          //     goto      Lglab 
       RETURN
     }
-    genf("com")                        //     com
+    genf("com")                    //     com
     RETURN
   }
 
@@ -589,10 +826,10 @@ AND trnC(n) BE
     LET L1 = loadp+n-1
     IF prob(10) DO
        glab := loadp + randno(n) - 1
-    genf("exp")                         //     E
-    genfl("jf", L1)                     //     jf  L1 
-    trnC(n-3)                           //     C
-    genf("lab")                         // L1:
+    genf("exp")                     //     E
+    genfl("jf", L1)                 //     jf  L1 
+    trnC(n-3)                       //     C
+    genf("lab")                     // L1:
     glab := g
     RETURN
   }
@@ -657,35 +894,27 @@ AND trnC(n) BE
 
   // Otherwise compile:  C1; C2
   m := randno(n-1) // size of C1
-  trnC(m)                                //      C1
-  trnC(n-m)                              //      C2
+  trnC(m)                         //      C1
+  trnC(n-m)                       //      C2
 }  
 
 AND genf(str) BE
-{ IF debug DO
-     writef("%i3: %s*n", loadp, str)
-  edge(loadp, loadp+1)
+{ edge(loadp, loadp+1)
   loadp := loadp+1
 }
 
 AND genfl(str, lab) BE
-{ IF debug DO
-     writef("%i3: %t8 %n*n", loadp, str, lab)
-  edge(loadp, lab)
+{ edge(loadp, lab)
   edge(loadp, loadp+1)
   loadp := loadp+1
 }
 
 AND genj(str) BE
-{ IF debug DO
-     writef("%i3: %s*n", loadp, str)
-  loadp := loadp+1
+{ loadp := loadp+1
 }
 
 AND genjl(str, lab) BE
-{ IF debug DO
-     writef("%i3: %t8 %n*n", loadp, str, lab)
-  edge(loadp, lab)
+{ edge(loadp, lab)
   loadp := loadp+1
 }
 
@@ -696,14 +925,40 @@ AND prnodes(n) BE
   FOR i = 1 TO n DO
   { LET p = vertex!i
     LET q = Succ!p
-    writef("%i4:",                 Id!p)
-    writef(" P:%i4", Parent!p   -> Id!(Parent!p),   0)
-    writef(" D:%i4", Dom!p      -> Id!(Dom!p),      0)
-    writef(" S:%i4", Semi!p     -> Id!(Semi!p),     0)
-    writef(" A:%i4", Ancestor!p -> Id!(Ancestor!p), 0)
-    writef(" L:%i4", Best!p     -> Id!(Best!p),    0)
+    writef("%z2:",                 Id!p)
+    writef(" P:%z2", Parent!p   -> Id!(Parent!p),   0)
+    writef(" D:%z2", Dom!p      -> Id!(Dom!p),      0)
+    writef(" S:%z2",               Semi!p)
+    writef(" A:%z2", Ancestor!p -> Id!(Ancestor!p), 0)
+    writef(" L:%z2", Best!p     -> Id!(Best!p),     0)
+    UNLESS Ancestor!p DO
+    { // These are only valid for roots of forest trees
+      writef(" C:%z2", Child!p    -> Id!(Child!p),    0)
+      writef(" Z:%z2", Size!p)
+    }
     writef(" -> ")
-    WHILE q DO { writef(" %i4", Id!(q!1)); q := !q }
+    WHILE q DO { writef(" %z2", Id!(q!1)); q := !q }
+    q := Bucket!p
+    IF q DO
+    { writef("*nBucket: ")
+      WHILE q DO { writef(" %z2", Id!(q!1)); q := !q }
+    }
+    UNLESS Ancestor!p DO
+    { // These are only valid for roots of forest trees
+      q := Child!p
+//writef("Child pointer of %z2 q=%n*n", Id!p, q)
+//abort(1233)
+      IF q DO
+      { writef("*nClild: ")
+        WHILE q DO
+        { writef(" %z2", Id!(q!1))
+          q := Child!q
+          deplete(cos)
+//writef("Next child pointer q=%n*n", q)
+//        abort(1234)
+        }
+      }
+    }
     newline()
   }
 }
@@ -713,12 +968,12 @@ AND prres(n) BE
   FOR i = 1 TO n DO
   { LET p = vertex!i
     LET q = Succ!p
-    writef("%i4:", Id!p)
-    writef(" P:%i4", Parent!p   -> Id!(Parent!p),   0)
-    writef(" D:%i4", Dom!p      -> Id!(Dom!p),      0)
-    writef(" S:%i4", Semi!p     -> Id!(Semi!p),     0)
+    writef("%z2:", Id!p)
+    writef(" P:%z2", Parent!p   -> Id!(Parent!p),   0)
+    writef(" D:%z2", Dom!p      -> Id!(Dom!p),      0)
+    writef(" S:%z2",               Semi!p)
     writef(" ->")
-    WHILE q DO { writef(" %i4", Id!(q!1)); q := !q }
+    WHILE q DO { writef(" %z2", Id!(q!1)); q := !q }
     newline()
   }
 }
@@ -727,8 +982,8 @@ AND prstruct() BE
 { writef("*nN: ")
   FOR i = 1 TO nodes DO writef(" %i2", i)
   writef("*nS: ")
-  FOR i = 1 TO nodes DO { LET v = Semi!(vertex!i)
-                          writef(" %i2", Id!v)
+  FOR i = 1 TO nodes DO { LET s = Semi!(vertex!i)
+                          writef(" %i2", s)
                         }
   writef("*nB: ")
   FOR i = 1 TO nodes DO { LET v = Best!(vertex!i)
@@ -752,10 +1007,10 @@ AND prstruct() BE
 AND prforest() BE
 { FOR i = 1 TO nodes DO
   { LET v = vertex!i
-    IF Size!v>1 & Ancestor!v=0 DO
+    IF Size!v>=1 & Ancestor!v=0 DO
     { IF Child!v & Id!(Child!v)<i DO abort(9999)
       prvtree(v)
-      writes("*n*n")
+      writes("*n")
     } 
   }
   FOR i = 1 TO nodes DO
@@ -769,13 +1024,17 @@ AND prvtree(t) BE
   Size!t := -Size!t // Mark this subtree as printed
   t := Child!t
   UNLESS t RETURN
-  writes("=>*n")
+  writes("=>")
 } REPEAT
 
 AND prstree(t) BE
 { LET id = Id!t
+  LET c = Child!t
   LET first = TRUE
-  writef("%n:%n", id, Id!(Semi!t), Id!(Best!t))
+  writef("%i2:A%z2S%z2B%z2",
+         id, Ancestor!t->Id!(Ancestor!t),0, Semi!t, Id!(Best!t))
+  UNLESS Ancestor!t DO
+    writef("Z%nC%z2", Size!t, c->Id!c,0)
 
   FOR i = 1 TO nodes DO // Find any sub branches
   { LET vi = vertex!i
@@ -811,6 +1070,7 @@ AND hashtree() = VALOF
 
 AND check(hash) BE
 { IF prevhash & hash & prevhash~=hash DO
-     writef("ERROR: dominator tree different*n")
+     writef("##### ERROR: Dominator trees are different ####*n")
   prevhash := hash
 } 
+

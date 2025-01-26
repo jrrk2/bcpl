@@ -119,8 +119,8 @@ LET step() BE
 }
 
 AND plotcraft() BE
-{ IF depthscreen FOR i = 0 TO screenxsize*screenysize-1 DO
-    depthscreen!i := maxint
+{ IF depthv FOR i = 0 TO screenxsize*screenysize-1 DO
+    depthv!i := maxint
 
   IF object=0 DO
   { // Simple aircraft

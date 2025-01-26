@@ -15,7 +15,7 @@
 
 
 
-SECTION " dumpdebug"
+SECTION " sysdebug"
 
 GET "libhdr"
 
@@ -78,23 +78,41 @@ LET rch() BE
   ch := capitalch(lch)
 }
 
-LET start() BE
+LET start() = VALOF
 { LET argv       = VEC 50
-  AND datv       = VEC 1
+  AND datv       = VEC 2
   AND datstrings = VEC 12
   AND sysin      = input()
   AND sysout     = output()
   AND imagefilename = "DUMP.mem"
+  LET hostaddrsize = rtn_hostaddsize!rootnode
+  LET bitsperword, msb, allones = 1, 1, 1
+  LET ww = 65
+  
+  UNTIL (msb<<1)=0 DO
+    bitsperword, msb, allones := bitsperword+1, msb<<1, allones<<1 | 1
+
+  writef("sysdebug entered*n")
+  writef("The host is a %s ender machine*n", (@ww)%0=65 -> "little", "big")
+  writef("Host address size = %n bits*n", hostaddrsize)
+  writef("BCPL word size    = %n bits*n", bitsperword)
 
   UNLESS rdargs("FROM", argv, 50) DO
-  { writes("bad arguments for DUMPDEBUG*n")
+  { writes("bad arguments for SYSDEBUG*n")
     stop(20)
   }
 
   IF argv!0 DO imagefilename := argv!0
   IF imagefilename UNLESS getimage(imagefilename) DO
   { writef("Unable to load image file %s*n", imagefilename)
-    RETURN
+    RESULTIS 0
+  }
+
+  IF mem(rootnode+rtn_devtab) |
+     mem(rootnode+rtn_tasktab) DO
+  { writef("The dump file seems to be a cintpos dump, not a cintsys dump*n")
+    writef("since the rootnode variables devtab and tasktab are not both zero*n")
+    RESULTIS 0
   }
 
   rec_p, rec_l := level(), fin
@@ -143,6 +161,8 @@ fin:
   IF imagedata DO freevec(imagedata)
   IF addrv     DO freevec(addrv)
   IF datav     DO freevec(datav)
+
+  RESULTIS 0
 }
 
 AND memdatstamp(v) = VALOF
@@ -152,6 +172,7 @@ AND memdatstamp(v) = VALOF
 
   v!0 := mem(tv+0)
   v!1 := mem(tv+1)
+  v!2 := mem(tv+2) // For compatibility with old dat format
 
   RESULTIS TRUE
 }
@@ -179,7 +200,7 @@ AND debug() = VALOF
 /*
   FOR i = 0 TO 9 DO            // Remove all BRK instructions (if any)
   { LET ba = mem(bpt_addr+i)
-    //writef("bpt %n: addr: %i6    instr: %n*n", i, ba, mem(bpt_instr+i))
+    //writef("bpt %n: addr: %6i    instr: %n*n", i, ba, mem(bpt_instr+i))
     IF ba DO setmemb(0, ba, mem(bpt_instr+i))
   }
 */
@@ -196,7 +217,7 @@ AND debug() = VALOF
                             ELSE RESULTIS "Negative pc"
                   CASE   5: RESULTIS "Division by zero"
                   CASE  10: RESULTIS "Cintasm single step"
-                  CASE  11: RESULTIS "Watch addr: %+%i7 value: %i8"
+                  CASE  11: RESULTIS "Watch addr: %+%7i value: %8i"
                   CASE  12: RESULTIS "Indirect address out of range: %+%+%+%n"
                   CASE  99: RESULTIS "User requested"
                   CASE 110: RESULTIS "Callco fault"
@@ -405,16 +426,16 @@ AND prprompt() BE
 AND dumprootnode() BE
 { writef("*nRootnode at %n*n*n", rootnode)
 
-  writef("  blklist    %i8*n", cont(rtn_blklist+rootnode))
-  writef("  memsize    %i8*n", cont(rtn_memsize+rootnode))
-  writef("  info       %i8*n", cont(rtn_info+rootnode))
-  writef("  sys        %i8*n", cont(rtn_sys+rootnode))
-  writef("  blib       %i8*n", cont(rtn_blib+rootnode))
-  writef("  boot       %i8*n", cont(rtn_boot+rootnode))
-  writef("  abortcode  %i8*n", cont(rtn_abortcode+rootnode))
-  writef("  context    %i8*n", cont(rtn_context+rootnode))
-  writef("  lastp      %i8*n", cont(rtn_lastp+rootnode))
-  writef("  lastg      %i8*n", cont(rtn_lastg+rootnode))
+  writef("  blklist    %8i*n", cont(rtn_blklist+rootnode))
+  writef("  memsize    %8i*n", cont(rtn_memsize+rootnode))
+  writef("  info       %8i*n", cont(rtn_info+rootnode))
+  writef("  sys        %8i*n", cont(rtn_sys+rootnode))
+  writef("  blib       %8i*n", cont(rtn_blib+rootnode))
+  writef("  boot       %8i*n", cont(rtn_boot+rootnode))
+  writef("  abortcode  %8i*n", cont(rtn_abortcode+rootnode))
+  writef("  context    %8i*n", cont(rtn_context+rootnode))
+  writef("  sysp       %8i*n", cont(rtn_sysp+rootnode))
+  writef("  sysg       %8i*n", cont(rtn_sysg+rootnode))
 
 }
 
@@ -446,7 +467,7 @@ AND prblock(a) BE
   LET freeblk = (size&1)=1
   size := size & -2
 
-  writef("%i8:%i7 ", a, size)
+  writef("%8i:%7i ", a, size)
   IF freeblk DO { writes("free "); GOTO nxt }
 
   IF a = (rootnode-1) DO { writes("Rootnode"); GOTO nxt }
@@ -467,8 +488,8 @@ AND prblock(a) BE
 dump:
   FOR i = 1 TO 5 DO { LET n = cont(a+i)
                       TEST -10_000_000<=n<=10_000_000
-                      THEN writef("%iA ", n)
-                      ELSE writef("#x%x8 ", n)
+                      THEN writef("%10i ", n)
+                      ELSE writef("#x%8x ", n)
                     }
 nxt:
   newline()
@@ -510,7 +531,7 @@ AND dumpmemory() BE
       BREAK
     }
 
-    writef("%i8:%i7 ", a, size)
+    writef("%8i:%7i ", a, size)
     IF freeblk DO { writes("free "); GOTO nxt }
 
     IF a = (rootnode-1) DO { writes("Rootnode"); GOTO nxt }
@@ -538,8 +559,8 @@ AND dumpmemory() BE
 dump:
     FOR i = 1 TO 5 DO { LET n = cont(a+i)
                         TEST -10_000_000<=n<=10_000_000
-                        THEN writef("%iA ", n)
-                        ELSE writef("#x%x8 ", n)
+                        THEN writef("%10i ", n)
+                        ELSE writef("#x%8x ", n)
                       }
 nxt: 
     newline()
@@ -585,19 +606,19 @@ AND cont(a) = mem(checkaddr(a))
 AND wrcortn() BE
 { LET size = cont(cptr+co_size)
   LET hwm = size+6
-  writef(" %i7: ", cptr)
+  writef(" %7i: ", cptr)
   writes("  Coroutine:")
   writearg(cont(cptr+co_fn))
   writef("  Parent %n", mem(cptr+co_parent))
   WHILE cont(cptr+hwm)=stackword DO hwm:=hwm-1
-  writef("  Stack %n/%n*n", size, hwm-6)
+  writef("  Stack %n/%n*n", hwm-6, size)
   prprompt()
   wrch(' ')
   wrframe()
 }
 
 AND wrframe() BE
-{ writef("%i8:", pptr)
+{ writef("%8i:", pptr)
   TEST pptr=cptr
   THEN writef("  #StackBase#")
   ELSE writearg(mem(pptr+2))
@@ -615,20 +636,22 @@ AND wrframe() BE
   }
 }
 
-AND writearg(n) BE
-// Write an argument in a field width of 13 characters
-  TEST isfun(n)
-  THEN { LET s = (n>>2)-3  // MR 1/11/03
-         LET len = memb(s, 0)
-         WHILE len>0 & memb(s, len)=' ' DO len := len-1
-         FOR i = len+1 TO 13 DO wrch(' ')
-         FOR i = 1 TO len DO wrch(memb(s, i))
-       }
-  ELSE TEST globword<=n<=globword+1000  // MR 1/11/03
-       THEN writef("       #G%z3#", n-globword)
-       ELSE TEST -10_000_000<=n<=10_000_000
-            THEN writef("  %iB", n)
-            ELSE writef("   #x%x8", n)
+AND writearg(n) BE TEST isfun(n)
+                   THEN { // Write the function name right justified
+                          LET s = (n>>2)-3  // MR 1/11/03
+                          LET len = 0
+                          FOR i = 1 TO 11 DO
+                          { IF memb(s, i)='*s' BREAK
+                            len := len+1
+                          }
+                          FOR i = len+1 TO 15 DO wrch('*s')
+                          FOR i = 1 TO len DO wrch(memb(s, i))
+                        }
+                   ELSE TEST globword<=n<=globword+1000  // MR 1/11/03
+                        THEN writef("         #G%3z#", n-globword)
+                        ELSE TEST -10_000_000<=n<=10_000_000
+                             THEN writef("    %11i", n)
+                             ELSE writef("     #x%8x", n)
 
 AND isfun(f) = VALOF
 { LET a = f>>2
@@ -649,7 +672,7 @@ AND getimage(filename) = VALOF
   imagedata, addrv, datav := 0, 0, 0
 
   UNLESS scb RESULTIS FALSE
-  size := sys(Sys_filesize, scb!scb_fd)    // Size in bytes
+  size := sys(Sys_filesize, @scb!scb_fd)   // Size in bytes
   IF size DO upb  := (size-1)/bytesperword // UPB in words      
 
   imagedata := getvec(upb)
@@ -665,7 +688,7 @@ AND getimage(filename) = VALOF
     GOTO ret
   }
   //writef("Read %n words from %s*n", wordsread, filename)
-  //FOR i = 0 TO upb>31->31, upb DO writef("%i5: %x8*n", i, imagedata!i)
+  //FOR i = 0 TO upb>31->31, upb DO writef("%5i: %8x*n", i, imagedata!i)
 
   memupb := imagedata!0
   imagep := 1
@@ -675,8 +698,9 @@ AND getimage(filename) = VALOF
     UNTIL addr > memupb DO
     { LET n = imagedata!imagep
 
-//TEST n>=0 THEN writef("%i9: %i9 BLOCK*n", addr, n)
-//          ELSE writef("%i9: %i9 x %x8*n", addr, -n, imagedata!(imagep+1))
+//TEST n>=0 THEN writef("%9i: %9i BLOCK*n", addr, n)
+//          ELSE writef("%9i: %9i x %8x*n", addr, -n, imagedata!(imagep+1))
+//abort(2345)
       UNLESS n BREAK
 
       TEST n>0 THEN imagep := imagep + n + 1
@@ -738,8 +762,10 @@ AND mem(p) = VALOF // Get a word of dumped memory
     RESULTIS #xBAD00BAD
   }
 
-  { LET m = (i+j)/2
-//    writef("addrv!m=%i9 p=%n  i=%i2 m=%i2 j=%i2*n", addrv!m, p, i, m, j)
+  { // Perform binary chop on the memory data.
+    // addrv!m is the address where 
+    LET m = (i+j)/2
+//    writef("addrv!m=%9i p=%n  i=%2i m=%2i j=%2i*n", addrv!m, p, i, m, j)
 //abort(1000)
     IF i=m BREAK
     TEST addrv!m <= p THEN i := m
@@ -750,19 +776,19 @@ AND mem(p) = VALOF // Get a word of dumped memory
   //writef("len = %n  datav!i=%n*n*n", len, datav!i)
   TEST len>0 THEN res := imagedata!(datav!i + p-addrv!i+1)
              ELSE res := imagedata!(datav!i + 1)
-  //writef("mem(%n) => %x8  %i9*n", p, res, res)
+  //writef("mem(%n) => %x8  %9i*n", p, res, res)
   RESULTIS res
 }
 
 AND setmem(p, val) BE // Set a word of dumped memory
 { LET i, j, len, res = 1, datavupb+1, 0, 0
   UNLESS 0<=p<=memupb DO
-  { writef("*nBad Cintpos memory address %x8  %n*n", p, p)
+  { writef("*nBad Cintpos memory address %8x  %n*n", p, p)
     longjump(rec_p, rec_l)
   }
 
   { LET m = (i+j)/2
-//    writef("addrv!m=%i9 p=%n  i=%i2 m=%i2 j=%i2*n", addrv!m, p, i, m, j)
+//    writef("addrv!m=%9i p=%n  i=%2i m=%2i j=%2i*n", addrv!m, p, i, m, j)
 //abort(1000)
     IF i=m BREAK
     TEST addrv!m <= p THEN i := m
@@ -772,7 +798,7 @@ AND setmem(p, val) BE // Set a word of dumped memory
   len := imagedata!(datav!i)
   //writef("len = %n  datav!i=%n*n*n", len, datav!i)
   IF len<=0 DO
-  { writef("Unable to write %x8 to location %n*n", val, p)
+  { writef("Unable to write %8x to location %n*n", val, p)
     RETURN
   }
   imagedata!(datav!i + p-addrv!i+1) := val
@@ -861,7 +887,7 @@ AND praddr(a) BE
   IF gptr <= a <= gptr+mem(gptr+g_globsize) DO type, base := 'G', gptr
   IF vars <= a <= vars+9                    DO type, base := 'V', vars
   IF regs <= a <= regs+r_upb                DO type, base := 'R', regs
-  writef("*n%c%i5:", type, a-base)
+  writef("*n%c%5i:", type, a-base)
 }
 
 AND print1(n) BE
@@ -879,14 +905,14 @@ AND print(n) BE SWITCHON style INTO
                }
                RETURN
              }
-  CASE 'B':  writef( " %bW ", n);     RETURN
-  CASE 'D':  writef( " %IA ", n);     RETURN
+  CASE 'B':  writef( " %32b ", n);     RETURN
+  CASE 'D':  writef( "  %10i ", n);     RETURN
   CASE 'F':  writearg(n);             RETURN
-  CASE 'O':  writef( " %OC ", n);     RETURN
+  CASE 'O':  writef( " %12O ", n);     RETURN
   CASE 'S':  checkaddr(n)
              writef( " %S ",  n);     RETURN
-  CASE 'U':  writef( " %UA ", n);     RETURN
-  CASE 'X':  writef( " %X8 ", n);     RETURN
+  CASE 'U':  writef( " %10u ", n);     RETURN
+  CASE 'X':  writef( " %8x ", n);     RETURN
 }
 
 AND selectprog(id) BE
@@ -963,7 +989,7 @@ AND wrfcode(f) BE
 
 AND prinstr(pc) BE
 { LET a = 0
-  writef(" %i7: ", pc)
+  writef(" %7i: ", pc)
   checkaddr(pc>>2)
   wrfcode(gb(pc))
   SWITCHON instrtype(gb(pc)) INTO

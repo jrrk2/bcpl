@@ -1,5 +1,4 @@
-// This is a really naive program to solve 16x16 SuDoku problems
-// as set in the Independent.
+// This is a really naive program to solve 16x16 SuDoku problems.
 
 // Implemented in BCPL by Martin Richards (c) July 2005
 

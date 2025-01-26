@@ -1,11 +1,38 @@
-// (c)  Copyright:  Martin Richards  30 April 2014
+// (c)  Copyright:  Martin Richards  25 May 2016
 
 /*
+14/08/2023
+Added cmpdats(dat1, dat2) to compare date and times
+
+25/10/2021
+Added sxpushval(sxv, val) to push val into a self expanding vector
+ 
+07/02/18
+Added %n.mf and %ng to writef, and corresponding functions
+writeflt, writee
+and added readflt.
+
+18/05/16
+Added BLIB function memoryfree() to check that the store chain is
+valid and return the amount of free memory as the result with the
+used memory in result2.
+
+11/02/16
+Added BLIB function stackfree() to return approximately how much of
+the run time stack is currently unused.
+
 21/11/14
 Corrected bug in /N qualifier of rdargs and added the function rdargs2.
 
 09/01/14
 rdargs rewritten.
+
+29/04/10
+Changed sys(Sys_delay,..) to take two arguments days (since 1 jan
+1970) and msecs (msecs since midnight). Modified the dlib function
+delay(msecs) to call delayuntil(days, msecs). Added delayuntil(days,
+msecs) to dlib.  In cintpos the clock device is now sent packets by
+sendpkt(notinuse,-1, 0,?,?,days, msecs).
 
 29/03/10
 Changed the units of time to be msecs instead of the system dependent
@@ -99,6 +126,12 @@ AND settimeout(scb, msecs, act) BE
 
 // Just set the timeoutact field
 AND settimeoutact(scb, act) BE scb!scb_timeoutact := act
+
+AND setvec(v, n, n0, n1,  n2,  n3,  n4,  n5,  n6,  n7,
+                 n8, n9, n10, n11, n12, n13, n14, n15) BE
+{ LET p = @n0
+  FOR i = 0 TO n-1 DO v!i := p!i
+}
 
 AND rdch() = VALOF
 // Returns the next byte from the currently selected input stream,
@@ -295,6 +328,11 @@ AND utf8wrch(code) BE
 
 AND readwords(vector, count) = VALOF
 // count is the number of words to read.
+// It returns the number of complete words copied into vector.
+// This may be less than count if the input becomes exhausted
+// before count words have been read. A few bytes may have been
+// copied into vector after the last completed word if the number
+// of bytes in the stream is not a multiple of bytesperword.
 { LET i, lim = 0, count*bytesperword
   // lim is the number of bytes still needed.
 
@@ -585,7 +623,13 @@ AND writed(n, d) BE writedz(n, d, FALSE, n<0)
 AND writez(n, d) BE writedz(n, d, TRUE,  n<0)
 
 AND writedz(n, d, zeroes, neg) BE
-{ LET t = VEC 10
+{ // n     is the number to output
+  // d     is the field width
+  // zeroes    =TRUE is leading zeroes are to be output
+  //           as zeroes. If FALSE leading zeroes are
+  //           replaced by spaces.
+  // neg       -TRUE if a minus sign is required.
+  LET t = VEC 20
   LET i = 0
   LET k = -n
 
@@ -638,34 +682,38 @@ AND writeu(n, d) BE
 
 
 /*
-        The following routines provide and extended version of writef.
+The following routines provide an extended version of writef.
 They support the following extra substitution items:
 
-        1. %F   - Takes next argument as a writef format string and
-                calls writef recursively using the remaining arguments.
-                The argument pointer is positioned to the next available
-                argument on return.
+        1. %F    - Takes next argument as a writef format string and
+                 calls writef recursively using the remaining arguments.
+                 The argument pointer is positioned to the next available
+                 argument on return.
 
-        2. %M   - The next argument is taken as a message number and processed
-                as for %F above. The message format string is looked up by
-                get_text(messno, str, upb) where str is a vector local to
-                writef to hold the message string. This is provided to easy
-                the generation of messages in different languages.
+        2. %n.mF - eg %8.3f
+                 Output a floating point number in a field width of n
+                 with m digits after the decimal point.
 
-        3. %+   - The argument pointer is incremented by 1.
+        3. %M    - The next argument is taken as a message number and processed
+                 as for %F above. The message format string is looked up by
+                 get_text(messno, str, upb) where str is a vector local to
+                 writef to hold the message string. This is provided to easy
+                 the generation of messages in different languages.
 
-        4. %-   - The argument pointer is decremented by 1.
+        4. %+    - The argument pointer is incremented by 1.
 
-        5. %P   - Plural formation. The singular form is use if and only if
-                the next argument is one. So that the argument can be used
-                twice it is normal to preceed or follow the %P item with %-.
-                There are two forms as follows:
+        5. %-    - The argument pointer is decremented by 1.
 
-                a. %Pc  - The character c is output if the the next argument
-                        not one.
+        6. %P    - Plural formation. The singular form is use if and only if
+                 the next argument is one. So that the argument can be used
+                 twice it is normal to preceed or follow the %P item with %-.
+                 There are two forms as follows:
 
-                b. %P\singular\plural\  - The appropriate text is printed,
-                        skipping the other. The '\' chars are not printed.
+                 a. %Pc  - The character c is output if the the next argument
+                         not one.
+
+                 b. %P\singular\plural\  - The appropriate text is printed,
+                         skipping the other. The '\' chars are not printed.
 
 Example: FOR count = 0 TO 2 DO
             writef("There %p\is\are\ %-%n thing%-%ps.*n", count)
@@ -687,7 +735,10 @@ outputs:
                   and     writef("%8.0d", 1234567) would output:  1234567
 
         8. %#     Write the next argument using codewrch, ie convert the
-                  next argument to UTF-8 format.
+                  next argument to UTF-8 or gb2312 format. If the
+                  argument is -1 it sets the encoding for the currently
+                  selected stream to be UTF8. If it is -2 it selects
+                  the GB2312 encoding.
 */
 
 // The following version of writef is new -- MR 21/1/04
@@ -717,31 +768,48 @@ AND sawritef(format,a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z) BE
 }
 
 AND write_format(format, lvnextarg) BE
-{ // writef and sawritef must preserve result2
+{ LET p = 1
+  // Both writef and sawritef must preserve result2
   LET res2 = result2
 
-  UNLESS 0 < format < rootnode!rtn_memsize DO format := "##Bad format##"
+  UNLESS 0 < format < rootnode!rtn_memsize DO // Safety check
+    format := "##Bad format##"
 
-  FOR p = 1 TO format%0 DO
-  { LET k, type, f, n, m, arg = format%p, ?, ?, ?, ?, ?
-    LET widthgiven = FALSE
+  WHILE p <= format%0 DO
+  { // When LOOP is executed p must point to the next format
+    // character to process.
+    LET k, type, f = format%p, ?, ?
+    LET n, m, arg  = 0, 0, 0
+    LET widthgiven = FALSE  // Set to RTUE ifthe item starts
+                            // with %n or %n.m
+    p := p + 1
     UNLESS k='%' DO { wrch(k); LOOP }
 
     // Deal with a substitution item
-    p := p + 1
-    type, arg, n, m := format%p, !!lvnextarg, 0, 0
+    type, arg := format%p, !!lvnextarg
+    // arg holds the next writef argument in case it is needed.
 
-sw: SWITCHON capitalch(type) INTO
-    { DEFAULT:    wrch(type)
+sw: // type is the character following %, %n or %n.m
+    // and p still points to this character.
+    // If widthgiven is TRUE, type will not be a digit.
+    
+    SWITCHON capitalch(type) INTO
+    { DEFAULT:    wrch(type) // %c where c in not expected
+                  p := p+1   // output c and advance p.
                   LOOP
 
       CASE '0':CASE '1':CASE '2':CASE '3':CASE '4':
       CASE '5':CASE '6':CASE '7':CASE '8':CASE '9':
+                  // A substituion item starting with %n or %n.m
+		  // It sets widthgiven to TRUE and n and m from %n.m
+		  // leaving p pointing to the character just after %n.m
+		  // If .m is not present m is left set to zero.
                   { n := 10*n + type - '0'
                     p := p+1
                     type := format%p
                     widthgiven := TRUE
                   } REPEATWHILE '0'<=type<='9'
+		  // p points to the charcter just after the digits.
                   IF type='.' DO
                   { p := p+1
                     type := format%p
@@ -751,48 +819,70 @@ sw: SWITCHON capitalch(type) INTO
                       type := format%p
                     }
                   }
+		  // type is the character just after %n.m
+		  // and p points to it.
                   GOTO sw
 
-      CASE 'D':   IF m DO
-                  { // Write a scaled number of the form nnn.nn
+      CASE 'D':   IF widthgiven DO // Deal with %nD or %n.mD
+                  { // Deal with %n.mD eg %6.2D
+                    // Writes a scaled number of the form nnn.nn
                     LET scale = 1
                     FOR i = 1 TO m DO scale := scale * 10
                     writedz(arg/scale, n-1-m, FALSE, arg<0)
                     wrch('.')
                     writez( ABS arg MOD scale, m)
                     !lvnextarg := !lvnextarg + 1
+		    p := p+1
+		    // p points to the character after %dD or %n.mD
                     LOOP
                   }
-                  f := writed;    GOTO getarg
+		  // Deal with %Dn (equivalent to %In).
+      CASE 'I':   f := writed;    GOTO getn
+      CASE 'S':   f := writes;    GOTO nowidth
+      CASE 'T':   f := writet;    GOTO getn
+      CASE 'C':   f := wrch;      GOTO nowidth
+      CASE '#':   f := codewrch;  GOTO nowidth
+      CASE 'O':   f := writeoct;  GOTO getn
+      CASE 'X':   f := writehex;  GOTO getn
+      CASE 'N':   f := writen;    GOTO nowidth
+      CASE 'U':   f := writeu;    GOTO getn
+      CASE 'Z':   f := writez;    GOTO getn
+      CASE 'B':   f := writebin;  GOTO getn
 
-
-      CASE 'S':   f := writes;    GOTO noargs
-      CASE 'T':   f := writet;    GOTO getarg
-      CASE 'C':   f := wrch;      GOTO noargs
-      CASE '#':   f := codewrch;  GOTO noargs
-      CASE 'O':   f := writeoct;  GOTO getarg
-      CASE 'X':   f := writehex;  GOTO getarg
-      CASE 'I':   f := writed;    GOTO getarg
-      CASE 'N':   f := writen;    GOTO noargs
-      CASE 'U':   f := writeu;    GOTO getarg
-      CASE 'Z':   f := writez;    GOTO getarg
-      CASE 'B':   f := writebin;  GOTO getarg
-
-    getarg:       UNLESS widthgiven DO
-                  { p := p + 1
+    getn:         // This is used by substitution items needing
+                  // a width such ad %6.3D or %I5 and using the
+		  // next writef argument.
+                  UNLESS widthgiven DO
+                  { p := p+1
+		    // p points to the first caharacter after
+		    // %D, %O, %X, %I, %U, %Z or %B.
                     n := capitalch(format%p)
                     n := '0' <= n <= '9' -> n - '0', 10 + n - 'A'
                   }
-
-    noargs:       f(arg, n)
+		  f(arg, n)
                   !lvnextarg := !lvnextarg + 1
+		  // Advance p to point to the character after
+		  // eg %6.2D or %I5
+		  p :=p+1
+                  LOOP
+
+    nowidth:      // This for substitution items not needing
+                  // a width shch as %n or %s but using the
+		  // next writef argument.
+		  f(arg, 0)
+                  !lvnextarg := !lvnextarg + 1
+		  p :=p+1
+		  // p points to the character after
+		  // %S, %C, %# or %N.
                   LOOP
 
       CASE '$':
       CASE '+':   !lvnextarg := !lvnextarg + 1
+		  p :=p+1
                   LOOP
 
       CASE '-':   !lvnextarg := !lvnextarg - 1
+		  p :=p+1
                   LOOP
 
       CASE 'M': { LET buf = VEC 256/bytesperword
@@ -800,33 +890,68 @@ sw: SWITCHON capitalch(type) INTO
                   UNLESS get_text(arg, buf, 256/bytesperword) DO
                     buf := "<<mess:%-%n>>"  // No message text
                   write_format(buf, lvnextarg)
+		  p :=p+1
                   LOOP
                 }
 
-      CASE 'F':   !lvnextarg := !lvnextarg + 1
-                  write_format(arg, lvnextarg)
+      CASE 'E':   !lvnextarg := !lvnextarg + 1
+                  writee(arg, n, m)          // Deal with eg %13.3e
+		  p :=p+1
                   LOOP
 
-      CASE 'P': { LET plural = arg ~= 1
+      CASE 'F':   !lvnextarg := !lvnextarg + 1
+                  TEST widthgiven
+                  THEN writeflt(arg, n, m)          // Deal with eg %8.3f
+                  ELSE write_format(arg, lvnextarg) // Deal with %f
+		  p :=p+1
+                  LOOP
+
+      CASE 'P': { LET plural = arg ~= 1 // =TRUE unless arg=1
                   !lvnextarg := !lvnextarg + 1
-                  p := p+1
+                  p := p+1 // p points to the first ch after %P
                   type := format%p
+
+		  // type is the charcter just after %P
+		  p := p+1 // p point to the character just after
+		           // %P\ or %Pc
+
                   IF type = '\' DO
                   { // Deal with %P\singular\plural\ item
                     LET skipping = plural
-                    p := p + 1
+		    // skipping is TRUE when when skipping the singular
+		    // or plural text.
+                    // p points to the start of the singular text
+		    // and skipping is TRUE if this is to be skipped.
                     UNTIL p > format%0 DO
                     { LET ch = format%p
-                      TEST ch = '\' THEN { skipping := ~skipping
-                                           IF skipping = plural BREAK
-                                         }
-                                    ELSE UNLESS skipping DO wrch(ch)
-                      p := p + 1
+		      // ch is a '\' or a character of the singular
+		      // or plural text.
+		      //writef("|*nwritef: format=%s*n", format); newline()
+		      //writef("*nwritef: p=%n ch=%c skipping=%n*n",
+		      //       p, ch, skipping)
+		      //abort(7456)
+		      p := p+1
+		      // p points to the character after ch.
+                      TEST ch = '\'
+		      THEN { skipping := ~skipping
+			     // p points to the character just after
+			     // the second or third \.
+		             // skipping = ~plural after the second \
+			     // skipping =  plural after the third \
+                             //IF skipping = plural GOTO break
+                             IF skipping = plural BREAK
+                           }
+                      ELSE { UNLESS skipping DO wrch(ch)
+		             // p points to just after ch.
+			   }
                     }
+		    break:
                     LOOP
                   }
 
-                  // Deal with simple %Pc items
+                  // Deal with %Pc.
+		  // type = c not equal to '\'
+		  // and p points to the character just after %Pc
                   IF plural DO wrch(type)
                   LOOP
                 }
@@ -836,8 +961,466 @@ sw: SWITCHON capitalch(type) INTO
   result2 := res2
 }
 
-LET randno(upb) = VALOF  // return a random number in the range 1 to upb
+AND checkpos(currch) BE
+{ LET pos = cis!scb_pos
+  LET ch = (cis!scb_buf)%pos
+  sawritef("current ch='%c' pos=%n => '%c'*n", currch, pos, ch)
+}
+
+AND readflt() = VALOF
+{ // Read and return a floating point number from the
+  // currently selected input stream.
+  // Syntax: spaces [+|-] [digits] [. digits] [e [+|-] digits]
+  // where spaces is zero or more white space chacters
+  //       [+|-] is an optional sign
+  //       digits is one or more decimal digits.
+  // There must be at least one digit before or after the decimal point.
+  // Underscores may be embedded in digit sequences.
+  // If successful, the result is the 32-bit or 64-bit representation
+  // of the floating point number, and result2 is zero.
+  // On failure the result is zero and result2 to -1.
+
+  // The strategy is as follows.
+  // Read and ignore white space: newline, newpage, tab and spaces.
+  // Read and remember the optional sign.
+  // Accumulate up to 9 or 17 digits in val.
+  // Count but otherwise ignore any additional digits left of the
+  // optional decimal point. Remember the number of non ignored
+  // digits following the optional decimal point.
+  // Negate val if the sign was negative,
+  // If the next character is E or e read and remember the optional
+  // exponent sign and accumulate the exponent digits in exponent.
+  // Negate exponent if negative.
+  // Return the 32- or 64-bit floating point number based on
+  // the val, the number of significant ignored digit and the
+  // exponent using sys(Sys_flt, fl_mk, val, exponent).
+  
+  LET ch = rdch()
+  LET err = FALSE   // Set to TRUE if the number is bad.
+  LET neg = FALSE   // Sign of significand or exponent
+  LET dmax = ON64 -> 17, 9
+  LET digs = FALSE  // Set to TRUE by the first decimal digit
+                    // This must be TRUE for a valid number
+  LET dcount = -1   // =-1 or the number of digits after the
+                    // leading zeroes.
+  LET fcount = -1   // =-1 or the number of digits after the
+                    // decimal point, if any.
+  LET val, exponent = 0, 0
+
+//sawritef("readflt: entered*n"); checkpos(ch)
+
+  // Ignore leading white space
+  WHILE ch='*s' | ch='*t' | ch='*n' | ch='*p' DO
+  { //sawritef("readflt: reading white space chat %n*n", ch)
+    ch := rdch()
+  }
+
+  IF ch='-' | ch='+' DO
+  { IF ch='-' DO neg := TRUE // val must be negated
+//sawritef("readflt: dealing with '%c'*n", ch)
+    ch := rdch()
+  }
+
+  // Read the significand
+  WHILE '0'<=ch<='9' | ch='_' | ch='.' DO
+  { //sawritef("readflt: reading significand '%c'*n", ch)
+    IF ch='_' DO
+    { ch := rdch()
+      LOOP
+    }
+
+    IF ch='.' DO
+    { //sawritef("readflt: dealing with '%c'*n", ch)
+      IF fcount>=0 DO err := TRUE // Only one '.' allowed
+      fcount := 0 // Start counting fractional digits
+      ch := rdch()
+      LOOP
+    }
+
+    // ch must be a digit
+    digs := TRUE // The significand has at least one digit.
+    IF ch>'0' & dcount<0 DO dcount := 0
+    IF dcount>=0 DO dcount := dcount + 1
+    IF dcount <= dmax DO
+       val := 10*val + ch - '0' // Accumulate the significand
+    ch := rdch()
+    IF fcount >= 0 DO fcount := fcount+1 // Count the fractional
+                                         // digits
+  }    
+
+  IF neg DO val := -val
+  
+//sawritef("readflt: significand = %n dcount=%n fcount=%n digs=%n*n",
+//          val, dcount, fcount, digs)
+
+  // dcount = number of digits after the leading zeroes
+  // fcount indicates the number of digits after the decimal point.
+  // digs is TRUE if there were any digits.
+
+  // Read the an exponent is given.
+  IF ch='e' | ch='E' DO
+  { neg := FALSE
+//sawritef("readflt: reading exponent*n")
+    ch := rdch()
+
+    IF ch='-' | ch='+' DO
+    { //sawritef("readflt: reading exponent sign '%c'*n", ch)
+      IF ch='-' DO neg := TRUE
+      ch := rdch()
+    }
+    // Read the exponent
+    WHILE '0'<=ch<='9' | ch='_' DO
+    { sawritef("readflt: reading exponent ch='%c'*n", ch)
+      UNLESS ch='_' DO exponent := 10*exponent + ch - '0'
+      ch := rdch()
+    }
+    // Negate exponent if necessary.
+    IF neg DO exponent := -exponent
+  }
+//sawritef("readflt: exponent=%n*n", exponent)
+
+  // Unread the terminating character.
+//sawritef("readflt: about to call unrdch before returning*n")
+
+  unrdch()
+
+  // Correct the exponent.
+  IF dcount<0 DO dcount := 1 // All digits were zero
+  IF fcount<0 DO fcount := 0 // There was no decimal point
+  IF dcount < dmax DO dmax := dcount
+  
+  // The number of diigits to the right of the least significant
+  // digit of the significand is: fcount-dmax
+  // so we must add dcount-dmax-fcount to the exponent
+//sawritef("readflt: val=%n exponent=%n dcount=%n fcount=%n dmax=%n*n",
+//          val, exponent, dcount, fcount, dmax)
+  exponent := exponent + dcount - dmax - fcount
+
+succ:
+  IF err DO
+  { result2 := -1
+//sawritef("readflt: Bad number*n")
+//abort(999)
+    RESULTIS 0
+  }
+  
+  // Convert val x 10^exponent to a floating point number of the
+  // current BCPL word length.
+  val := sys(Sys_flt, fl_mk, val, exponent)
+//sawritef("readflt: return result %13.6f  val=%8x*n", val, val)
+  result2 :=  0  // Successful return
+  //abort(1679)
+  RESULTIS val
+}
+
+AND writeflt(x, w, p) BE
+{ // Write a floating point number x in a field width w.
+  // p is the number of digits after the decimal point.
+  // p will be forced to be >= 0
+  // w will be forced to be >= p+3 to allow for a possible sign, 
+  //   one digit before the decimal point and the decimal point.
+  LET val = sys(Sys_flt, fl_unmk, x) // Upto 18 digits in val
+  LET e = result2                    // x = val times 10^e
+  // val has upto 18 digits on 64 bit BCPL systems
+  //     and upto  9 digits on 32 bit BCPL systems
+  // If val=0 the number is 0.0
+  // otherwise val is an integer containing upto 18 (or 9) decimal digits
+  // Its most and least significant digits will both non zero.
+  LET digv = VEC 18 // will hold upto 18+1 extracted decimal digits.
+                    // The +1 is because rounding may add another digit.
+  LET n = ?  // digv!0,.., digv!n will hold the extracted decimal digits.
+             // Positions outside the range 0 to p representing zeroes,
+             // so we can thinks of the given digits to be extended by
+             // zeroes in both directions.
+             // The digit at position 0 represents the value digv!0 x 10^e
+  LET q = ?  // The position in digv of the first digit after the
+             // decimal point. It value will be -e.
+  LET r = ?  // The position of the p^th digit after the decimal point,
+             // ie the last digit of the fraction to be output. It value
+             // will be q-p.
+  LET s = ?  // The position corresponding to the sign ('-' or ' ') to
+             // the left of the most significant digit.
+  LET f = ?  // Position of the first digit of val.
+  LET t = ?  // The position of the first character to output which will
+             // be either a sign or padding space.
+
+  LET neg = FALSE
+  IF val<0 DO neg, val := TRUE, -val // Ensure that val is >=0
+//writef("*nval=%n e=%n neg=%n*n", val, e, neg)
+  IF val=0 DO e := 0 // The number was 0.0
+
+  IF p<0 DO p := 0 // p must not be negative
+  IF w<4 DO w := 4 // Minimum width number is: Sd.d
+
+  // Extract the decimal digits into digv!0,..., digv!n
+  n := 0
+
+  { digv!n := val MOD 10  // Extract the next digit
+    val    := val  /  10
+    n := n+1
+  } REPEATWHILE val
+  // digv!0     is the least significant digit and
+  // digv!(n-1) is the most significant digit.
+  // n is > 0
+
+  // val was >= 0 and its digits are now held in positions 0 to n
+  // of digv. Position zero holds the least significant digit
+  // corresponding to digv!0 x 10^e. Digits at positons outside
+  // the range 0 to n are treated as zeroes.
+  // We now set the values of q,r,s, f and t. As an example,
+  // If val=-1275, e=-2, w=11 and p=4 the settings are as follows:
+
+  //         n                number of significant digits
+  //           3 2 1 0        subscripts of digv
+  //   S S S - 1 2.7 5 0 0    the Ss are padding spaces
+  //   |     | | |       |
+  //   |     | | q       |    position of the units digit
+  //   |     | |         r    position of p^th fractional digit
+  //   |     | |              position of the most significant
+  //   |     | f              digit of val, f=n-1
+  //   |     s                position of sign. If f>q s = q+1
+  //   |                      otherwiae s = f+1
+  //   t                      position of first character, t=r+w-1
+  //                          If this is < s there are no padding spaces.
+
+  // val and e are obtained from the sys(Sys_flt, fl_unmk, x) call.
+  // The n digits of val are placed in digv!0 to digv!(n-1).
+  // digv!0 is the least significant digit and figv!(n-1) is
+  // non zero. The sign is held in neg.
+  // p>=0 is the number of fractional digits.
+  // If p=0 there are no fractional digits and the decimal point
+  // is not output.
+
+  // The calculations of the values of q, r, s, t are as follows:
+  // If e=0 the units digit is in div!0
+  // If e=-1 the units digit is in digv!1
+  // etc so
+  q := -e
+
+  // r is chosen to give p digits after the decimal point and p
+  // must be non zero, so
+  IF p<0 DO p := 0
+  r := q-p
+  // Bear in mind both q and r may be subscripts of digv out of
+  // the range of the digits provided by val.
+
+  // If there is a digit from val greater than or equal to 5 at
+  // position r-1 we must round up the number.
+
+  IF 1 <= r <= n &      // dig!(r-1) is a digit from val
+     digv!(r-1)>=5 DO   // Is it >= 5
+  { // Yes, so add 1 at digit position r
+    LET carry = 1       // We are adding 1
+    LET i = r
+    WHILE carry & i<n DO
+    { LET d = digv!i + carry
+      digv!i := d MOD 10
+      carry  := d  /  10
+      i := i+1
+    }
+    IF carry DO
+    { // i must = n
+      digv!n := 1   // We must be rounding from eg  99999 to
+      n := n+1      //                             100000
+                    // This increases the number of digits
+		    // in digv.
+    }
+  }
+
+//writef("*nAfter rounding:  ")
+//writef("w=%n n=%n q=%n [", w, n, q)
+//FOR j = 0 TO n-1 DO writef(" %n", digv!j)
+//writef(" ]*n")
+
+  f := n-1          // The subscript of digv holding the most
+                    // significant digit of val.
+
+  TEST f>q THEN s := f+1 // s is just left of the most significant digit.
+           ELSE s := q+1 // s if just left of the units digit
+
+  t := r + w - 1
+
+//newline()
+//writef("neg=%n w=%n p=%n n=%n t=%n s=%n f=%n q=%n r=%n*n",
+//        neg, w, p, n, t, s, f, q, r) 
+//newline()
+
+  // If the number only has zeroes neg should be FALSE
+  IF neg DO
+  { LET allzero = TRUE
+    FOR j = r TO f>q->f,q IF 0<=j<n & digv!j DO { allzero := FALSE; BREAK }
+    IF allzero DO neg := FALSE
+  }
+//  writef("all digits zero so neg=%n*n", neg)
+  
+  // Write out the padding spaces
+  FOR i = t TO s+1 BY -1 DO wrch('*s')
+  // write the sign
+  TEST neg THEN wrch('-')
+           ELSE wrch(' ')
+
+  // Output the digits and the decimal point, if any.
+  FOR i = s-1 TO r BY -1 DO  
+  { TEST 0 <= i < n THEN wrch(digv!i + '0')
+                    ELSE wrch('0')
+    // Conditionally output the decimal point
+    IF i = q DO wrch('.') 
+  }
+}
+
+AND writee(x, w, p) BE
+{ // Write a floating point number x in exponential form in a
+  // field width of w.
+  // p number of digits after the decimal point.
+  // p will be forced to be >=1
+  // w will be forced to be >= p+8 to allow for the sign,
+  //   one digit before the decimal point, the ceimal point,
+  //   one digit after the decimal point and the exponent: eSdd. 
+  LET val = sys(Sys_flt, fl_unmk, x) // Upto 18 digits in val
+  LET e = result2                    // x = val times 10^e
+  // val has upto 18 digits on 64 bit BCPL systems
+  //     and upto  9 digits on 32 bit BCPL systems
+  // If val=0 the number is 0.0
+  // otherwise val is an integer containing upto 18 (or 9) decimal digits
+  // Its most and least significant digits will both non zero.
+  LET digv = VEC 18 // will hold upto 19 extracted decimal digits.
+  LET n = ?  // digv!0,.., digv!n will hold the extracted decimal digits.
+             // Positions outside the range 0 to p representing zeroes,
+             // so we can thinks of the given digits to be extended by
+             // zeroes in both directions.
+             // The digit at position 0 represents the value digv!0 x 10^e
+  LET q = ?  // The position the units digit. It value will be -e.
+  LET r = ?  // The position of the p^th digit after the decimal point,
+             // ie the last digit of the fraction to be output. It value
+             // will be q-p.
+  LET s = ?  // The position corresponding to the sign ('-' or ' ') to
+             // the left of the most significant digit.
+  LET t = ?  // The position of the first character to output which may
+             // be a padding space.
+
+  LET neg = FALSE
+  IF val<0 DO neg, val := TRUE, -val // Ensure that val is >=0
+//writef("*nval=%n e=%n neg=%n*n", val, e, neg)
+
+  IF p<1 DO p := 1
+  IF w<8 DO w := 8 // Minimum width: Sd.deSdd
+
+  // Extract the decimal digits into digv!0,..., digv!n
+  n := -1
+
+  { n := n+1
+    digv!n := val MOD 10  // Extract the next digit
+    val    := val  /  10
+  } REPEATWHILE val
+  // digv!0 is the least significant digit and
+  // digv!n is the most significant digit.
+  // n is >= 0
+
+  // val is >= 0 and its digits are held in positions 0 to n
+  // of digv. Position zero holds the least significant digit
+  // corresponding to digv!0 x 10^e. Digits at positions outside
+  // the range 0 to n are treated as zeroes.
+  // We now set the values of q,r,s and t. As an example,
+  // If val=1275, e=-2, w=10 and p=4 the settings are as follows:
+
+  //       0     3           subscripts of digv
+  //     0 5 7 2 1 S padding
+  //     |       | |     t   position of first character
+  //     |       | s         position of sign
+  //     |      .q=n         units and decimal point position
+  //     r=q-p               position of p^th fractional digit
+
+//newline()
+//writef("w=%n n=%n [", w, n)
+//FOR j = 0 TO n DO writef(" %n", digv!j)
+//writef(" ] e=%n*n", e)
+
+  q := n   // The position of the digit to the just left
+           // of the decimal point. If e=-2 q will be 2
+  // Position 0 corresponds to value digv!0 x 10^e
+  e := e+n     // Correct e
+
+  r :=  q - p  // Position r holds the p^th digit after the
+               // decimal point.
+
+  // Round the digits away from zero by adding 5 to the digit
+  // at position r-1, if necessary.
+
+  IF 1 <= r <= n+1 & digv!(r-1)>=5 DO
+  { LET carry = 1
+    LET i = r
+    WHILE carry & i<=n DO
+    { LET d = digv!i + carry
+      digv!i := d MOD 10
+      carry  := d  /  10
+      i := i+1
+    }
+    IF carry DO
+    { n := n+1      // We are rounding eg  99999 to
+      digv!n := 1   //                    100000 
+    }
+  }
+//writef("*nAfter rounding*n")
+//writef("w=%n n=%n q=%n [", w, n, q)
+//FOR j = 0 TO n DO writef(" %n", digv!j)
+//writef(" ]*n")
+//newline()
+ 
+  s := q
+  IF s < n DO s := n
+  s := s+1
+  // s is the position of the sign character.
+
+  // Set t to the position of the first character to output
+  // including padding. The decimal point occurs between
+  // positions q and q-1 and there is an exponent eSdd, so
+  // t-r+1 must be w-5. This gives:
+
+  t := r + w - 6
+
+  // If w was too small to include the sign, one digit before
+  // the decimal point, the decimal point and p digits after the
+  // decimal point, set t to the position of the sign character.
+  IF t < n+1 DO t := n+1
+
+
+  //writef("w=%n n=%n q=%n [", w, n, q)
+  //FOR j = 0 TO n DO writef(" %n", digv!j)
+  //writef(" ]*n")
+//newline()
+//writef("w=%n p=%n n=%n t=%n s=%n q=%n r=%n*n", w, p, n, t, s, q, r) 
+
+  // If the number only has zeroes neg should be FALSE
+  IF neg DO
+  { LET allzero = TRUE
+    FOR j = r TO q IF 0<=j<=n & digv!j DO { allzero := FALSE; BREAK }
+    IF allzero DO neg := FALSE
+  }
+
+  // Write out the characters of the number.
+  FOR i = t TO r BY -1 DO
+  { IF i > s DO { wrch(' '); LOOP } // A padding space
+    IF i = s DO
+    { TEST neg THEN wrch('-')
+               ELSE wrch(' ')
+      LOOP
+    }
+    // Output a decimal digit
+    TEST 0 <= i <= n THEN wrch(digv!i + '0')
+                     ELSE wrch('0')
+    // Conditionally output the decimal point
+    IF i = q DO wrch('.') 
+  }
+
+  // Output the exponent
+  TEST e<0 THEN writef("e-%z2", -e)
+           ELSE writef("e+%z2",  e)
+}
+
+
+LET randno(upb) = VALOF  // Return a random number in the range 1 to upb
 { randseed := randseed*2147001325 + 715136305
+  // randseed cycles through all 2^32 possible values.
   RESULTIS (ABS(randseed/3)) MOD upb + 1
 }
 
@@ -885,7 +1468,14 @@ AND str2numb(s) = VALOF // Deprecated
 }
 
 AND getkeylen(keys, len, i, keyword) = VALOF
-{ LET p = 1        // Position in keys string
+{ // keys  is the rdargs format string
+  // len   bytes in keys go from keys%1 to keys%len. len may be greater
+  //       255.
+  // i     is the number counting from zero of the argument
+  //       specified by keys whose first keyword is to be
+  //       copied into keyword.
+
+  LET p = 1        // Position in keys string
   LET n = 0        // For length of key word
 
   // Set p to start of the keyword for argument i
@@ -940,11 +1530,11 @@ AND rdargs2(keys1, keys2, argv, upb) = VALOF
 
 AND rdargslen(keys, len, argv, upb) = VALOF
 { MANIFEST
-  { a_bit =  1            // /A
-    k_bit =  2            // /K
-    s_bit =  4            // /S
-    n_bit =  8            // /N
-    p_bit = 16            // /P
+  { a_bit =  1            // /A    must provide argument
+    k_bit =  2            // /K    must use keyword
+    s_bit =  4            // /S    switch argument
+    n_bit =  8            // /N    number argument
+    p_bit = 16            // /P    prompt if needed
     d_bit = 32            // argument defined bit
   }
 
@@ -977,7 +1567,7 @@ AND rdargslen(keys, len, argv, upb) = VALOF
     IF kch = ',' DO
     { argmax := argmax+1
       IF argmax>127 DO
-      { sawritef("Error: rdargs format expects more than 128 arguments*n")
+      { sawritef("Error: rdargs format specified too many arguments*n")
         RESULTIS 0
       }
     }
@@ -1129,7 +1719,7 @@ skip:
 
 // Deliberate missing 'ENDCASE'
 
-      CASE 2: // item was either quoted or
+      CASE 2: // The item was either quoted or
               // was unquoted but did not match a key word.
               // So it is a positional argument.
               // Find the first unset argument no having /K or /S
@@ -1200,12 +1790,13 @@ AND rditem(v, upb) = VALOF
   // ...
   LET ch, quoted = rdch(), FALSE
 //sawritef("rditem: clearing from %n to %n*n", v, v+upb)
+//abort(1023)
   FOR i = 0 TO upb DO v!i := 0
 
 //sawritef("*nrditem first ch = '%c'*n", ch)
 
   // Skip over white space.
-  WHILE ch='*s' | ch='*t' | ch='*c'DO ch := rdch() 
+  WHILE ch='*s' | ch='*t' | ch='*c' DO ch := rdch() 
 
   IF ch=endstreamch RESULTIS  0   // EOF
   IF ch='*n'        RESULTIS  3   // '*n'
@@ -1268,7 +1859,7 @@ AND createco(fn, size) = VALOF
   // pointer, the following assumptions are made:
   //  P!0, P!1, P!2 contain the return link information
   //  P!3   is the variable fn
-  //  P!4   is the variable size
+  //  P!4   is the variable size, not including the 6 system words
   //  P!5   is the variable c
 
   // Now make the vector c into a valid BCPL
@@ -1353,15 +1944,15 @@ AND initco(fn, size, a, b, c, d, e, f, g, h, i, j, k) = VALOF
   RESULTIS cptr
 }
 
-/*      res := startco(body, arg, stsize)
+/*      res := startco(bodyfn, arg, stsize)
 
-        The routine 'body' is created as a coroutine with a stacksize 'stsize'
+        The routine 'bodyfn' is created as a coroutine with a stacksize 'stsize'
         and 'arg' passed as an argument.  The result is the stackbase of
         the new coroutine.
 */
 
-AND startco(body, arg, stsize) = VALOF
-{ LET newco = createco(body, stsize)
+AND startco(bodyfn, arg, stsize) = VALOF
+{ LET newco = createco(bodyfn, stsize)
 //sawritef("BLIB: callco(%n,%n)*n", newco, arg)
    IF newco DO callco(newco, arg)
    RESULTIS newco
@@ -1400,7 +1991,7 @@ AND dat_to_strings(datv, v) = VALOF
 // datv!0 = days since 1 Jan 1970
 // datv!1 = msecs since midnight
 // datv!2 = -1
-// or
+// or old format (no longer used)
 // datv!0 = days since 1 Jan 1978
 // datv!1 = mins since midnight
 // datv!2 = ticks since start of current minute
@@ -1428,13 +2019,13 @@ AND dat_to_strings(datv, v) = VALOF
   LET mcharbase = ?
   LET mtable = ?
 
-  IF datv!2>=0 DO
-  { // Convert old dat format to new
-    days := days + 2922 // Days between 1 Jan 1970 and 1978
-    // Convert (mins,ticks) to msecs assuming 1000 ticks per second
-    msecs  := datv!1*60_000 + datv!2
-    datv!2 := -1 // mark as new dat format
-  }
+  //IF datv!2>=0 DO // No longer used
+  //{ // Convert old dat format to new
+  //  days := days + 2922 // Days between 1 Jan 1970 and 1978
+  //  // Convert (mins,ticks) to msecs assuming 1000 ticks per second
+  //  msecs  := datv!1*60_000 + datv!2
+  //  datv!2 := -1 // mark as new dat format
+  //}
 
   dayofweek := (days+4) MOD 7 // 1 Jan 1970 was a Thursday (code=4)
   secs  := msecs/1000         // Seconds since midnight
@@ -1518,6 +2109,23 @@ AND isleap(year) = year MOD 400 = 0 -> TRUE,
                    year MOD 100 = 0 -> FALSE,
                    year MOD   4 = 0 -> TRUE,
                                        FALSE
+
+AND cmpdats(dat1, dat2) = VALOF
+{ // Compare date and times
+  // dat1 -> [days1,msecs1]
+  // dat2 -> [days2,msecs2]
+  // Return -1 if dat1 earlier than dat2
+  // Return  0 if dat1 and dat2 are the same
+  // Return  1 if dat1 later than dat2
+  LET diff = dat1!0 - dat2!0
+  UNLESS diff=0 RESULTIS diff<0 -> -1, 1
+  // Both dates have the same day
+  // Compare the msecs
+  diff := dat1!1 - dat2!1
+  IF diff<0 RESULTIS -1
+  IF diff>0 RESULTIS 1
+  RESULTIS 0
+}
 
 AND testbit(bitno, bitvec) = VALOF
 // This function returns a non zero value if the specified bit in
@@ -1646,10 +2254,9 @@ AND getvec(upb) = VALOF
 { LET res = ?
   IF upb<0 DO
   { sawritef("BLIB: getvec(%n) called*n", upb)
-    abort(1000)
+    abort(999)
   }
   res := sys(Sys_getvec, upb)
-//sawritef("BLIB: task %i2 calling getvec(%i6) => %i6*n", taskid, upb, res)
   RESULTIS res
 }
 
@@ -1794,13 +2401,13 @@ AND recordpoint(scb, recno) = VALOF
 { LET pvec = VEC 1
   LET type = scb!scb_type
   UNLESS type=scbt_file | type=scbt_ram DO
-  { sawritef("FLIB recordpoint: only works on a disc or RAM file*n")
+  { sawritef("blib: recordpoint only works on a disc or RAM file*n")
     abort(999)
     RESULTIS FALSE
   }
-  IF recno<0 DO   // The first record has number 0
-  { sawritef("DLIB: recordpoint recno=%n*n", recno)
-    abort(1000)
+  UNLESS recno>=0 DO   // The record number must be >= 0
+  { sawritef("blib: recordpoint given bad recno=%n*n", recno)
+    abort(999)
     recno := 0
   }
 //sawritef("DLIB: recordpoint: muldiv(%n,%n,%n)*n",
@@ -1808,7 +2415,7 @@ AND recordpoint(scb, recno) = VALOF
 //abort(1000)
   pvec!0 := muldiv(scb!scb_reclen, recno, scb!scb_bufend) // MR 29/7/02
   pvec!1 := result2
-//sawritef("DLIB: recordpoint: recno %n => %n %n*n",
+//sawritef("DLIB: recordpoint: recno %n => blockno=%n pos=%n*n",
 //          recno, pvec!0, pvec!1)
 //abort(1000)
 //IF pvec!0>2 DO abort(8888)
@@ -1883,5 +2490,105 @@ AND setbulk(scb, no_records) = VALOF
 
 AND datstamp(v) = sys(Sys_datstamp, v)
 
-// Dummy definition of testflags
-AND testflags(flags) = FALSE
+AND stackfree(hwm) = VALOF
+{ // If hwm=TRUE the result is the number of unused stack words
+  //             above the high water mark.
+  // otherwise   the result is the number of words between the
+  //             current stack frame pointer and the end of stack.
+  LET stacksize = currco!co_size
+  LET freewords = stacksize - (@hwm - currco)
+  IF hwm=TRUE DO
+  { FOR p = currco + currco!co_size TO currco BY -1 DO
+    { IF !p=stackword LOOP
+      freewords := stacksize - (p - currco)
+      BREAK
+    }
+  }
+  result2 := stacksize
+  RESULTIS freewords
+}
+
+// It checks that the memory chain is valid and return the amount
+// of free memory, result2 is the Cintcode memory size.
+// If the memory chain is corrupt it outputs an error message and
+// call abort(999).
+AND memoryfree(x) = VALOF
+{ LET usedwords = 0
+  LET freewords = 0
+  LET a = 0 // rootnode!rtn_blklist       // Start of the memory block list
+  LET topofstore = rootnodeaddr ! rtn_memsize
+
+  // Take highest task priority for critical section
+  // (Should always be available if we are running)
+  //changepri(taskid, maxpri)
+
+  // Check that the store chain is valid.
+  UNTIL !a = 0 DO
+  { LET size = !a & -2    // Clear the block free bit
+    LET next = a + size
+
+    TEST (!a & 1) = 0     // Test if the block is currently in use
+    THEN usedwords := usedwords + size
+    ELSE freewords := freewords + size
+
+//sawritef("%i8: size %i8 %s  %i8 %i8*n", a, size,
+//         ((!a&1)->"used","free"), usedwords, freewords) 
+
+    UNLESS size>=0 & next<=topofstore DO   // Safety check
+    { //changepri(taskid, oldpri)
+      sawritef("*n******Store chain corrupt!!*n*
+               *Noticed at %n next=%n*n", a, next)
+      abort(999)
+      BREAK
+    }
+    a := next
+  }
+
+  UNLESS a=topofstore DO     // Another safety check
+  { //changepri(taskid, oldpri)
+    sawritef("*n******Store chain corrupt!!*n")
+    sawritef("The chain stopped prematurely at %n*n",a)
+    sawritef("Top of store is at %n*n", topofstore)
+    abort(999)
+  }
+
+  //changepri(taskid, oldpri)
+
+  result2 := usedwords+freewords
+  RESULTIS freewords
+}
+
+AND sxpushval(sxv, val) = VALOF
+{ // Push a value into the self expanding vector sxv.
+  LET upb = sxv!0      // =0 or the upb of v
+  LET v   = sxv!1      // =0 or a getvec'd vector for the elements.
+  LET p = v -> v!0, 0 // Position of the previous element, if any.
+  // Initially upb, v, and p are all zero.
+  // If v is not zero, v!0 will be the subscript of its latest element in v.
+  // If the vector is full, pushval will allocate another larger vector
+  // and copy the existing elements into it before pushing x.
+  // The result is the subscript of v where val is stored.
+  
+  IF p>=upb DO
+  { LET newupb = 3*upb/2 + 10 // upb of the new larger vector
+    LET newv = getvec(newupb)
+    UNLESS newv DO
+    { writef("More memory needed for pushval*n")
+      abort(999)
+      RETURN
+    }
+    sxv!0 := newupb // Update the control block
+    sxv!1 := newv
+
+    FOR i = 0 TO upb DO newv!i := v!i      // Copy the existing elements
+    FOR i = upb+1 TO newupb DO newv!i := 0 // Pad with zeroes
+
+    IF v DO freevec(v) // Free the old vector if it existed.
+
+    v := newv
+  }
+  p := p+1
+  v!0, v!p := p, val
+  RESULTIS p
+}
+

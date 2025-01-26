@@ -1,16 +1,42 @@
 /*
-** This is CLIB for BCPL compiled into native code
-**
-** It is based on cintsys.c from the BCPL Cintcode system and is
-** meant to run on most machines with a Unix-like C libraries.
-**
-** (c) Copyright:  Martin Richards  19 Jun 2013
-**
+This is CLIB for BCPL compiled into native code
+It contains def of main
+
+It is based on cintsys.c from the BCPL Cintcode system and is
+meant to run on most machines with a Unix-like C libraries.
+
+(c) Copyright:  Martin Richards  19 Jun 2013
+
+This file is out of date and requires modification particularly
+for the natbcpl version for AMD64 machines. I believe it still
+workd on i386 machines.
 */
 
-// Test this sort of comment.
+// Just testing whether this sort of comment is available.
 
 /*
+04/10/18
+After including cintsys.h, the macro PTR64 will be defined by INT.h if this
+program is being compiled on an architecture that uses 64 bit pointers.
+TARGET64 will be defined if the target BCPL word length is 64 bits, even if
+PTR64 is not defined. There are thus 4 versions of the system all provided by
+the same source code.
+
+26/08/18
+Modified the treatment of streams to always use fpvec to hold values of
+type FILE*. This increases the compatibility between 32 and 64 bit systems.
+(This mechanism is no longer used). When machine addresses have to be saved
+in BCPL space two BCPLWORDs are used.
+
+30/03/16
+Added rootnode field Rtn_system. =1 for Cintsys, =2 for Cintpos, =0 otherwise.
+
+03/03/14
+The Cintcode memory must have read, write and execute permissions.  Allocating
+memory using malloc seems to provide this under windows but not under all
+versions of Linux, so under Linux the Cintcode memory is now allocated using
+mmap.
+
 15/04/13
 Added sys(Sys_opengl,...) to provide an interface to the OpenGL graphics library.
 
@@ -162,7 +188,7 @@ until successfully opened.  It is designed to work on both Windows and
 unix. The convention will be that if the shell variable is set it will specify
 a path used by loadseg (ie the initial loading of SYSLIB, BOOT, BLIB, CLI and
 CLI commands) as well as for header files. There are small related changes to
-libhdr, BLIB.b and bcpl.b.
+libhdr, blib.b and bcpl.b.
 
 5/11/98
 The comment character in object modules has changed from semicolon(';') to hash
@@ -178,7 +204,7 @@ Added handler for SIGINT to restore tty settings
 
 30/4/96
 Added call of fflush(fp) to case 13: in dosys, with corresponding changes to
-libhdr and BLIB.b (added flush())
+libhdr and blib.b (added flush())
 
 24/11/95
 Improved the efficiency of the calls of fread and fwrite
@@ -195,7 +221,6 @@ to forMAC, forMIPS, forSUN4 etc Add and set external tallyv
 #include <signal.h>
 #include <string.h>
 #include <math.h>
-#include <sys/stat.h>
 
 #if defined(forVmsItanium) || defined(forVmsVax)
 #include <timeb.h>
@@ -212,7 +237,6 @@ BCPLWORD rootnode[Rtn_upb+1];
 static char *parms;  /* vector of command-line arguments */
 static int  parmp=1; /* subscript of next command-line character. */
 static int  ttyinp;  /* =1 if stdin is a tty, =0 otherwise */
-static int verbose =  1;
 
 /* Function defined in callc.c  */
 extern BCPLWORD callc(BCPLWORD *args, BCPLWORD *g);
@@ -279,8 +303,20 @@ static char* scriptsvar = "BCPLSCRIPTS"; /* The default setting */
 int tracing = 0;
 int filetracing = 0;
 
+BCPLWORD memupb;        // In words
+BCPLWORD Globupb=2000;  // MR 28/12/2019 used to be 1000
+                        // also made a similar change in boot.b
+BCPLWORD taskname[4];   // Used in getvec for debugging
+
+BCPLWORD *W;    // This will hold the pointer to the memory used by getvec
+
+
 /* Function defined in mlib -- the m/c library */
 BCPLWORD callstart(BCPLWORD *p, BCPLWORD *g);
+
+void copyaddrB2C(void*from, void*to); // Used for saving and restoring
+void copyaddrC2B(void*from, void*to); // host machine addresses.
+
 
 #define Globword       0x8F8F0000L
 
@@ -306,9 +342,9 @@ BCPLWORD callstart(BCPLWORD *p, BCPLWORD *g);
 int badimplementation(void)
 { int bad = 0;
   int A='A';
-  SIGNEDCHAR c = (SIGNEDCHAR)255;
+  BCPLCHAR c = (BCPLCHAR)255;
   if(sizeof(BCPLWORD)!=(1<<B2Wsh)) {
-       PRINTF("Size of a BCPL word is not %d\n", 1<<B2Wsh);
+       PRINTF("Bytes per BCPL word is not %d\n", 1<<B2Wsh);
        bad = 1;
   }
   if(A!=65) {
@@ -316,7 +352,7 @@ int badimplementation(void)
        bad = 1;
   }
   if (c/-1 != 1) {
-    PRINTF("There is a problem with SIGNEDCHAR\n");
+    PRINTF("BCPLCHAR should be a signed char\n");
     bad = 1;
   }
   /* Test vmsfname */
@@ -383,17 +419,18 @@ void handler(int sig)
 }
 
 int main(int argc, char *argv[])
-{ int i = stackupb;      /* for FOR loops  */
+{ int rc;
+  int i;                         // for FOR loops
   BCPLWORD res;
 
   printf("main: entered\n");
-
-  for(i=0; i<=Rtn_upb; i++) rootnode[i] = 0;
 
   if ( badimplementation() )
   { printf("This implementation of C is not suitable\n");
     return 20;
   }
+
+  for(i=0; i<=Rtn_upb; i++) rootnode[i] = 0;
 
   /* Try to reconstruct the command line arguments from argv */
   parms = (char *)(MALLOC(256));
@@ -405,7 +442,7 @@ int main(int argc, char *argv[])
       char *arg = argv[i];
       int len = strlen(arg);
       int j;
-      int is_string = 0; /* =1 if arg contains ", space, or newline.white space */
+      int is_string = 0; // =1 if arg contains ", space, or newline.white space
       /*printf("clib: getting command line, len=%d\n", len); */
       for (j=0; j<len; j++)
         if( arg[j]=='"' || arg[j]==' ' || arg[j]=='\n') is_string = 1;
@@ -429,9 +466,9 @@ int main(int argc, char *argv[])
     parmp = 1;    /* Subscript of the first character of the */
                   /* command-line argument */
 
-    /*printf("clib: args: len=%d\n", parms[0]); */
-    /*for(i=1; i<=parms[0];i++) printf("parm[%d]=%d\n", i, parms[i]); */
-    /*printf("\n"); */
+    //printf("clib: args: len=%d\n", parms[0]);
+    //for(i=1; i<=parms[0];i++) printf("parm[%d]=%d\n", i, parms[i]);
+    //printf("\n");
   }
 
   /*  parms = (BCPLWORD *)(MALLOC(argc+1)); */
@@ -454,7 +491,7 @@ int main(int argc, char *argv[])
   prefixstr     = rootvarstr+4*16;
   prefixbp      = (char *)(prefixstr<<B2Wsh);
   for(i=0; i<=5*16; i++) ((BCPLWORD*)(rootvarstr<<B2Wsh))[i] = 0;
-  if (verbose) printf("rootnode[Rtn_hdrsvar]=%ld\n", rootnode[Rtn_hdrsvar]);
+  printf("clib.c: rootnode[Rtn_hdrsvar]=%d\n", rootnode[Rtn_hdrsvar]);
 
   c2b_str(rootvar, rootvarstr);
   c2b_str(pathvar, pathvarstr);
@@ -466,9 +503,9 @@ int main(int argc, char *argv[])
   rootnode[Rtn_hdrsvar]      = hdrsvarstr;
   rootnode[Rtn_scriptsvar]   = scriptsvarstr;
 
-  if (verbose) printf("rootnode=%ld\n", (BCPLWORD)rootnode/4);
-  if (verbose) printf("rootnode[Rtn_hdrsvar]=%ld\n", rootnode[Rtn_hdrsvar]);
-  if(filetracing) {
+  //printf("rootnode=%d\n", (BCPLWORD)rootnode/4);
+  //printf("rootnode[Rtn_hdrsvar]=%d\n", rootnode[Rtn_hdrsvar]);
+  if(filetracing||1) {
     char *path = getenv(rootvar);
     PRINTFS("Environment variable %s", rootvar);
     PRINTFS(" = %s\n", path);
@@ -499,22 +536,31 @@ int main(int argc, char *argv[])
 
   for (i=1;i<=gvecupb;i++) globbase[i] = Globword + i;
   globbase[Gn_rootnode] = ((BCPLWORD)rootnode)>>B2Wsh;
-  if (verbose) printf("globbase[Gn_rootnode]=%ld\n", globbase[Gn_rootnode]);
+  //printf("globbase[Gn_rootnode]=%d\n", globbase[Gn_rootnode]);
 
   for (i=0;i<=stackupb;i++) stackbase[i] = 0;
 
-  //  printf("clib: gvecupb=%d stackupb=%d\n", gvecupb, stackupb);
+  printf("clib: gvecupb=%d stackupb=%d\n", gvecupb, stackupb);
   /* initsections, gvecupb and stackupb are defined in the file */
   /* (typically) initprog.c created by a call of the command makeinit. */
 
-  if (verbose) printf("Calling initsections\n");
+  printf("Calling initsections\n");
   initsections(globbase);
-  if (verbose) printf("Calling init_keyb\n");
+  printf("Calling init_keyb\n");
   ttyinp = init_keyb();
 
-  if (verbose) printf("globbase[Gn_rootnode]=%ld\n", globbase[Gn_rootnode]);
-  if (verbose) printf("clib: calling callstart(%ld, %ld)\n", (BCPLWORD)stackbase, (BCPLWORD)globbase);
-  /* Enter BCPL start function: callstart is defined in mlib.s */
+  /*
+  printf("globbase[Gn_rootnode]=%d\n", globbase[Gn_rootnode]);
+
+  { int i;
+    for (i=0; i<20; i++) printf("g%2d = #x%8X %d\n", i, globbase[i], globbase[i]);
+  }
+  */
+
+  printf("clib: calling callstart(%d, %d)\n",
+  	 (BCPLWORD)stackbase, (BCPLWORD)globbase);
+  /* Enter BCPL start function: callstart is defined in i386/mlib.s */
+
   res = callstart(stackbase, globbase);
 
   close_keyb();
@@ -530,6 +576,7 @@ int main(int argc, char *argv[])
   free(stackbase);
   free(parms);
 
+  printf("main: returning with res=%d\n", res);
   return res;
 }
 
@@ -538,7 +585,7 @@ BCPLWORD muldiv1(BCPLWORD a, BCPLWORD b, BCPLWORD c)
   // and seem to run about 60% faster.
   // It is used by the MDIV instruction (and the syslib muldiv function).
   BCPLINT64 ab = (BCPLINT64)a * (BCPLINT64)b;
-  if (verbose) printf("muldiv: entered\n");
+  //printf("muldiv: entered\n");
   if(c==0) c=1;
   result2 = (BCPLWORD)(ab % c);
   return (BCPLWORD)(ab / c);
@@ -571,7 +618,7 @@ BCPLWORD muldiv(BCPLWORD a, BCPLWORD b, BCPLWORD c)
     if(rn>=uc) { qn++; rn -= uc; }
   }
   result2 = rneg ? -(BCPLWORD)r : r;
-  if (verbose) printf("muldiv: result2=%ld\n", result2);
+  //printf("muldiv: result2=%d\n", result2);
   return    qneg ? -(BCPLWORD)q : q;
 }
 
@@ -601,7 +648,7 @@ FILEPT pathinput(char *name, char *pathname)
 
   if ( pathname==0 || !relfilename(name)) {
     /* If no pathname given or name is absolute just search the current directory */
-    if (verbose) printf("pathinput: pathname=0\n");
+    //printf("pathinput: pathname=0\n");
     fp = fopen(osfname(name, chbuf4), "rb");
     if(filetracing)
     { PRINTFS("Trying: %s in the current directory - ", name);
@@ -614,7 +661,7 @@ FILEPT pathinput(char *name, char *pathname)
     return fp;
   }
 
-  if (verbose) printf("pathinput: pathname=%s\n", pathname);
+  //printf("pathinput: pathname=%s\n", pathname);
 
   /* Look through the PATH directories if pathname is given. */
   { char *path = getenv(pathname);
@@ -707,9 +754,10 @@ BCPLWORD dosys(register BCPLWORD *p, register BCPLWORD *g)
   switch((int)(p[3]))
   { default: printf("\nBad sys %ld\n", (long)p[3]);  return p[3];
   
-    /* case Sys_setcount: set count               -- done in cinterp
-    ** case Sys_quit:     return from interpreter -- done in cinterp
+    // case Sys_setcount: set count               -- done in cinterp
+    case Sys_quit:     exit(p[4]); //return from interpreter
 
+    /*
     ** case Sys_rti:      sys(Sys_rti, regs)      -- done in cinterp  Cintpos
     ** case Sys_saveregs: sys(Sys_saveregs, regs) -- done in cinterp  Cintpos
     ** case Sys_setst:    sys(Sys_setst, st)      -- done in cinterp  Cintpos
@@ -872,9 +920,9 @@ BCPLWORD dosys(register BCPLWORD *p, register BCPLWORD *g)
 */
 
     case Sys_muldiv:
-      if (verbose) printf("dosys: calling muldiv(%ld, %ld, %ld)\n", p[4], p[5], p[6]);
+      //printf("dosys: calling muldiv(%d, %d, %d)\n", p[4], p[5], p[6]);
     { BCPLWORD res =  muldiv(p[4], p[5], p[6]);
-	if (verbose) printf("res=%ld   result2=%ld\n", res, result2);
+	//printf("res=%d   result2=%d\n", res, result2);
       globbase[Gn_result2] = result2;
       return res;
     }
@@ -888,7 +936,8 @@ BCPLWORD dosys(register BCPLWORD *p, register BCPLWORD *g)
 */
 
     case Sys_cputime: /* Return CPU time in milliseconds  */
-      return muldiv(clock(), 1000, TICKS_PER_SEC);
+      //return muldiv(clock(), 1000, TICKS_PER_SEC);
+      return muldiv(clock(), 1000, 1000);
 
 #ifndef forWinCE
     case Sys_filemodtime:
@@ -903,24 +952,26 @@ BCPLWORD dosys(register BCPLWORD *p, register BCPLWORD *g)
        FALSE is returned and the elements of datv are set to 0, 0 and
        -1, respectively.
     */
-    { struct stat buf;
+      { //struct stat buf;
       BCPLWORD days, secs, msecs;
       char *name = b2c_str(p[4], chbuf1);
       BCPLWORD *datestamp = (BCPLWORD *)(p[5]<<B2Wsh);
-      if (stat(osfname(name, chbuf4), &buf)) {
+      ///if (stat(osfname(name, chbuf4), &buf)) {
         datestamp[0] = 0;
         datestamp[1] = 0;
         datestamp[2] = -1;
         return 0;
-      }
-      secs = buf.st_mtime;
+	///}
+
+	secs = 0; //buf.st_mtime;
       // nsecs = buf.st_mtimensec; // nano second time, if poss
       days = secs / (24*60*60);
       msecs = (secs % (24*60*60)) * 1000;
       datestamp[0] = days;
       datestamp[1] = msecs;
       datestamp[2] = -1;  // New dat format
-      if (verbose) printf("filemodtime: name=%s days=%" FormD " msecs=%" FormD "\n", name, days, msecs);
+      //printf("filemodtime: name=%s days=%" FormD " msecs=%" FormD "\n",
+      //        name, days, msecs);
       return -1;
     }
 #endif
@@ -948,9 +999,9 @@ BCPLWORD dosys(register BCPLWORD *p, register BCPLWORD *g)
               return -1;
 #endif
 
-  case 36:   return syscall(p[4], p[5], p[6], p[7], p[8], p[9]); /* Generic syscall */
+    case 36:   return 0; /* Spare */
 
-  case 37:   for (int i = 0; i < 16; i++) printf("arg[%d] = %.16X\n", i, p[i]); return 0; /* Spare  */
+    case 37:   return 0; /* Spare  */
 
     case Sys_seek:  /* res := sys(Sys_seek, fd, pos)   */
     { FILEPT fp = findfp(p[4]);
@@ -1163,6 +1214,9 @@ BCPLWORD dosys(register BCPLWORD *p, register BCPLWORD *g)
               { BCPLWORD res = doflt(p[4], p[5], p[6], p[7]);
                 globbase[Gn_result2] = result2;
 		//g[Gn_result2] = result2;
+		//if(W[p+4]==35)
+		//printf("sys_flt: op=%d res=%08" FormX " result2=%08" FormX "\n",
+                //       W[p+4], (UBCPLWORD)res, (UBCPLWORD)result2);
                 return res;
               }
 
@@ -1238,306 +1292,373 @@ void msecdelay(unsigned int delaymsecs) {
                   diffdays = days - tv[0];
                   diffmsecs = msecs - tv[1];
                   if (diffdays>0) { diffdays--; diffmsecs += msecsperday; }
-		  if (verbose) printf("Sys_delay: diffmsecs = %" FormD " msec\n", diffmsecs);
+		  //printf("Sys_delay: diffmsecs = %" FormD " msec\n", diffmsecs);
                   if (diffmsecs<=0) return;
                   if (diffmsecs>900) diffmsecs = 900;
                   timeout.tv_sec = 0;
                   timeout.tv_usec = diffmsecs * 1000;
-		  if (verbose) printf("Sys_delay: waiting for %" FormD " msec\n", diffmsecs);
+		  //printf("Sys_delay: waiting for %" FormD " msec\n", diffmsecs);
                   select(FD_SETSIZE, NULL, NULL, NULL, &timeout);
                 }
               }
 #endif
 }
 
-#ifdef NOFLOAT
-
 BCPLWORD doflt(BCPLWORD op, BCPLWORD a, BCPLWORD b, BCPLWORD c) {
-  return 0;
-}
-
-#else
-
-BCPLWORD doflt(BCPLWORD op, BCPLWORD a, BCPLWORD b, BCPLWORD c) {
-  // Typically a is left operand
-  // and b is the right operand, if required
-  typedef union fi { BCPLWORD i; float f; } FI;
-  FI x;
-  FI y;
-  FI z;
-  double dx, dy, dz;
-
-  if (verbose) printf("doflt entered op=%" FormD " fl_mk=%" FormD "\n", op, fl_mk);
+  // Typically a is the left operand
+  // and b is typically the right operand, if required.
+  // c is currently only used by fl_radius3.
+  // If TARGET64 is set, BCPLWORD is the type of a 64 bit integer
+  // and BCPLFLOAT is the type of a 64 bit floating point number,
+  // otherwise BCPLWORD and BCPLFLOAT are both of length 32.
 
   switch (op) {
   default:
     printf("doflt(%" FormD ", %" FormD ", %" FormD ") not implemented\n", op, a, b);
 
-  case fl_avail:
-    return -1;
+    case fl_avail:
+      return -1;
 
-  case fl_mk:
-  { // a=mantissa, b=exponent
-    double res = (double) a;
-    while(b> 5) { res *= 100000.0; b-=5; }
-    while(b> 0) { res *=     10.0; b--;  }
-    while(b<-5) { res /= 100000.0; b+=5; }
-    while(b< 0) { res /=     10.0; b++;  }
-    x.f = (float) res;
-    return x.i;
-  }
-
-  case fl_unmk: // eg sys(Sys_flt, fl_unmk, 1.234)
-                //     result  = 123399997
-                //     result2 =        -8
-  { BCPLWORD mantissa, exponent=0;
-    double d;
-    int neg = 0;
-    x.i = a;
-    d = x.f;
-    if (verbose) printf("d = %15.9g %" FormD "\n", d, exponent);
-    if (d<0.0) { d = -d; neg = 1; }
-    if (verbose) printf("d = %15.9g %" FormD "\n", d, exponent);
-    while (d>=100000.0) {
-      d /= 100000.0; exponent+=5;
-      if (verbose) printf("d = %15.9g %" FormD "\n", d, exponent);
-    }
-    while (d>=1.0) {
-      d /= 10.0; exponent++;
-      if (verbose) printf("d = %15.9g %" FormD "\n", d, exponent);
-    }
-    while (d<=0.00001 && exponent>=-400) {
-      d *= 100000.0; exponent-=5;
-      if (verbose) printf("d = %15.9g %" FormD "\n", d, exponent);
-    }
-    while (d<0.1 && exponent>=-400) {
-      d *= 10.0; exponent--;
-      if (verbose) printf("d = %15.9g %" FormD "\n", d, exponent);
-    }
-    if (exponent>=-400) {
-      mantissa = (BCPLWORD) (d * 1000000000.0 + 0.5);
-      exponent -= 9;
-    } else {
-      mantissa = 0;
-      exponent = 0;
-    }
-    result2 = exponent;
-    if (neg) mantissa = -mantissa;
-    return mantissa;
-  }    
-
-  case fl_float:
-    x.f = (float)a; 
-    return x.i;
-
-  case fl_fix:
-    x.i = a;
-    if(x.f<0) return (BCPLWORD)(x.f - 0.5);
-    return (BCPLWORD)(x.f + 0.5);
-
-  case fl_abs:
-    x.i = a;
-    if (x.f<0.0) x.f = -x.f;
-    return x.i;
-
-  case fl_mul:
-    x.i = a; y.i = b;
-   x.f = x.f * y.f;
-    return x.i;
-
-  case fl_div:
-    x.i = a; y.i = b;
-    x.f = x.f / y.f;
-    return x.i;
-
-  case fl_add:
-    x.i = a; y.i = b;
-    x.f = x.f + y.f;
-    return x.i;
-
-  case fl_sub:
-    x.i = a; y.i = b;
-    x.f = x.f - y.f;
-    return x.i;
-
-  case fl_pos:
-    return a;
-
-  case fl_neg:
-    x.i = a;
-    x.f = -x.f;
-    return x.i;
-
-  case fl_eq:
-    x.i = a; y.i = b;
-    return x.f == y.f ? -1 : 0;
-
-  case fl_ne:
-    x.i = a; y.i = b;
-    return x.f != y.f ? -1 : 0;
-
-  case fl_ls:
-    x.i = a; y.i = b;
-    return x.f < y.f ? -1 : 0;
-
-  case fl_gr:
-    x.i = a; y.i = b;
-    return x.f > y.f ? -1 : 0;
-
-  case fl_le:
-    x.i = a; y.i = b;
-    return x.f <= y.f ? -1 : 0;
-
-  case fl_ge:
-    x.i = a; y.i = b;
-    return x.f >= y.f ? -1 : 0;
-
-  case fl_acos:
-    x.i = a;
-    x.f = acos(x.f);
-    return x.i;
-
-  case fl_asin:
-    x.i = a;
-    x.f = asin(x.f);
-    return x.i;
-
-  case fl_atan:
-    x.i = a;
-    x.f = atan(x.f);
-    return x.i;
-
-  case fl_atan2:
-    x.i = a; y.i = b;
-    x.f = atan2(x.f, y.f);
-    return x.i;
-
-  case fl_cos:
-    x.i = a;
-    x.f = cos(x.f);
-    return x.i;
-
-  case fl_sin:
-    x.i = a;
-    x.f = sin(x.f);
-    return x.i;
-
-  case fl_tan:
-    x.i = a;
-    x.f = tan(x.f);
-    return x.i;
-
-  case fl_cosh:
-    x.i = a;
-    x.f = cosh(x.f);
-    return x.i;
-
-  case fl_sinh:
-    x.i = a;
-    x.f = sinh(x.f);
-    return x.i;
-
-  case fl_tanh:
-    x.i = a;
-    x.f = tanh(x.f);
-    return x.i;
-
-  case fl_exp:
-    x.i = a;
-    x.f = exp(x.f);
-    return x.i;
-
-  case fl_frexp:
-  { int r2;
-    x.i = a;
-    x.f = frexp(x.f, &r2);
-    result2 = r2;
-    return x.i;
-  }
-
-  case fl_ldexp:
-    x.i = a;
-    x.f = ldexp(x.f, b);
-    return x.i;
-
-  case fl_log:
-    x.i = a;
-    x.f = log(x.f);
-    return x.i;
-
-  case fl_log10:
-    x.i = a;
-    x.f = log10(x.f);
-    return x.i;
-
-  case fl_modf:
-    { double r1, r2;
-      x.i = a;
-      r1 = modf((double)x.f, &r2);
-      x.f = (float)r1;
-      result2 = (BCPLWORD)r2;
-      return (BCPLWORD)x.i;
+    case fl_mk: // eg sys(Sys_flt, fl_mk, 1234, -3) => 1.234 
+    { // a=mantissa, b=exponent
+      BCPLFLOAT da = (BCPLFLOAT) a;
+      BCPLFLOAT res;
+      while(b > 5) { da *= 100000.0; b-=5; }
+      while(b > 0) { da *=     10.0; b--;  }
+      while(b <-5) { da /= 100000.0; b+=5; }
+      while(b < 0) { da /=     10.0; b++;  }
+      res = (BCPLFLOAT) da;
+      return F2N (res);
     }
 
-  case fl_pow:
-    x.i = a; y.i = b;
-    x.f = pow(x.f, y.f);
-    return x.i;
+    case fl_unmk: // eg for 32 bit BCPL sys(Sys_flt, fl_unmk, 1.234)
+                  //     result  = 123399997   9 digits
+                  //     result2 =        -8
+                  // If a is zero result and result2 are both zero
+                  // On 64 bit BCPL the result has up to 18 digits with
+                  // an appropriate exponent. Neither the most and least
+                  // significant digits of the matissa are zero.
+                  // Most of the calculation is done using 64 bit
+                  // arithmetic.
+    { BCPLINT64 mantissa;
+      int exponent=0;
+      FLOAT64 d = (FLOAT64) (N2F a);  // N2F is defined to be *(BCPLFLOAT*)&
+      int neg = 0;
 
-  case fl_sqrt:
-    x.i = a;
-    x.f = sqrt(x.f);
-    return x.i;
+      if (d==0.0) {
+        result2 = 0;
+        return 0;
+      }
 
-  case fl_ceil:
-    x.i = a;
-    x.f = ceil(x.f);
-    return x.i;
+      if (d<0.0) { d = -d; neg = 1; }
 
-  case fl_floor:
-    x.i = a;
-    x.f = floor(x.f);
-    return x.i;
+      // while d>=10 divide by a power of 10 and adjust the exponent.
 
-  case fl_fmod:
-    x.i = a; y.i = b;
-    x.f = fmod(x.f, y.f);
-    return x.i;
+      while (d >= 100000.0 && exponent<100) {
+        d = d / 100000.0; exponent+=5;
+        //printf("unmk3: d = %15.9e %d\n", d, exponent);
+      }
+
+      while (d>=10.0 & exponent<100) {
+        d = d / 10.0; exponent++;
+        //printf("unmk4: d = %15.9e %d\n", d, exponent);
+      }
+
+      if (exponent>=100) {
+        result2 = 100;
+        return 1;
+      }
+
+      // d is now less than 10.0
+
+      //printf("unmk5: d = %15.9e %d\n", d, exponent);
+      while (d<=0.00001 && exponent>-100) {
+        d *= 100000.0; exponent-=5;
+        //printf("unmk6: d = %15.9e %d\n", d, exponent);
+      }
+
+      while (d<1.0 && exponent>-100) {
+        d *= 10.0; exponent--;
+        //printf("unmk7: d = %15.9e %d\n", d, exponent);
+      }
+
+      if (exponent<=-100) {
+        result2 = 0; // Treat 1E-100 as 0.0
+        return 0;
+      }
+
+      //printf("unmk: d should now be >=1.0 and <10.0\n");
+      // d is now <10.0 and >= 1.0
+      mantissa = floor(d * 1e16); // Mantissa has 17 digits
+      exponent -= 16;
+
+      //printf("unmk8: d = %24.18f mantissa=%18lld exponent=%d\n", d, mantissa, exponent);
+
+#ifndef TARGET64
+      // For 32 bit BCPL, ensure that mantissa has no more
+      // than 9 digits
+      //printf("unmk: mantissa=%lld exponent=%d\n", mantissa, exponent);
+      while(mantissa >= 1e10) {
+        mantissa = mantissa/10;  // Divide by 10 without rounding
+        exponent++;
+	//printf("unmk: mantissa=%lld exponent=%d\n", mantissa, exponent);
+      }
+      if(mantissa >= 1e9) {
+        mantissa = (mantissa+5)/10;  // Divide by 10 with rounding
+        exponent++;
+	//printf("unmk: mantissa=%lld exponent=%d\n", mantissa, exponent);
+      }
+#endif
+
+      // Divide mantissa by 10 with rounding and correct the exponent.
+      mantissa = (mantissa+5)/10;
+      exponent++;
+
+      // Ensure the least significant decimal digit of mantissa
+      // is not 0. Checking mantissa non zero for safety.
+      while (mantissa%10 == 0 && mantissa != 0) {
+        mantissa = mantissa/10;
+        exponent++;
+	//printf("unmk: mantissa=%lld exponent=%d\n", mantissa, exponent);
+      }
+
+      if (mantissa==0) exponent=0; // For safety.
+
+      //printf("unmk9: d = %24.18f mantissa=%18lld exponent=%d\n", d, mantissa, exponent);
+      result2 = (BCPLWORD)exponent;
+      if (neg) return (BCPLWORD)(-mantissa);
+      return (BCPLWORD)(mantissa);
+    }    
+
+    case fl_float:
+    { BCPLFLOAT fa = (BCPLFLOAT) a;
+      return F2N fa;
+    }
+
+    case fl_fix: // Return nearest integer
+    { BCPLFLOAT fa = N2F a;
+      if(fa<0.0) return (BCPLWORD)(fa - 0.5);
+      else       return (BCPLWORD)(fa + 0.5);
+    }
+
+    case fl_abs:
+    { BCPLFLOAT fa = N2F a;
+      if (fa<0.0) fa = -fa;
+      return F2N fa;
+    }
+
+    case fl_mul:
+    { BCPLFLOAT res = N2F a * N2F b;
+      return F2N res;
+    }
+
+    case fl_div:
+    { BCPLFLOAT res = N2F a / N2F b;
+      return F2N res;
+    }
+
+    case fl_mod:
+    { BCPLFLOAT res = Cfmod(N2F a, N2F b);
+      return F2N res;   // Return the floating point remainder
+                        // after dividing a by b. Ie return
+                        // x - n * y where n is the integer
+                        // quotient of x / y. ie how many times
+                        // y can be subtracted from x before
+                        // the sign changes.
+    }
+
+    case fl_add:
+    { BCPLFLOAT res = N2F a + N2F b;
+      return F2N res;
+    }
+
+    case fl_sub:
+    { BCPLFLOAT res = N2F a - N2F b;
+      return F2N res;
+    }
+
+    case fl_pos:
+      return a;
+
+    case fl_neg:
+    { BCPLFLOAT res = N2F a;
+      res = -res;
+      return F2N res;
+    }
+
+    case fl_eq:
+      return N2F a == N2F b ? -1 : 0;
+
+    case fl_ne:
+      return N2F a != N2F b ? -1 : 0;
+
+    case fl_ls:
+      //printf("cintsys: fl_ls of %8X and %8X\n", a, b);
+      //printf("cintsys: fl_ls of %13.4f and %13.4f\n", N2F a, N2F b);
+      return N2F a < N2F b ? -1 : 0;
+
+    case fl_gr:
+      return N2F a > N2F b ? -1 : 0;
+
+    case fl_le:
+      return N2F a <= N2F b ? -1 : 0;
+
+    case fl_ge:
+      return N2F a >= N2F b ? -1 : 0;
+
+    case fl_acos:
+    { BCPLFLOAT res = Cacos(N2F a);
+      return F2N res;
+    }
+
+    case fl_asin:
+    { BCPLFLOAT res = Casin(N2F a);
+      return F2N res;
+    }
+
+    case fl_atan:
+    { BCPLFLOAT res = Catan(N2F a);
+      return F2N res;
+    }
+
+    case fl_atan2:
+    { BCPLFLOAT res = Catan2(N2F a, N2F b);
+      return F2N res;
+    }
+
+    case fl_cos:
+    { BCPLFLOAT res = Ccos(N2F a);
+      return F2N res;
+    }
+
+    case fl_sin:
+    { BCPLFLOAT res = Csin(N2F a);
+      return F2N res;
+    }
+
+    case fl_tan:
+    { BCPLFLOAT res = Ctan(N2F a);
+      return F2N res;
+    }
+
+    case fl_cosh:
+    { BCPLFLOAT res = Ccosh(N2F a);
+      return F2N res;
+    }
+
+    case fl_sinh:
+    { BCPLFLOAT res = Csinh(N2F a);
+      return F2N res;
+    }
+
+    case fl_tanh:
+    { BCPLFLOAT res = Ctanh(N2F a);
+      return F2N res;
+    }
+
+    case fl_exp:
+    { BCPLFLOAT res = Cexp(N2F a);
+      return F2N res;
+    }
+
+    case fl_frexp:
+    // If a is non zero it returns a fraction f in the
+    // range 0.5 (inclusive) to 1.0 (exclusive) and an
+    // integer exponent e in result2 such that f = a x 2^e
+    { int r2=222;
+      // frexp expects an int* as its second argument but
+      // actually places a floating point integer there.
+      BCPLFLOAT fa = frexp(N2F a, &r2);
+      //printf("frexp: a=%13.3f => %13.6f  e=%d\n", N2F a, fa, r2);
+      result2 = r2;
+      //printf("frexp: resul2=%d\n", result2);
+      return F2N fa;
+    }
+
+  case fl_ldexp:  // Returns a x 2^b where a is floating
+                  //                 and b is an integer
+    { BCPLFLOAT res = ldexp(N2F a, b);
+      return F2N res;
+    }
+
+    case fl_log:
+    { BCPLFLOAT res = log(N2F a);
+      return F2N res;
+    }
+
+    case fl_log10:
+    { BCPLFLOAT res = log10(N2F a);
+      return F2N res;
+    }
+
+    case fl_modf:
+    { BCPLFLOAT r1, r2;
+#ifdef TARGET64
+      r1 = modf(N2F a, &r2);
+#else
+      r1 = modff(N2F a, &r2);
+#endif
+      result2 = F2N r2;   // The integer part of x as a BCPLFLOAT
+      return F2N r1;      // The fractional part of x
+                          // both are the same sign a x
+    }
+ 
+    case fl_pow:
+    { BCPLFLOAT res = pow(N2F a, N2F b);
+      return F2N res; 
+    }
+
+    case fl_sqrt:
+    { BCPLFLOAT res = sqrt(N2F a);
+      return F2N res;
+    }
+
+    case fl_ceil:
+    { BCPLFLOAT res = ceil(N2F a);
+      return F2N res;
+    }
+
+    case fl_floor:
+    { BCPLFLOAT res = floor(N2F a);
+      return F2N res;
+    }
 
     case fl_N2F:
     { // eg sys(Sys_flt, fl_N2F, 1_000, 1_234) => 1.234
-      float af = (float)a;
-      float bf = (float)b;
-      x.f = bf / af;
-      return x.i;
+      BCPLFLOAT res = (BCPLFLOAT)b / (BCPLFLOAT)a;
+      return F2N res;
     } 
 
     case fl_F2N:
     { // eg sys(Sys_flt, fl_F2N, 1_000, 1.234) => 1_234
-      float res;
-      x.i = b;
-      res = (float)a * x.f;
-      if(res<0) return (BCPLWORD)(res - 0.5);
-      return (BCPLWORD)(res + 0.5);
+      BCPLFLOAT fa = (BCPLFLOAT)a;
+      BCPLFLOAT fb = N2F b;
+      BCPLFLOAT res = fa * fb;
+      if(res<0) { res = res - 0.5; }
+      else      { res = res + 0.5; }
+      return (BCPLWORD)res;
     }
 
     case fl_radius2:
-      // eg sys(Sys_flt, fl_radius2, 3.0, 4.0) => 5.0
-      x.i = a; y.i = b;
-      x.f = sqrt(x.f*x.f + y.f*y.f);
-      return x.i;
+    { // eg sys(Sys_flt, fl_radius2, 3.0, 4.0) => 5.0
+      // since 9 + 16 = 25
+      BCPLFLOAT fa = N2F a;
+      BCPLFLOAT fb = N2F b;
+      BCPLFLOAT res = sqrt(fa*fa + fb*fb); 
+      return F2N res;
+    }
 
     case fl_radius3:
-      // eg sys(Sys_flt, fl_radius3, 1.0, 2.0, 2.0) => 3.0
+    { // eg sys(Sys_flt, fl_radius3, 1.0, 2.0, 2.0) => 3.0
       // since 1 + 4 + 4 = 9
-      x.i = a; y.i = b; z.i = c;
-      x.f = sqrt(x.f*x.f + y.f*y.f + z.f*z.f);
-      return x.i;
-  };
-
-  //return 0;
+      BCPLFLOAT fa = N2F a;
+      BCPLFLOAT fb = N2F b;
+      BCPLFLOAT fc = N2F c;
+      BCPLFLOAT res = sqrt(fa*fa + fb*fb+fc*fc); 
+      return F2N res;
+    }
+  }
 }
-#endif
 
 BCPLWORD timestamp(BCPLWORD *v) {
   // Set v[0] = days since 1 January 1970
@@ -1565,7 +1686,7 @@ BCPLWORD timestamp(BCPLWORD *v) {
     secs = tb.time;
     //if(tb.dstflag) secs += 60*60;
     secs -= tb.timezone * 60;
-    if (verbose) printf("tb.dstflag=%" FormD " tb.timezone=%" FormD "\n",
+    //printf("tb.dstflag=%" FormD " tb.timezone=%" FormD "\n",
     //        tb.dstflag, tb.timezone);
     msecs = tb.millitm;
   }
@@ -1713,7 +1834,7 @@ This function converts a cintsys/cintpos filename to a Unix filename
 This copies name to winname replacing all '/' characters by '\'s.
 */
   char *p = osname;
-  if (verbose) printf("unixfname: name=%s\n", name);
+  //printf("unixfname: name=%s\n", name);
   while(1) {
     int ch = *name++;
     if(ch=='\\') ch = '/';
@@ -1730,7 +1851,7 @@ format. The possible formats are UNIX, WIN or VMS.
   char *res=0;
   char buf[256];
 
-  if (verbose) printf("osfname: name=%s\n", name);
+  //printf("osfname: name=%s\n", name);
 
 #ifdef VMSNAMES
   res = vmsfname(prepend_prefix(name, buf), osname);
@@ -1760,11 +1881,11 @@ char *prepend_prefix(char *fromstr, char *tostr)
 { char *pfxp = prefixbp;
   int pfxlen = *pfxp++;
   int i = 0;
-  if (verbose) printf("prepend_prefix: fromstr=%s pfxlen=%d\n", fromstr, pfxlen);
+  //printf("prepend_prefix: fromstr=%s pfxlen=%d\n", fromstr, pfxlen);
   if(pfxlen==0) return fromstr;
   if(!relfilename(fromstr)) return fromstr;
 
-  if (verbose) printf("prepend_prefix: prepending the prefix\n");
+  //printf("prepend_prefix: prepending the prefix\n");
 
   while(pfxlen--) tostr[i++] = *pfxp++;
   /* Insert separator '/' between the prefix and name, if necessary. */
@@ -1775,7 +1896,7 @@ char *prepend_prefix(char *fromstr, char *tostr)
     tostr[i++] = ch;
     if(ch==0) break;
   }
-  if (verbose) printf("prepend_prefix: gives tostr=%s\n", tostr);
+  //printf("prepend_prefix: gives tostr=%s\n", tostr);
   return tostr;
 }
 

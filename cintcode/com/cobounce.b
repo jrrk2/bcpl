@@ -9,7 +9,7 @@ GLOBAL {
 
 LET start() BE 
 { LET argv = VEC 10
-  LET count = 1_000_000
+  LET count = 10_000_000
 
   UNLESS rdargs("COUNT", argv, 10) DO
   { writef("Bad arguments for SEND*n")
@@ -30,8 +30,12 @@ LET start() BE
 AND bouncefn(val) BE val := cowait(val) REPEAT
 
 AND senderfn(count) BE
-{ writef("Calling the bounce coroutine %n times*n", count)
+{ LET t = sys(Sys_cputime)
+  writef("Calling the bounce coroutine %n times*n", count)
 //abort(1000)
   FOR i = 1 TO count DO callco(bounce_co, i)
+  t := sys(Sys_cputime) - t // Run time is msecs
+  writef("About %n coroutine changes per second*n",
+         muldiv(2*count, 1_000, t))
   writes("done*n")
 }

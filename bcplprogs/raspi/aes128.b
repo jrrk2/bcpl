@@ -30,8 +30,7 @@ GLOBAL {
 }
 
 MANIFEST {
-  n=4         // 4x4 matrices are being used
-  Keylen=n*n
+  Keylen=16   // 16 = 4x4
   Nr=10       // Number of rounds
 }
 
@@ -56,14 +55,14 @@ LET InvShiftRows_ts() BE
 // state matrix with values in the S-box.
 LET SubBytes_ts() BE
 { // Apply sbox from t state to s state
-  FOR i = 0 TO n*n-1 DO stateS!i := sbox%(stateT!i)
+  FOR i = 0 TO 15 DO stateS!i := sbox%(stateT!i)
 }
 
 // The InvSubBytes Function Substitutes the values in the
 // state matrix with values in an RS-box.
 LET InvSubBytes_st() BE
 { // Apply rsbox from s state to t state
-  FOR i = 0 TO n*n-1 DO stateT!i := rsbox%(stateS!i)
+  FOR i = 0 TO 15 DO stateT!i := rsbox%(stateS!i)
 }
 
 LET inittables() BE
@@ -107,13 +106,13 @@ LET inittables() BE
 
 LET AddRoundKey_st(i) BE
 { // Add key round i from s state to t state
-  LET K = @Rkey!(n*n*i)   // n = number of elements per row
+  LET K = @Rkey!(16*i)   // n = number of elements per row
   FOR i = 0 TO 15 DO stateT!i := stateS!i XOR K!i
 }
 
 LET AddRoundKey_ts(i) BE
 { // Add key round i from s state to t state
-  LET K = @Rkey!(n*n*i)   // n = number of elements per row
+  LET K = @Rkey!(16*i)   // n = number of elements per row
   FOR i = 0 TO 15 DO stateS!i := stateT!i XOR K!i
 }
 
@@ -129,8 +128,8 @@ LET KeyExpansion(key) BE
 
   // Add 10 more keys to the round schedule
   FOR i = 1 TO 10 DO
-  { LET p = @Rkey!(n*n*i) // Pointer to space for key in round i
-    LET q = p-n*n          // Pointer to round key i-1
+  { LET p = @Rkey!(16*i) // Pointer to space for key in round i
+    LET q = p-16        // Pointer to round key i-1
 
     p!00 := q!00 XOR sbox%(q!07) XOR rcon
     p!04 := q!04 XOR sbox%(q!11)
@@ -416,9 +415,9 @@ LET start() = VALOF
 
 AND prstate(m) BE
 { // For outputting state matrix or keys, column by column.
-  FOR i = 0 TO n-1 DO
+  FOR i = 0 TO 3 DO
   { wrch(' ')
-    FOR j = 0 TO n-1 DO
+    FOR j = 0 TO 3 DO
       writef("%x2", m!(4*j+i))
   }
   newline()

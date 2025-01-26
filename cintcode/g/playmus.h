@@ -1,11 +1,21 @@
 /*
 This is the header file for playmus.b
 
-Wriiten by Martin Richards (c) February 2009
+Written by Martin Richards (c) November 2022
+
+History
+
+08 Dec 2022
+Started a major revision of this program.
+Reorganising how environments work.
+
+01 Feb 2009
+Initial implementation started
+
 */
 
 GLOBAL {
-// BGPM globals
+// BGPM global variables
 bg_s:ug
 bg_t
 bg_h
@@ -15,197 +25,322 @@ bg_c
 bg_e
 bg_ch
 
-bggetch; bgputch;  bgwrnum
-bgpush
-error
+bgrec_p // For errors detected in BGPM
+bgrec_l
 
-bgpmco
-bgpmfn
-
+bgpmco // The BGPM macro generator is implemented as a corouitne.
+       // ch := callco(bgplco, 0)   get the next character
 playmus_version // eg "Playmus v2.0"
 sysin; sysout; sourcestream; tostream
 sourcenamev; sourcefileno; sourcefileupb
 getstreams
-lineno      // <fno/ln> of latest character obtained by bggetch
-nextlineno  // <fno/ln> of the next character obtained by bggetch
-plineno     // <fno/ln> of latest character given to bgputch 
-tokln       // fno/ln of the first character of the current token
+lineno        // lineno value of the current character in bg_ch or ch.
+prevlineno    // lineno value of the previous character.
+tokln         // lineno value of the first character of the current token
 
 startbarno  // Number of the first bar to play
 endbarno    // Number of the last bar to play
 start_msecs // Midi msecs of the start of the first bar to play
 end_msecs   // Midi msecs of the end of the last bar to play
 
-optPp; optLex; optTree; optPtree
+optPp; optLex; optTree; optfaca
 optStrace   // Trace the creation of parse tree nodes.
 optNtrace   // Trace notes as they are generated.
 optMtrace   // Trace Midi commands as they are played.
-tempoadj    // playing tempo adjustment as a percentage, 100=don't adjust
+optgenmidi  // Generate a MIDI file
+optplay     // Play the score on a midi device such as /dev/midi1
+
+playrate    // playing tempo adjustment as a percentage, 100=don't adjust
+
 accompany   // =TRUE if accompaning
 pitch       // Number of semitones to transpose every note up by
 graphdata   // =TRUE to generate graph data
 calibrating // =TRUE if calibrating Midi to Mic delay
 waiting     // =TRUE if playmidi waits before playing
+
 quitting    // =TRUE if quitting
-die         // Function to cause a coroutine to commit suicide
 killco      // Killer coroutine
 
 notecount   // Count of recognised note events
 totalerr    // Sum of all note event errors
 
-newvec; mk1; mk2; mk3; mk4; mk5; mk6; mk7; mk8; mk9
-// Return blks to their free lists
-unmk1; unmk2; unmk3; unmk4; unmk5; unmk6; unmk7; unmk8; unmk9
-// The free lists for ewach size
+// The free lists for each size
 mk1list; mk2list; mk3list; mk4list; mk5list
-mk6list; mk7list; mk8list; mk9list
+mk6list; mk7list; mk8list; mk9list; mk10list
 
 blklist  // List of blocks of work space
-blkb
 blkp
 blkt
 blkitem
-//treevec; treep; treet
 bg_base; bg_baseupb; rec_p; rec_l; fin_p; fin_l
 
 debugv              // To hold system debug flags 0 to 9
 errcount; errmax
-fatalerr; synerr; fatalsynerr
-trerr
 strv       // Short term sting buffer, typically for op names
-fnolnstrv  // Short term sting buffer for <fno/ln> strings
 
-appendmus // Append .mus to a file name
-rch; ch; chbuf; chbufln; chcount; formtree; tree
-prnote; prtree; opstr; prlineno
-token; numval; noteletter; prevnoteletter
-prevoctave; reloctave; notenumber; noteqbeats
-notesharps; notelengthnum; prevlengthnum; dotcount
-bgexp; bgbexp; argp; argt
-wrc; wrs; chpos; charv; wordnode; stringval
-rdtag
-rdnum
-dsw
-lookupword
-rdstrch
+ch; chbuf; chbufln; chcount; tree
+token
+FLT fnumval // Note numbers from BGPM are floating point.
+intval      // >=0 if lex returned s_int ie if a posive number
+            // was found containg no decimal point and is
+	    // representable as an integer.
+noteletter; prevnoteletter
+prevoctave; reloctave; notenumber
+notesharps;
+n2qlen       // Convert note length number to a length in qbeats.
+prevnoteqlen // qlen of the previous note, space or rest
+prevdotcount // The dot count of the previous note, space or rest.q
+noteqlen     // The nominal qlen of notes before the dots as set by lex
+dotcount
+sfac         // The shape scaling factor set by eg :s4.
+
+FLT shapefaca // Shape factors used by setshapes when combining
+FLT shapefacb // a shape values with their parent values.
+              // Combined value is shapevala*val+shapefacb*pval
+	      // Usually shapefaca+shapefacb = 1.0
+
+argp; argt
+chpos; charv; wordnode; stringval
 nametable
-noteqbeats
 
+qbeat       // The number of the current quantum beat.
+
+// Section Playmus
+
+die         // Function to cause a coroutine to commit suicide
+concatext   // Concatenate two strings if the first does not contain
+            // a dot.
+
+// Section Bgpm
+
+bgputch
+bgpush
+bggetch
+arg
+lookup
+arg2str
+define
+bgpmfn
+rdbgint
+performget
+evalarg
+bgbexp
+bgexp
+getargch
+rdnum
+bgwrnum
+wrpn
+wrc
+wrs
+wrn
+bg_error
+prcall
+btrace
+wrcall
+wrarg
+wrenv
+newvec
+mk1; mk2; mk3; mk4; mk5; mk6; mk7; mk8; mk9; mk10
+// Return blks to their free lists
+unmk1; unmk2; unmk3; unmk4; unmk5; unmk6; unmk7; unmk8; unmk9; unmk10
+
+// Section Lex
+
+rch
+lex
+lookupword
+dsw
+declsyswords
+wrchbuf
+rdtag
+rdstrch
+formtree
+prlineno
+fatalerr
+fatalsynerr
+synerr
+trerr
 checkfor
 rdscore
-rdscores
-rdshape
+rdstring
+rdnumber
+rdlength
+rdoctave
+rdint
+rdinteger
+note2qlen
 rdnoteprim
 rdnoteitem
-rdnoteitems
-rdnumber
-rdinteger
-rdstring
+rdparlist
+rdblock
 
-insertblocks
-blockneeded
-initshapeitems
+rdnoteseq
+rdnotelist
+rdshape
+rdtupletqlen
 
-// Globals for the translation stage
-trscores
+fno
+lno
+opstr
+prnote
+
+prtree     // (tree, idepth, maxdepth)   Print a tree
+prnltree
+
+// Section Trans
+
+prshapes
+prshape
+
+calcqlen
+
+findrawshapes
+addshapedata
+replacestars // This is called after findrawshapes(tree) has completed
+setshapes    // This is called after replacestars(tree) has completed
+
+updateenvironments
+restoreenvironments
+
+setscaleparams
+setmsecsenv
+barscan
+barscanitem
 trscore
-qbeatlength
-shapelistlength
-shapescan
-prblockenv
-istied
-prties
 
-currpartname
-midichannel
+currpartname   // To hold the name of the current part.
+currln         // Used by trerr
 
 veclist        // List of vectors that must be freevec'd
+pushipair
+pushfpair
+pushival
+pushfval
 pushval
+pushmsecsval
+pushshape
+shapelookup
+istied
+checktlist
+prties
+
 transposition  // Number of semitones to transpose this part up by
-conductorblk
 
-qbeats         // The qbeat position of the current item
-currbarno      // Current bar number used in trscores
-maxbarno       // Total number of bars in the piece
-maxbeatno      // Total number of beats in the piece,
-               // ie the sum of beats in each bar
-barqerr
-barno2qbeats
-qbeats2barno
-qbeats2msecs
+currqbeat      // The qbeat position of the current item
+maxqbeat       // The largest value of currqbeat. It will be the
+               // length of the score in qbeats.
+
+blkstartqbeat  // While in trscore, these are the qbeat positions of
+blkendqbeat    // the start and end of the current block.
+
+currbarqbeat   // The qbeat position of the start of the current bar
+
+currbarno      // Current bar number, equal to -1 until bar one is found.
+               // Typically used in error messages.
+
+maxbarno       // The number of the last barline in the composition.
+               // This will hold the last barline number of the conductor part.
+currbeatno     // Current beat number used in the coposition
+
+maxbeatno      // Total number of beats in the composition,
+               // ie the sum of beats in each bar. Why is this needed?
+
+currblock      // Points to the current Block node
+currtuplet     // Points to the current Tuplet or zero
+
+timesig_t      // The number of beats per bar
+timesig_b      // The length number of a beat, eg 4 = a quarter note, etc
+
+prevnum        // =TRUE if the previous item in a shape list
+               // was a number.
+prevqlen       // The qlen of the previous space in a shape list 
+
+barno2absq
+barno2absqv
+absq2barno   // Find the number of the bar at or earlier than the
+             // given q value.
+tstabsq2barno 
+
+absq2msecs
 barno2msecs
-midilist       // The start of the midi list -> [link, msecs, <midi triple>]
-midiliste      // Pointer to the last midi list item, or 0.
-editnoteoffs
-mergesort
-prmidilist
-fnoln2str      // s := fnoln2str(ln, fnolnstr)
-note2str       // s := note2str(noteno, str)
 
-scbase  // Parameters for scaling local qbeats to absolute qbeats
-scfaca  // using
-scfacb  //        absqbeat = scbase + muldiv(q, scfaca, scfacb)
-        // or
-qscale  //        absqbeat = qscale(q)
+q2blkq       // blkq = q2blkq(q, tuplet)
+             // Apply all the Tuplet nodes in the given Tuplet chain
+	     // linked though the parent field. The result specifies
+	     // the local qbeat location within the current block.
+	     // It is used when adding shape data to an environment
+	     // in the current block It is also used by q2absq and
+	     // q2msecs.
+	     
+q2absq       // absq = q2absq(q)
+             // Return the absolute qbeat location corresponding
+	     // to the given local qbeat location based on the
+             // the current Tuplet and Block ignoring the effecct
+	     // of tempo data in inner blocks. So the qshiftv
+	     // field in blocks are ignored. This is used when
+	     // checking that barlines are correctly placed.
 
-plist   // Previous tlist just before current par or tuplet construct.
-pqpos   // Abs qbeat terminating position of items in ptlist
-tlist   // Outstanding ties in the current note thread
-tqpos   // Abs qbeat terminating position of items in tlist
-clist   // Outstanding ties in the other concurrent note threads
-cqpos   // Abs qbeat terminating position of items in clist
+q2msecs      // absq = q2msecs(q)
+             // Return the time in msecs corresponding to the
+	     // given local qbeat location based on the current
+	     // Tuplet and Block and taking account of Tempo
+	     // statements in inner blocks. So data in the
+	     // qshiftv fields of blocks are used.
+
+midilist    // The start of the midi list -> [link, msecs, <midi triple>]
+midiliste   // Pointer to the last midi list item, or 0.
+
+// Implementation of ties
+plist       // Previous tlist just before current par or tuplet construct.
+pqpos       // Abs qbeat terminating position of items in ptlist
+tlist       // Outstanding ties in the current note thread
+tqpos       // Abs qbeat terminating position of items in tlist
+clist       // Outstanding ties in the other concurrent note threads
+cqpos       // Abs qbeat terminating position of items in clist
 
 // Player globals
-getrealmsecs
-midichannel // 0 .. 15
-getshapeval
-lookupshapeval
-playmidi
+midichannel // 0 .. 15 while running trpart?
 micbuf
-tempodata     // Mapping from absolute qbeat values to msecs
-              // tempodata!i the time is msecs of absolute qbeat 32*i
+
+//tempodata     // A vector mapping from absolute qbeat values to floating
+              // point msecs.
+              // tempodata!i the time is msecs of absolute qbeat 32*i.
+	      // This vector is used by absq2msecs.
 
 barmsecs      // Mapping from bar number to midi msecs
-beatmsecs     // mapping from beat number to midi msecs
 
-solochannels  // Bit pattern with 1<<chan set if chan is a solo channel
+solochannels  // Bit pattern with bit 1<<chan set if chan is a solo channel.
 
 baseday       // Used by getrealmsecs
 rmsecs0       // real msecs at startmsecs
 
-currbarno     // Used by msecs2barno
-currbeatno    // Used by msecs2beatno
 soundv        // Buffer of cumulative data
 soundp        // Position of next element of soundv to be updated
 soundval      // Latest soundv element
 soundmsecs    // real msecs of latest sound sample in soundv
 
 genmidi
+apmidi
 
-notecofn
 soundco       // Coroutine to read sound samples into soundv
-soundcofn
 keyco         // The coroutine reading the keyboard
-keycofn
 playmidico    // The coroutine to output midi data
-playmidicofn
 
-bartabcb      // The bar table control block
-bartab        // Mapping from bar number to qbeat (later msec) values
-beattabcb     // The beat table control block
-beattab       // Mapping from beat number to qbeat (later msec) values
-barno
-timesiga      // eg 6
-timesigb      // eg 8
-qbeatsperbeat // = 4096/timesigb, ie 1024 for crotchet beats
-prevbeatqbeat // The qbeats value of the previous beat
-beatcount     // Count of the most recent beat. In 6 8 time
-              // beatcount will be 1, 2, 3, 4, 5,or 6. It must
-              // be 1 at the next time signature or bar line. 
+barsxv_upb
+barsxv_v
+barsxv        // The bar self expanding vector
+
+msecsv        // This gives the mapping from absolute qbeats to msecs
+              // msecsv!0 is the upb of msecsv. This vector is created
+	      // by mkmsecsv called from setshapes after calcqlen and
+	      // findrawshapes have been called.
+
+qbeatsperbar     // The current number of qbeats per bar
+qbeatsperbeat    // = 4096/timesigb, ie 1024 for crotchet beats
 
 notecov       // Vector of recognition coroutines for notes 0..127
-notecoupb     // Note coroutines are from votecov!1 to notecov!notecoupb
-notecop       // Position of next note coroutine to run
+notecoupb     // Note coroutines are from notecov!1 to notecov!notecoupb
+notecop       // Subscript of next note coroutine to run
 
 freqtab       // Frequency table for notes 0..127
 initfreqtab   // Function to initialise freqtab
@@ -220,12 +355,13 @@ prevrt        // Real time of the most recent event in eventv, the next event
 pushevent     // Put and event in the eventv circular buffer.
 newevents     // =TRUE when a newevent is in eventv. It is reset by calcrates
 
-calcrates     // Calculate new estimated and correction play lines
-clearevents   // Remove all previous events
-
 msecsbase     // Real time at first call of getrealmsecs
 real_msecs    // msecs since msecsbase
 midi_msecs    // Current midi time
+
+interpolateflt // y := interpolate( x, x1,x2,  y1,y2),
+               // This performs integer interpolation.
+interpolateint
 
 variablevol   // TRUE means volume can change while a not is being played.
 chanvol       // -1 or the current channel volume
@@ -234,11 +370,6 @@ chanvol       // -1 or the current channel volume
 
 ocr; ocm; crate // The origin of the current play line
 oer; oem; erate // The origin of the estimated play line
-
-r2m_msecs     // (r, or, om, rate) This converts real to midi msecs using
-              // om + muldiv(real_msecs-or, rate, 1000)
-m2r_msecs     // (r, or, om, rate) This converts midi to real msecs using
-              // or + muldiv(real_msecs-om, 1000, rate)
 
 calcrates     // Function to compute new values for play_rate, play_offset
               // curr_rate, curr_offset and revert_msecs. These values are
@@ -249,34 +380,147 @@ calc_msecs    // Real time when calcrates should next be called.
 midifd
 micfd
 
+
+// Global functions and variables
+
+// Section Writemidi
+
 pushbyte
+pushh
 pushh
 pushw
 pushw24
 pushstr
-pushpfx
 pushnum
+pushpfx
 packw
-
-//selectbank
-//selectpatch
-
 writemidi
-wrmid1
-wrmid2
-wrmid3
+
+// Section Shapefns
+
+FLT shapeval
+
+
+// Section Playmidi
+
+genrecogfn
+getrealmsecs
+notecofn
+setfreqtab
+checktab
+findtimes
+addevent
+clearevents   // Remove all previous events
+soundcofn
+playmidicofn
+keycofn
+playmidi
+r2m_msecs     // (r, or, om, rate) This converts real to midi msecs using
+              // om + muldiv(real_msecs-or, rate, 1000)
+m2r_msecs     // (r, or, om, rate) This converts midi to real msecs using
+              // or + muldiv(real_msecs-om, 1000, rate)
+msecs2barno
+msecs2beatno
+msdelay
+wrmid1; wrmid2; wrmid3
+prmidilist
+note2str       // s := note2str(noteno, str)
+editnoteoffs
+mergesort
+mergelist
+
+conductorpart
+conductorblock
+conductorenvs
+conductorflag  // =0 when translating psrtd snd solos
+               // =1 at the start of processing the conductor part
+	       // =2 when processing the body of the conductor block
+
+scoreqlen          // The qlen of the score, returned by calcqlen(tree)
+
+//msecsenv    // -> [upb, v, prevmsecsenv, sq, eq,-]
+            // v has a msecs value for the start of every
+            // 64 qbeat group enclosing sq to eq.
+
+            // Each entry in this table is of the form [q, rate, msecs]
+            // where q is the absolute qbeat position in the composition
+            //       rate is the tempo after ajustment in msecs per qbeats.
+            //  and  msecs is time of the start of qbeat q from the start
+            //             of the composition.
+            // The data in this environment is constructed by merging the
+            // tempo and tempoadj. The tempo values are held in units of
+            // msec per qbeat which is proportional to the inverse of 
+            // beats per minute given by the user and intermediate values
+            // are determined by linear interpolation on these values.
+            // Suppose the tempo as specified by the user changes from
+            // 100 to 200 beats per minute. Using linear interpolation
+            // on these values would give 150 at the mid point, but if
+            // linear interpolation on the msecs per qbeats was used
+            // we get a different result. 100 beats per minute
+            // corresponds to (60*1000)/(1024*100)=0.586 msecs/qbeat
+            // and 200 corresponds tp 0.293. This gives a midpoint
+            // value of 0.439 which corresponds to 133 beats per minute.
+            // Using tempo rate in units of msecs/qbeat means that
+            // tempoadj values must be divided rather than multiplied,
+            // since, for instance, a tempoadj value of 2 would halve
+            // the msecs per qbeat rate. Tempoadj values are thus held
+            // as the inverse of the values supplied by the
+            // user, and Intermediate tempoadj
+	    values are determined
+            // using linear interpolation of these inverse values.
+            // These modified tempo are both linear  ???????
+            // functions of q. Their product is thus a quadratic
+            // of the form r(q) = A + Bq + Cq^2. The time between
+            // two qbeat values q1 and q2 is thus the integral of
+            // r(q) between q1 and q2. The result is thus
+
+            // Aq2 + Bq2^2/2 + Cq2^3/3 - Aq1 + Bq1^2/2 + Cq1^3/3
+
+            // This formula is used to fill in the msecs values in
+            // the msecs environment and it is also used when
+            // calculating  intermediate times.
+
+// Items in environments are of the form [absq,val]. Absolute locations
+// are used since environments do not contain sufficient information to
+// convert a local location to an absolute one. The shape valus val is
+// always a floating point number. The elements of v range from zero
+// to absq2-absq1.
+
+delayenv    // =0 or -> [-, Volenv, ln, parent, upb, v, absq1, absq2] etc
+delayadjenv
+legatoenv
+legatoadjenv
+tempoenv
+vibrateenv
+vibrateadjenv
+vibampenv
+vibampadjenv
+volenv
+voladjenv
+volmapenv
+
+mkenvs
+mkmsecsv
+msv2qshiftv
+prmsv
+
+FLT defaultshapeval
+compactsxv
+envbits
+
+ZZZlastglobal
 }
 
 MANIFEST {
-nametablesize = 541
+nametablesize = 541 // A prime number
 blkupb = 10_000
 micbufupb = 1023
-soundvupb = #xFFFF // Room for about 1.5 seconds of sound
-eventvupb = 4*20-1 // Allow for 20 event items [rt, mt, weight, note]
+soundvupb = #xFFFF  // Room for about 1.5 seconds of sound
+eventvupb = 4*20-1  // Allow for 20 event items [rt, mt, weight, note]
 
 // BGPM markers
-s_eof     =  -2
-s_eom     =  -3
+s_eof     =  -2     // end of file character
+s_eom     =  -3     // end of macro body character
 
 // BGPM builtin macros
 s_def     =  -4
@@ -300,8 +544,8 @@ c_lquote  = '<'
 c_rquote  = '>'
 c_arg     = '#'
 
-// General selectors
-h1=0; h2; h3; h4; h5; h6; h7; h8; h9
+// General selectors for node fields
+h1=0; h2; h3; h4; h5; h6; h7; h8; h9; h10
 
 // Lex tokens and other symbols
 s_altoclef=1          // [-, Altoclef, ln]
@@ -310,8 +554,8 @@ s_bank                // [-, Bank, ln, byte, byte]
 s_barlabel            // [-, Barlabel, ln, str]
 s_barline             // [-, Barline, ln]
 s_bassclef            // [-, Bassclef, ln]
-s_block               // [-, Block, ln, note_item,
-                      //     envblk, shapeitems, qstart, qend]
+s_block               // [-, Block,  ln, notes, qlen, parent,
+                      //     qbeat, envs, shiftenv]
 s_colon               // [-, Colon, ln, qlen]
 s_composer            // [-, Composer, ln, str]
 s_conductor           // [-, Conductor, ln, note-item]
@@ -322,30 +566,38 @@ s_doublebar           // [-, Doublebar, ln]
 s_instrument          // [-, Instrument, ln, str]
 s_instrumentname      // [-, Instrumentname, ln, str]
 s_instrumentshortname // [-, Instrumentshortname, ln, str]
-s_interval            // [-, Interval, ln, msecs]
+s_int                 // [-, Int, ln, intval]
 s_keysig              // [-, Keysig, ln, note, mode]
-s_lcurly
 s_legato              // [-, Legato, ln, note_item, shapelist]
 s_legatoadj           // [-, Legatoadj, ln, note_item, shapelist]
 s_legon               // [-, Legon, ln]
 s_legoff              // [-, Legoff, ln]
-s_list
-s_lparen
-s_lsquare
-s_major               // A mode
-s_minor               // A mode
+
+s_blocklist           // [-, Blocklist, ln, notelist,  qlen]
+s_shape               // [-, Shape,     ln, shapelist, qlen]
+
+s_tenorclef           // [-, Tenorclef, ln]
+
+s_lcurly              // Token for {
+s_lparen              // Token for (
+s_lsquare             // Token for [
+s_major               // Token for \major
+s_minor               // Token for \minor
 s_msecsmap            // [-, Msecsmap, v]
 s_name                // [-, Name, ln, str]
-s_neg
+s_neg                 // Token for -
 s_nonvarvol           // [-, Nonvarvol, ln]
-s_note                // [-, Note, ln, <letter,sharps,n>, qlen]
-s_notetied            // [-, Notetied, ln, <letter,sharps,n>, qlen]
+s_note                // [-, Note, ln, <letter:sharps:n>, qlen]
+s_notetied            // [-, Notetied, ln, <letter:sharps:n>, qlen]
 s_null                // [-, Null, ln]
-s_num                 // [-, Num, ln, value]
-s_numtied             // [-, Numtied, ln, value]
+s_fnum                // [-, Fnum, ln, value]
 s_opus                // [-, Opus, ln, str]
-s_par                 // [-, Par, ln, note_list, qlen]
-s_part                // [-, Part, ln, body, channel]
+s_par                 // [-, Par, ln, parlist, qlen]
+s_notes               // [-, Notes, ln, notelist, qlen]
+s_notelist            // [-, Notelist, ln, notelist, qlen]
+s_parts               // [partlist, Parts, ln, notelist, qlen]
+s_parlist             // [parlist, Parlist, ln, block, qlen]
+s_part                // [-, Part, ln, notelist, qlen]
 s_partlabel           // [-, partlabel, ln, str]
 s_patch               // [-, patch, ln, byte]
 s_pedon               // [-, Pedon, ln]
@@ -353,39 +605,74 @@ s_pedoff              // [-, Pedoff, ln]
 s_pedoffon            // [-, Pedoffon, ln]
 s_portaon             // [-, Portaon, ln]
 s_portaoff            // [-, Portaoff, ln]
-s_rcurly
+s_rcurly              // Token for }
 s_repeatback          // [-, Repeatback, ln]
 s_repeatbackforward   // [-, Repeatforwardback, ln]
 s_repeatforward       // [-, Repeatforward, ln]
 s_rest                // [-, Rest, ln, qlen]
-s_rparen
-s_rsquare
+s_rparen              // Token for )
+s_rsquare             // Token for ]
 s_score               // [-, Score, ln, str, conductor, parts]
-s_seq                 // [-, Seq, ln, note_list, qlen]
 s_space               // [-, Space, ln, qlen]
 s_star                // [-, Star, ln]
 s_startied            // [-, Startied, ln]
 s_string
 s_softon              // [-, Softon, ln]
 s_softoff             // [-, Softoff, ln]
-s_solo                // [-, Solo, ln, body, channel]
-s_tempo               // [-, Tempo, ln, note_item, shapelist]
-s_tempoadj            // [-, Tempo, ln, note_item, shapelist]
+s_solo                // [-, Solo, ln, noteseq, channel]
+s_tempo               // [-, Tempo, ln, notelist, qlen]
 s_tenorclef           // [-, Tenorclef, ln]
-s_timesig             // [-, Timesig, ln, byte, byte]
+s_timesig             // [-, Timesig, ln, timesiga, timesigb]
 s_title               // [-, Title, ln, str]
 s_transposition       // [-, Transposition, ln, semitones_up]
 s_trebleclef          // [-, Trebleclef, ln]
-s_tuplet              // [-, Tuplet, ln, note_item, note_item]
+s_tuplet              // [-, Tuplet, ln, noteseq, shapeseq]
 s_varvol              // [-, Varvol, ln]
-s_vibrate             // [-, Vibrate, ln, note_item, shapelist]
-s_vibrateadj          // [-, Vibrateadj, ln, note_item, shapelist]
-s_vibamp              // [-, Vibamp, ln, note_item, shapelist]
-s_vibampadj           // [-, Vibampadj, ln, note_item, shapelist]
-s_vol                 // [-, Vol, ln, note_item, shapelist]
-s_voladj              // [-, Voladj, ln, note_item, shapelist]
-s_volmap              // [-, Volmap, ln, shapelist]
+s_vibrate             // [-, Vibrate, ln, noteseq, shapeseq]
+s_vibrateadj          // [-, Vibrateadj, ln, noteseq, shapeseq]
+s_vibamp              // [-, Vibamp, ln, noteseq, shapeseq]
+s_vibampadj           // [-, Vibampadj, ln, noteseq, shapeseq]
+s_vol                 // [-, Vol, ln, noteseq, shapeseq]
+s_voladj              // [-, Voladj, ln, noteseq, shapeseq]
+s_volmap              // [-, Volmap, ln, shapeseq]
+
 s_word
+
+// Environment operators
+s_tempoenv
+s_volmapenv
+
+s_delayenv            // [-, Delayenv, ln, parent, upb, v, absq1, absq2]
+s_legatoenv           // etc
+s_vibrateenv
+s_vibampenv
+s_volenv
+
+s_delayadjenv
+s_legatoadjenv
+s_vibrateadjenv
+s_vibampadjenv
+s_voladjenv
+
+s_shiftenv            // [-, Shiftenv, ln, upb, v, qlen]
+
+s_envs
+
+// Environment bit patterns
+b_tempo      = #b0000_0000_0001
+b_volmap     = #b0000_0000_0010
+
+b_delay      = #b0000_0000_0100
+b_legato     = #b0000_0000_1000
+b_vibrate    = #b0000_0001_0000
+b_vibamp     = #b0000_0010_0000
+b_vol        = #b0000_0100_0000
+
+b_delayadj   = #b0000_1000_0100
+b_legatoadj  = #b0001_0000_0000
+b_vibrateadj = #b0010_0000_0000
+b_vibampadj  = #b0100_0000_0000
+b_voladj     = #b1000_0000_0000
 
 // MIDI opcodes
 midi_note_off     = #x80
@@ -396,4 +683,6 @@ midi_progchange   = #xC0
 midi_chanpressure = #xD0
 midi_pitchbend    = #xE0
 midi_sysex        = #xF0
+
+starval = #x12344321  // Used to represent a star in an environment vector
 }

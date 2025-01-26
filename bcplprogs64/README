@@ -1,4 +1,4 @@
 This directory holds programs that can only be compiled and run
-successfully using 64-bit BCPL systems.
+successfully using a BCPL system with a BCPL word size of 64 bits.
 
 

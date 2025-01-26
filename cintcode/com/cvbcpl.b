@@ -258,7 +258,7 @@ LET lex() BE
       CASE '(': token := s_lparen;    BREAK
       CASE ')': token := s_rparen;    BREAK 
       CASE '?': token := s_query;     BREAK
-      CASE '+': token := s_plus;      BREAK
+      CASE '+': token := s_add;       BREAK
       CASE ',': token := s_comma;     BREAK
       CASE ';': token := s_semicolon; BREAK
       CASE '@': token := s_lv;        BREAK
@@ -266,7 +266,7 @@ LET lex() BE
       CASE '=': token := s_eq;        BREAK
       CASE '!': token := s_vecap;     BREAK
       CASE '%': token := s_byteap;    BREAK
-      CASE '**':token := s_mult;      BREAK
+      CASE '**':token := s_mul;       BREAK
       CASE '|': token := s_logor;     BREAK
       CASE '.': token := s_dot;       BREAK
 
@@ -329,7 +329,7 @@ LET lex() BE
  
       CASE '-': wrch(ch); rch()
               IF ch='>' DO { token := s_cond; BREAK  }
-              token := s_minus
+              token := s_sub
               RETURN
  
       CASE ':': wrch(ch); rch()
@@ -512,16 +512,16 @@ AND declsyswords() BE
   dsw("LOOP", s_loop)
   dsw("LSHIFT", s_lshift)
   dsw("MANIFEST", s_manifest)
-  dsw("MOD", s_rem)
+  dsw("MOD", s_mod)
   dsw("NE", s_ne)
   dsw("NEEDS", s_needs)
-  dsw("NEQV", s_neqv)
+  dsw("NEQV", s_xor)
   dsw("NOT", s_not)
   dsw("OF", s_of)                   // Inserted 11/7/01
   dsw("OR", s_else)
   dsw("RESULTIS", s_resultis)
   dsw("RETURN", s_return)
-  dsw("REM", s_rem)
+  dsw("REM", s_mod)
   dsw("RSHIFT", s_rshift)
   dsw("RV", s_rv)
   dsw("REPEAT", s_repeat)
@@ -542,7 +542,7 @@ AND declsyswords() BE
   dsw("VEC", s_vec)
   dsw("VALOF", s_valof)
   dsw("WHILE", s_while)
-  dsw("XOR", s_neqv)
+  dsw("XOR", s_xor)
   dsw("$", 0)
  
   nulltag := wordnode

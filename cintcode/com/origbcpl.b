@@ -1,8 +1,8 @@
 /* Change history
 
-12/10/06
-Changed GET "libhdr" to GET "libhdr.h" so that the original
-compiler can still compile itself.
+27/09/16
+Changed GET "libhdr.h" to GET "origlibhdr.h" to allow origbcpl
+to compile itself.
 
 14/8/01
 Added SLCT and OF(synonym ::) operators
@@ -99,7 +99,7 @@ SECTION "SYN"
 
 //   SYNHDR
  
-GET "libhdr.h"
+GET "origlibhdr.h"
  
 MANIFEST {                          // Parse Tree operators
 
@@ -209,7 +209,7 @@ LET start() = VALOF
                                         errcount := 1
                                         GOTO fin
                                      }
-   treesize := 40000
+   treesize := 39000 // Use to be 40000
    IF argv!3 DO treesize := str2numb(argv!3)
    IF treesize<10000 DO treesize := 10000
    obufsize := treesize/4
@@ -1444,7 +1444,7 @@ SECTION "TRN"
 
 //    TRNHDR
  
-GET "libhdr.h"
+GET "origlibhdr.h"
  
 MANIFEST {   // Parse tree operators
 s_number=1; s_name=2; s_string=3; s_true=4; s_false=5
@@ -2584,7 +2584,7 @@ SECTION "CINCG"
 // based on the CINTCODE code-generator (1980).
 // Copyright  M.Richards  6 June 1991.
 
-GET "libhdr.h"
+GET "origlibhdr.h"
 
 MANIFEST {
 t_hunk  = 1000       // Object module item types.

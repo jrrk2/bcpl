@@ -1,5 +1,4 @@
-// This is a really naive program to solve Su Doku problems
-// as set in many newspapers.
+// This is a really naive program to solve 9x9 Sudoku problems.
 
 // Implemented in BCPL by Martin Richards (c) January 2005
 
@@ -35,7 +34,9 @@ SECTION "sudoku"
 
 GET "libhdr"
 
-GLOBAL { count:ug
+GLOBAL {
+count:ug
+errflag
 
 // The 9x9 board consisting of 81 cells
 
@@ -74,43 +75,82 @@ N9 = #b_100000000
 All = N1+N2+N3+N4+N5+N6+N7+N8+N9
 }
 
+LET fillrow(row) BE
+{ LET pos = 100_000_000
+  WHILE pos DO
+  { LET ch = rdch()
+    //wrch(ch)
+    SWITCHON ch INTO
+    { DEFAULT:  LOOP
+
+      CASE '#': ch := rdch() REPEATUNTIL ch='*n' | ch=endstreamch
+                LOOP
+
+      CASE endstreamch:
+                errflag := TRUE
+                BREAK
+
+      CASE '0':CASE '1':CASE '2':CASE '3':CASE '4':
+      CASE '5':CASE '6':CASE '7':CASE '8':CASE '9':
+                // Digit '0' means unset square.
+                !row := !row + pos * (ch - '0')
+                //writef("pos=%9i !row = %n*n", pos, !row)
+                pos := pos/10
+		LOOP
+    }
+  }
+  RETURN
+}
+
 LET start() = VALOF
 { LET argv = VEC 50
+  LET r1, r2, r3, r4, r5, r6, r7, r8, r9 = 0,0,0, 0,0,0, 0,0,0
 
-  LET r1 = 000_638_000  // The default board setting
-  LET r2 = 706_000_305
-  LET r3 = 010_000_040
-  LET r4 = 008_712_400
-  LET r5 = 090_000_050
-  LET r6 = 002_569_100
-  LET r7 = 030_000_010
-  LET r8 = 105_000_608
-  LET r9 = 000_184_000
+  errflag := FALSE
 
-  //LET r1 = 000_000_000 // This version of row 1 gives 14 solutions
-  //LET r9 = 000_000_000 // This version of row 9 gives 46 solutions
-                         // If both row 1 and row 9 are all zeroes
-                         // there are 2096 solutions.
-
-  UNLESS rdargs("r1/n,r2/n,r3/n,r4/n,r5/n,r6/n,r7/n,r8/n,r9/n",
-                 argv, 50) DO
-  { writef("Bad arguments for SUDOKU*n")
+  UNLESS rdargs("from", argv, 50) DO
+  { writef("Bad argument for SUDOKU*n")
     RESULTIS 0
   }
 
-  IF argv!0 DO
-  { // Set the board from the arguments
-    r1,r2,r3,r4,r5,r6,r7,r8,r9 := 0,0,0,0,0,0,0,0,0
-    IF argv!0 DO r1 := !(argv!0)
-    IF argv!1 DO r2 := !(argv!1)
-    IF argv!2 DO r3 := !(argv!2)
-    IF argv!3 DO r4 := !(argv!3)
-    IF argv!4 DO r5 := !(argv!4)
-    IF argv!5 DO r6 := !(argv!5)
-    IF argv!6 DO r7 := !(argv!6)
-    IF argv!7 DO r8 := !(argv!7)
-    IF argv!8 DO r9 := !(argv!8)
-  }
+  TEST argv!0
+  THEN { // Set the board as specified by the from file.
+         LET fromfilename = argv!0
+         LET fromstream = findinput(fromfilename)
+         UNLESS fromstream DO
+         { writef("Trouble with file %s*n", fromfilename)
+	   errflag := TRUE
+           RESULTIS 0
+         }
+         selectinput(fromstream)
+         fillrow(@r1)    
+         fillrow(@r2)    
+         fillrow(@r3)    
+         fillrow(@r4)    
+         fillrow(@r5)    
+         fillrow(@r6)    
+         fillrow(@r7)    
+         fillrow(@r8)    
+         fillrow(@r9)
+         endstream(fromstream)
+	 newline()
+	 IF errflag RESULTIS 0
+       }
+  ELSE { r1 := 000_638_000  // The default board setting
+         r2 := 706_000_305
+         r3 := 010_000_040
+         r4 := 008_712_400
+         r5 := 090_000_050
+         r6 := 002_569_100
+         r7 := 030_000_010
+         r8 := 105_000_608
+         r9 := 000_184_000
+	 
+         r1 := 000_000_000   // This version of row 1 gives 14 solutions
+         //r9 := 000_000_000 // This version of row 9 gives 46 solutions
+                             // If both row 1 and row 9 are all zeroes
+                             // there are 2096 solutions.
+       }
 
   initboard(r1,r2,r3,r4,r5,r6,r7,r8,r9)
   writef("*nInitial board*n")

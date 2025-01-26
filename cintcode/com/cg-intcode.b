@@ -28,11 +28,6 @@ MANIFEST {
 // Code Generator Globals:
 
 GLOBAL
-{}
-
-
-
-GLOBAL
 {
 cgsects: cgg
 ssp
@@ -265,16 +260,15 @@ LET opstr(op) = VALOF SWITCHON op INTO
   CASE s_lshift:   RESULTIS "lshift"
   CASE s_lstr:     RESULTIS "lstr"
   CASE s_sub:      RESULTIS "sub"
+  CASE s_mod:      RESULTIS "mod"
   CASE s_mul:      RESULTIS "mul"
   CASE s_ne:       RESULTIS "ne"
   CASE s_neg:      RESULTIS "neg"
-  CASE s_neqv:     RESULTIS "neqv"
   CASE s_none:     RESULTIS "none"
   CASE s_not:      RESULTIS "not"
   CASE s_add:      RESULTIS "add"
   CASE s_putbyte:  RESULTIS "putbyte"
   CASE s_query:    RESULTIS "query"
-  CASE s_rem:      RESULTIS "rem"
   CASE s_res:      RESULTIS "res"
   CASE s_rshift:   RESULTIS "rshift"
   CASE s_rstack:   RESULTIS "rstack"
@@ -291,6 +285,7 @@ LET opstr(op) = VALOF SWITCHON op INTO
   CASE s_store:    RESULTIS "store"
   CASE s_switchon: RESULTIS "switchon"
   CASE s_true:     RESULTIS "true"
+  CASE s_xor:      RESULTIS "xor"
 
 
 /*
@@ -308,7 +303,7 @@ s_assvecap
 s_assmul; s_assdiv; s_assrem; s_assadd; s_asssub
 s_assfmul; s_assfdiv; s_assfadd; s_assfsub
 s_asslshift; s_assrshift
-s_asslogand; s_asslogor; s_asseqv; s_assneqv
+s_asslogand; s_asslogor; s_asseqv; s_assxor
 
 
 s_selld; s_selst // Added 19/07/10
@@ -333,7 +328,7 @@ sf_rshift
 sf_logand
 sf_logor
 sf_eqv
-sf_neqv
+sf_xor
 */
 }
 
@@ -475,12 +470,12 @@ IF debug>0 DO writef("*n// %s*n", opstr(op))
       state := nil
       ENDCASE
 
-    CASE s_mul:    CASE s_div:     CASE s_rem:
-    CASE s_sub:   CASE s_eq:      CASE s_ne:
-    CASE s_ls:      CASE s_gr:      CASE s_le:
-    CASE s_ge:      CASE s_lshift:  CASE s_rshift:
-    CASE s_logand:  CASE s_logor:   CASE s_neqv:
-    CASE s_eqv:     CASE s_getbyte:
+    CASE s_mul:    CASE s_div:     CASE s_mod:
+    CASE s_sub:    CASE s_eq:      CASE s_ne:
+    CASE s_ls:     CASE s_gr:      CASE s_le:
+    CASE s_ge:     CASE s_lshift:  CASE s_rshift:
+    CASE s_logand: CASE s_logor:   CASE s_xor:
+    CASE s_eqv:    CASE s_getbyte:
 IF debug>0 DO writef("*n// %s*n", opstr(op))
       force_acad()
       code(f_l, ad_a, ad_k)
@@ -991,7 +986,7 @@ AND opcode(op) = VALOF SWITCHON op INTO
   CASE s_rtrn:     RESULTIS 4
   CASE s_mul:      RESULTIS 5
   CASE s_div:      RESULTIS 6
-  CASE s_rem:      RESULTIS 7
+  CASE s_mod:      RESULTIS 7
   CASE s_add:      RESULTIS 8
   CASE s_sub:      RESULTIS 9
   CASE s_eq:       RESULTIS 10
@@ -1004,7 +999,7 @@ AND opcode(op) = VALOF SWITCHON op INTO
   CASE s_rshift:   RESULTIS 17
   CASE s_logand:   RESULTIS 18
   CASE s_logor:    RESULTIS 19
-  CASE s_neqv:     RESULTIS 20
+  CASE s_xor:      RESULTIS 20
   CASE s_eqv:      RESULTIS 21
   CASE s_finish:   RESULTIS 22
   CASE s_switchon: RESULTIS 23
@@ -1113,6 +1108,8 @@ LET codegenerate(workspace, workspacesize) BE
 //writef("before repeatuntil op=%n %s*n", op, opstr(op))
    } REPEATUNTIL op=s_end
 
+   //endread()
+   //endwrite()
    selectoutput(sysprint)
    writef("Program size = %n words*n", proglength)
 

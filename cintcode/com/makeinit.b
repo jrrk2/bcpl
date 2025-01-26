@@ -105,7 +105,7 @@ LET start() = VALOF
     RESULTIS 20
   }
 
-  outputstream := findoutput(argv ! 11)
+  outputstream := findoutput(argv ! 11)         // TO/A/K
   IF outputstream = 0 DO {
     writef("Cannot open file %s*n", argv ! 11)
     RESULTIS 20
@@ -114,13 +114,13 @@ LET start() = VALOF
 // default allocations for user program   
   stacksize := 50000
   IF argv!12 DO {
-    stacksize := str2numb(argv!12)
+    stacksize := str2numb(argv!12)              // STKSIZE/K
     IF stacksize < 10000 DO stacksize := 10000
   }
 
   gvecsize := 1000
   IF argv!13 DO {
-    gvecsize := str2numb(argv!13)
+    gvecsize := str2numb(argv!13)               // GLOBSIZE/K
     IF gvecsize < 500 DO gvecsize := 500
   }
 
@@ -307,11 +307,11 @@ AND writeinitfile() BE {
   writef("/** Initialisation file written by MakeInit version %s  **/*n",
         getversion(version))
   writes("#include *"bcpl.h*"*n")
-  writef("*nBCPLWORD stackupb=%n;*n", stacksize)
-  writef("*nBCPLWORD gvecupb=%n;*n",  gvecsize)
+  writef("*nint stackupb=%n;*n", stacksize)
+  writef("*nint gvecupb=%n;*n",  gvecsize)
   writes("*n/** BCPL sections  **/*n")
   // List references to other modules
-  listsects(sections, "extern int %s(BCPLWORD **g); *t/** file %s  **/*n")
+  listsects(sections, "extern BCPLWORD %s(BCPLWORD **g); *t/** file %s  **/*n")
   newline()
   // List initsections() functions
   writes("void initsections(BCPLWORD **g) {*n")

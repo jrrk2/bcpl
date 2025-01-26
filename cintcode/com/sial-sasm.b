@@ -1,20 +1,48 @@
+/*
+
+History
+
+14/01/2019
+Changed rem to mod and added f_fmod.
+*/
+
 SECTION "sial-sasm"
 
 GET "libhdr"
-
 GET "sial.h"
 
 GLOBAL {
 sialin: ug
 sialout; stdin; stdout
 
-rdf; rdp; rdg; rdk; rdh; rdw; rdl; rdd; rdc
+rdf; rdp; rdg; rdk; rdh; rdw; rdl; rdc
 rdcode
 
 scan
 cvf; cvfp; cvfg; cvfk; cvfh; cvfw; cvfl; cvfd
 }
-
+/*
+MANIFEST {
+sf_none=0     // Assignment operators
+sf_vecap
+sf_fmul
+sf_fdiv
+sf_fmod
+sf_fadd
+sf_fsub
+sf_mul
+sf_div
+sf_mod
+sf_add
+sf_sub
+sf_lshift
+sf_rshift
+sf_logand
+sf_logor
+sf_eqv
+sf_xor
+}
+*/
 LET start() = VALOF
 { LET argv = VEC 20
 
@@ -53,19 +81,18 @@ LET start() = VALOF
 AND rdcode(let) = VALOF
 { LET a, ch, neg = 0, ?, FALSE
 
-   ch := rdch() REPEATWHILE ch='*s' | ch='*n'
+  ch := rdch() REPEATWHILE ch='*s' | ch='*n'
 
-   IF ch=endstreamch RESULTIS -1
+  IF ch=endstreamch RESULTIS -1
+  UNLESS ch=let DO error("Bad item, looking for %c found %c*n", let, ch)
 
-   UNLESS ch=let DO error("Bad item, looking for %c found %c*n", let, ch)
+  ch := rdch()
 
-   ch := rdch()
+  IF ch='-' DO { neg := TRUE; ch := rdch() }
 
-   IF ch='-' DO { neg := TRUE; ch := rdch() }
+  WHILE '0'<=ch<='9' DO { a := 10*a + ch - '0'; ch := rdch()  }
 
-   WHILE '0'<=ch<='9' DO { a := 10*a + ch - '0'; ch := rdch()  }
-
-   RESULTIS neg -> -a, a
+  RESULTIS neg -> -a, a
 }
 
 AND rdf() = rdcode('F')
@@ -91,7 +118,7 @@ AND error(mess, a, b, c) BE
 AND scan() BE
 { LET op = rdf()
 
-   SWITCHON op INTO
+  SWITCHON op INTO
 
    { DEFAULT:       error("Bad op %n*n", op); LOOP
 
@@ -138,15 +165,14 @@ AND scan() BE
       CASE f_not:    cvf("NOT"); ENDCASE
       CASE f_abs:    cvf("ABS"); ENDCASE
 
-      CASE f_xdiv:   cvf("XDIV"); ENDCASE
-      CASE f_xrem:   cvf("XREM"); ENDCASE
-      CASE f_xsub:   cvf("XSUB"); ENDCASE
-
       CASE f_mul:    cvf("MUL"); ENDCASE
       CASE f_div:    cvf("DIV"); ENDCASE
-      CASE f_rem:    cvf("REM"); ENDCASE
+      CASE f_xdiv:   cvf("XDIV"); ENDCASE
+      CASE f_mod:    cvf("MOD"); ENDCASE
+      CASE f_xmod:   cvf("XMOD"); ENDCASE
       CASE f_add:    cvf("ADD"); ENDCASE
       CASE f_sub:    cvf("SUB"); ENDCASE
+      CASE f_xsub:   cvf("XSUB"); ENDCASE
 
       CASE f_eq:     cvf("EQ"); ENDCASE
       CASE f_ne:     cvf("NE"); ENDCASE
@@ -239,6 +265,8 @@ AND scan() BE
       CASE f_fmul:     cvf("FMUL"); ENDCASE
       CASE f_fdiv:     cvf("FDIV"); ENDCASE
       CASE f_fxdiv:    cvf("FXDIV"); ENDCASE
+      CASE f_fmod:     cvf("FMOD"); ENDCASE
+      CASE f_fxmod:    cvf("FXMOD"); ENDCASE
       CASE f_fadd:     cvf("FADD"); ENDCASE
       CASE f_fsub:     cvf("FSUB"); ENDCASE
       CASE f_fxsub:    cvf("FXSUB"); ENDCASE
@@ -271,6 +299,10 @@ AND scan() BE
       CASE f_jfgr0:   cvfl("JFGR0"); ENDCASE
       CASE f_jfle0:   cvfl("JFLE0"); ENDCASE
       CASE f_jfge0:   cvfl("JFGE0"); ENDCASE
+
+      CASE f_selld:   cvfkk("SELLD");   ENDCASE
+      CASE f_selst:   cvfkkk("SELST");  ENDCASE
+      CASE f_xselst:  cvfkkk("XSELST"); ENDCASE
    }
 
    newline()
@@ -288,6 +320,20 @@ AND cvfh(s) BE writef("%t7 H%n", s, rdh())
 AND cvfw(s) BE writef("%t7 W%n", s, rdw())
 AND cvfl(s) BE writef("%t7 L%n", s, rdl())
 AND cvfm(s) BE writef("%t7 M%n", s, rdm())
+
+AND cvfkk(s) BE
+{ LET len = rdk()
+  LET sh  = rdk()
+  writef("%t7 K%n K%n", s, len, sh)
+}
+
+AND cvfkkk(s) BE
+{ LET f   = rdk()
+  LET len = rdk()
+  LET sh  = rdk()
+  LET fs  = sfname(f)
+  writef("%t7 %s K%n K%n", s, fs, len, sh)
+}
 
 AND cvswl() BE
 { LET n = rdk()
@@ -327,8 +373,8 @@ AND cvstring() BE
 
 AND cvconst() BE
 { LET lab = rdm()
-   LET w = rdw()
-   writef("CONST   M%n W%n", lab, w)
+  LET w   = rdw()
+  writef("CONST   M%n W%n", lab, w)
 }
 
 AND cvstatic() BE
@@ -352,4 +398,27 @@ AND cventry() BE
    writef("*n//Entry to: %s*n", v)
    writef("%t7 K%n", "ENTRY", n)
    FOR i = 1 TO n DO writef(" C%n", v%i)
+}
+
+AND sfname(sfop) = VALOF SWITCHON sfop INTO
+{ DEFAULT:        RESULTIS "UNKNOWN"
+
+  CASE 0:         RESULTIS "NULL"
+  CASE sf_vecap:  RESULTIS "VECAP"
+  CASE sf_fmul:   RESULTIS "FMUL"
+  CASE sf_fdiv:   RESULTIS "FDIV"
+  CASE sf_fmod:   RESULTIS "FMOD"
+  CASE sf_fadd:   RESULTIS "FADD"
+  CASE sf_fsub:   RESULTIS "FSUB"
+  CASE sf_mul:    RESULTIS "MUL"
+  CASE sf_div:    RESULTIS "DIV"
+  CASE sf_mod:    RESULTIS "MOD"
+  CASE sf_add:    RESULTIS "ADD"
+  CASE sf_sub:    RESULTIS "SUB"
+  CASE sf_lshift: RESULTIS "LSHIFT"
+  CASE sf_rshift: RESULTIS "RSHIFT"
+  CASE sf_logand: RESULTIS "LOGAND"
+  CASE sf_logor:  RESULTIS "LOGOR"
+  CASE sf_eqv:    RESULTIS "EQV"
+  CASE sf_xor:    RESULTIS "XOR"
 }
